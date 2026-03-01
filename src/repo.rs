@@ -15,6 +15,7 @@ pub fn get_encrypted_path(repo_root: &Path, name: &str) -> PathBuf {
 }
 
 /// Get the path for a plaintext artifact under .secrets/plain/<env>/. REQ-8
+#[allow(dead_code)]
 pub fn get_plain_path(repo_root: &Path, env: &str, name: &str) -> PathBuf {
     repo_root.join(PLAIN_BASE_DIR).join(env).join(name)
 }
