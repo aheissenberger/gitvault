@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-009"
 title: "Merge optimization and conflict behavior"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

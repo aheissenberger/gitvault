@@ -9,6 +9,70 @@ pub const SECRETS_DIR: &str = "secrets";
 /// Base directory for plaintext outputs (REQ-8)
 pub const PLAIN_BASE_DIR: &str = ".secrets/plain";
 
+/// File storing persistent recipient public keys (REQ-36)
+pub const RECIPIENTS_FILE: &str = ".secrets/recipients";
+
+/// Guard against path traversal: ensure `target` is under `base`.
+pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultError> {
+    fn normalize(path: &Path) -> PathBuf {
+        let mut out = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::ParentDir => { out.pop(); }
+                std::path::Component::CurDir => {}
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    let canonical_base = base.canonicalize().unwrap_or_else(|_| normalize(base));
+    let canonical_target = target.canonicalize().unwrap_or_else(|_| {
+        // For not-yet-existing files, canonicalize the parent then re-attach filename
+        if let Some(parent) = target.parent() {
+            let canon_parent = parent.canonicalize().unwrap_or_else(|_| normalize(parent));
+            canon_parent.join(target.file_name().unwrap_or_default())
+        } else {
+            normalize(target)
+        }
+    });
+    if canonical_target.starts_with(&canonical_base) {
+        Ok(())
+    } else {
+        Err(GitvaultError::Usage(format!(
+            "Path traversal detected: {} is outside repository root {}",
+            target.display(), base.display()
+        )))
+    }
+}
+
+/// Read persistent recipients from .secrets/recipients (one pubkey per line).
+pub fn read_recipients(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
+    let path = repo_root.join(RECIPIENTS_FILE);
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    Ok(content.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(String::from)
+        .collect())
+}
+
+/// Write recipients to .secrets/recipients atomically.
+pub fn write_recipients(repo_root: &Path, recipients: &[String]) -> Result<(), GitvaultError> {
+    let path = repo_root.join(RECIPIENTS_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = recipients.join("\n") + "\n";
+    let tmp = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    std::fs::write(tmp.path(), content)?;
+    tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
+    Ok(())
+}
+
 /// Get the path for an encrypted artifact under secrets/. REQ-7
 pub fn get_encrypted_path(repo_root: &Path, name: &str) -> PathBuf {
     repo_root.join(SECRETS_DIR).join(name)
@@ -231,6 +295,66 @@ mod tests {
         let content = std::fs::read_to_string(dir.path().join(".git/hooks/pre-commit")).unwrap();
         // Should only contain one gitvault block (not duplicated)
         assert_eq!(content.matches("# gitvault:").count(), 1);
+    }
+
+    #[test]
+    fn test_validate_write_path_allows_subpath() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("subdir").join("file.txt");
+        // Create subdir so canonicalize can resolve the parent
+        std::fs::create_dir_all(dir.path().join("subdir")).unwrap();
+        let result = validate_write_path(dir.path(), &target);
+        assert!(result.is_ok(), "subpath inside repo root should be allowed");
+    }
+
+    #[test]
+    fn test_validate_write_path_blocks_traversal() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("..").join("etc").join("passwd");
+        let result = validate_write_path(dir.path(), &target);
+        assert!(result.is_err(), "path traversal outside repo root should be blocked");
+    }
+
+    #[test]
+    fn test_read_write_recipients() {
+        let dir = TempDir::new().unwrap();
+        let keys = vec![
+            "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string(),
+            "age1z6j0we5lvscfzxqlqtpfwkf6p4amhjw6hv6h0x3n7lkdmkdwkjnq9x5x5v".to_string(),
+        ];
+        write_recipients(dir.path(), &keys).unwrap();
+        let read_back = read_recipients(dir.path()).unwrap();
+        assert_eq!(read_back, keys);
+    }
+
+    #[test]
+    fn test_recipients_dedup_on_add() {
+        let dir = TempDir::new().unwrap();
+        let pubkey = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string();
+
+        // Write once
+        write_recipients(dir.path(), &[pubkey.clone()]).unwrap();
+
+        // Simulate cmd_recipient Add logic (check contains before adding)
+        let mut recipients = read_recipients(dir.path()).unwrap();
+        if !recipients.contains(&pubkey) {
+            recipients.push(pubkey.clone());
+            write_recipients(dir.path(), &recipients).unwrap();
+        }
+
+        let read_back = read_recipients(dir.path()).unwrap();
+        assert_eq!(
+            read_back.iter().filter(|r| r.as_str() == pubkey).count(),
+            1,
+            "duplicate recipient should not be added"
+        );
+    }
+
+    #[test]
+    fn test_read_recipients_empty_when_no_file() {
+        let dir = TempDir::new().unwrap();
+        let recipients = read_recipients(dir.path()).unwrap();
+        assert!(recipients.is_empty());
     }
 
     #[test]

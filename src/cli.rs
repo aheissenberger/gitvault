@@ -44,6 +44,9 @@ pub enum Commands {
         /// Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML; REQ-4)
         #[arg(long, value_name = "FIELDS")]
         fields: Option<String>,
+        /// Print decrypted content to stdout instead of writing to file (REQ-41)
+        #[arg(long)]
+        reveal: bool,
     },
     /// Materialize secrets to root .env
     Materialize {
@@ -92,4 +95,60 @@ pub enum Commands {
         #[arg(long, default_value_t = crate::barrier::DEFAULT_TOKEN_TTL_SECS)]
         ttl: u64,
     },
+    /// Run as git merge driver for .env files (REQ-34)
+    /// Usage: git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"
+    MergeDriver {
+        /// Base version (ancestor)
+        base: String,
+        /// Ours version (current branch, will be overwritten with merge result)
+        ours: String,
+        /// Theirs version (incoming branch)
+        theirs: String,
+    },
+    /// Manage persistent recipients (REQ-37)
+    Recipient {
+        #[command(subcommand)]
+        action: RecipientAction,
+    },
+    /// Re-encrypt all secrets with the current recipients list (REQ-38)
+    Rotate {
+        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        #[arg(short, long)]
+        identity: Option<String>,
+    },
+    /// Manage identity key in OS keyring (REQ-39)
+    Keyring {
+        #[command(subcommand)]
+        action: KeyringAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RecipientAction {
+    /// Add a recipient public key
+    Add {
+        /// age public key (age1...)
+        pubkey: String,
+    },
+    /// Remove a recipient public key
+    Remove {
+        /// age public key (age1...)
+        pubkey: String,
+    },
+    /// List current recipients
+    List,
+}
+
+#[derive(Subcommand)]
+pub enum KeyringAction {
+    /// Store identity key in OS keyring
+    Set {
+        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        #[arg(short, long)]
+        identity: Option<String>,
+    },
+    /// Show public key of stored identity
+    Get,
+    /// Remove stored identity from OS keyring
+    Delete,
 }

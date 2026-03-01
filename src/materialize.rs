@@ -61,6 +61,7 @@ pub fn materialize_env_file(repo_root: &Path, secrets: &[(String, String)]) -> R
 /// Format key=value pairs as canonical .env content.
 /// REQ-19: sorted keys, KEY="VALUE" quoting where values are double-quoted
 /// and internal double quotes and backslashes are escaped.
+/// REQ-35: sorted keys minimize diff noise
 fn format_env_content(pairs: &[&(String, String)]) -> String {
     let mut lines: Vec<String> = pairs
         .iter()
