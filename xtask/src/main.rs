@@ -1,6 +1,8 @@
+use age::secrecy::ExposeSecret;
 use std::env;
 use std::fs;
-use std::path::{Component, Path};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use regex::Regex;
@@ -35,6 +37,7 @@ enum Task {
     WtList,
     WtCreate { branch: String, dir: String },
     WtRemove { dir: String },
+    DevShell,
     Help,
     Unknown { task: String },
 }
@@ -76,6 +79,7 @@ impl Task {
                     Self::Help
                 }
             }
+            "dev-shell" => Self::DevShell,
             "help" | "-h" | "--help" => Self::Help,
             other => Self::Unknown {
                 task: other.to_string(),
@@ -107,6 +111,7 @@ impl Task {
             Self::WtList => run_worktree_list(),
             Self::WtCreate { branch, dir } => run_worktree_create(&branch, &dir),
             Self::WtRemove { dir } => run_worktree_remove(&dir),
+            Self::DevShell => run_dev_shell(),
             Self::Help => {
                 print_help();
                 Ok(())
@@ -268,6 +273,246 @@ fn run_worktree_list() -> Result<(), String> {
     run("git", &["worktree", "list"])
 }
 
+fn run_dev_shell() -> Result<(), String> {
+    // Step 1: build the gitvault binary
+    println!("🔨 Building gitvault (debug)...");
+    run("cargo", &["build", "--bin", "gitvault"])?;
+
+    let bin = find_gitvault_bin()?;
+    println!("✅ Binary: {}", bin.display());
+
+    // Step 2: create temp sandbox directory
+    let sandbox = std::env::temp_dir().join(format!(
+        "gitvault-sandbox-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
+    fs::create_dir_all(&sandbox)
+        .map_err(|e| format!("Failed to create sandbox dir: {e}"))?;
+    println!("📁 Sandbox: {}", sandbox.display());
+
+    let result = setup_and_run_shell(&sandbox, &bin);
+
+    // Step 3: always clean up, regardless of shell exit code
+    println!("\n🧹 Removing sandbox {}...", sandbox.display());
+    if let Err(e) = fs::remove_dir_all(&sandbox) {
+        eprintln!("  Warning: cleanup failed: {e}");
+    } else {
+        println!("✅ Done.");
+    }
+
+    result
+}
+
+/// Set up the sandbox repo and launch the interactive shell.
+fn setup_and_run_shell(sandbox: &Path, bin: &Path) -> Result<(), String> {
+    // Initialise a git repo
+    git_silent(&["init"], sandbox)?;
+    git_silent(&["config", "user.email", "dev@gitvault.local"], sandbox)?;
+    git_silent(&["config", "user.name", "gitvault-dev"], sandbox)?;
+
+    // Generate an age X25519 identity for use in the sandbox
+    let identity = age::x25519::Identity::generate();
+    let privkey = identity.to_string(); // Secret<String>
+    let pubkey = identity.to_public().to_string();
+
+    let key_file = sandbox.join("identity.key");
+    fs::write(&key_file, format!("{}\n", privkey.expose_secret()))
+        .map_err(|e| format!("Failed to write identity key: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&key_file)
+            .map_err(|e| format!("Failed to stat identity.key: {e}"))?
+            .permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&key_file, perms)
+            .map_err(|e| format!("Failed to chmod identity.key: {e}"))?;
+    }
+
+    // Write sample plaintext secret files
+    fs::write(
+        sandbox.join(".env.plain"),
+        format!(
+            "# Sample .env — encrypt with: gitvault encrypt .env.plain --recipient {pubkey}\n\
+             DATABASE_URL=postgres://localhost:5432/myapp_dev\n\
+             SECRET_KEY=dev-only-change-in-prod\n\
+             API_TOKEN=sample-api-token-abc123\n\
+             REDIS_URL=redis://localhost:6379/0\n"
+        ),
+    )
+    .map_err(|e| format!("Failed to write .env.plain: {e}"))?;
+
+    fs::write(
+        sandbox.join("db.secrets.json"),
+        "{\n  \"host\": \"localhost\",\n  \"port\": 5432,\n  \
+         \"user\": \"app\",\n  \"password\": \"super-secret-db-password\",\n  \
+         \"database\": \"myapp_dev\"\n}\n",
+    )
+    .map_err(|e| format!("Failed to write db.secrets.json: {e}"))?;
+
+    // Write a .gitignore (harden will add more)
+    fs::write(sandbox.join(".gitignore"), "identity.key\n")
+        .map_err(|e| format!("Failed to write .gitignore: {e}"))?;
+
+    // Commit the initial sample files (plaintext, unencrypted yet)
+    git_silent(&["add", ".env.plain", "db.secrets.json", ".gitignore"], sandbox)?;
+    git_silent(
+        &["commit", "-m", "chore: initial sandbox sample files"],
+        sandbox,
+    )?;
+
+    // Write a shell init script that sources the user's bashrc and prints a welcome banner
+    let identity_key_path = key_file.display().to_string();
+    let pubkey_display = pubkey.clone();
+    let init_script = sandbox.join(".gitvault_shell_init.sh");
+    let banner = format!(
+        r#"#!/usr/bin/env bash
+# Source user's existing interactive config if present
+[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc" 2>/dev/null
+
+# gitvault dev-shell environment
+export GITVAULT_IDENTITY="{identity_key_path}"
+export GITVAULT_SANDBOX="{sandbox}"
+
+cat <<'BANNER'
+
+╔══════════════════════════════════════════════════════╗
+║           gitvault  ·  interactive dev sandbox        ║
+╚══════════════════════════════════════════════════════╝
+
+  Sandbox dir : {sandbox_display}
+  Identity key: identity.key  (private, gitignored)
+  Public key  : {pubkey_display}
+
+  Sample files:
+    .env.plain        — plaintext env vars (ready to encrypt)
+    db.secrets.json   — JSON secrets (ready to encrypt)
+
+  Quick-start commands:
+    gitvault harden
+    gitvault encrypt .env.plain --recipient {pubkey_display}
+    gitvault status
+    gitvault materialize
+    gitvault --help
+
+  Type 'exit' or Ctrl-D to leave the sandbox (directory is removed).
+
+BANNER
+"#,
+        sandbox = sandbox.display(),
+        sandbox_display = sandbox.display(),
+    );
+
+    let mut f = fs::File::create(&init_script)
+        .map_err(|e| format!("Failed to create init script: {e}"))?;
+    f.write_all(banner.as_bytes())
+        .map_err(|e| format!("Failed to write init script: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&init_script)
+            .map_err(|e| format!("Failed to stat init script: {e}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&init_script, perms)
+            .map_err(|e| format!("Failed to chmod init script: {e}"))?;
+    }
+
+    // Build PATH with gitvault's directory first
+    let bin_dir = bin
+        .parent()
+        .ok_or("Could not determine binary directory")?
+        .to_string_lossy()
+        .to_string();
+    let path = format!(
+        "{bin_dir}:{}",
+        env::var("PATH").unwrap_or_default()
+    );
+
+    // Launch the shell
+    let shell = env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+    println!("🚀 Launching shell ({}). Type 'exit' to quit.", shell);
+
+    let status = Command::new(&shell)
+        .args(["--rcfile", &init_script.to_string_lossy()])
+        .current_dir(sandbox)
+        .env("PATH", &path)
+        .env("GITVAULT_IDENTITY", &identity_key_path)
+        .env("GITVAULT_SANDBOX", sandbox.display().to_string())
+        .status()
+        .map_err(|e| format!("Failed to launch shell '{shell}': {e}"))?;
+
+    if !status.success() {
+        // Non-zero shell exit is normal (user typed `exit 1`), not an error for us.
+        eprintln!(
+            "Shell exited with status: {}",
+            status.code().unwrap_or(-1)
+        );
+    }
+
+    Ok(())
+}
+
+/// Find the gitvault debug binary by asking cargo for the target directory.
+fn find_gitvault_bin() -> Result<PathBuf, String> {
+    // cargo metadata gives us the actual target directory, respecting .cargo/config.toml overrides.
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version=1", "--no-deps"])
+        .output()
+        .map_err(|e| format!("Failed to run cargo metadata: {e}"))?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let re = Regex::new(r#""target_directory"\s*:\s*"([^"]+)""#)
+            .map_err(|e| format!("Regex error: {e}"))?;
+        if let Some(caps) = re.captures(&stdout) {
+            // JSON strings may have escaped forward-slashes
+            let target_dir = caps[1].replace("\\/", "/");
+            let candidate = PathBuf::from(&target_dir).join("debug").join("gitvault");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    // Fallback: check well-known locations
+    for candidate in &[
+        PathBuf::from("/workspaces/.cargo-target/debug/gitvault"),
+        PathBuf::from("target/debug/gitvault"),
+    ] {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(
+        "gitvault binary not found after build. \
+         Check that `cargo build --bin gitvault` succeeded."
+            .to_string(),
+    )
+}
+
+/// Run a silent git command in `dir` (suppress stdout; show stderr on failure).
+fn git_silent(args: &[&str], dir: &Path) -> Result<(), String> {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("Failed to run git {}: {e}", args.join(" ")))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
+}
+
 fn run_worktree_create(branch: &str, dir: &str) -> Result<(), String> {
     run("git", &["worktree", "add", "-b", branch, dir])
 }
@@ -302,6 +547,7 @@ fn print_help() {
     println!("  wt-list");
     println!("  wt-create <branch> <dir>");
     println!("  wt-remove <dir>");
+    println!("  dev-shell: open an interactive sandbox shell for testing the gitvault CLI");
 }
 
 #[derive(Debug, Deserialize)]
