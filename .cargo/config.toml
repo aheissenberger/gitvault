@@ -1,0 +1,21 @@
+[build]
+target-dir = "/workspaces/.cargo-target"
+
+[net]
+git-fetch-with-cli = true
+
+[registries.crates-io]
+protocol = "sparse"
+
+[alias]
+xtask = "run --manifest-path xtask/Cargo.toml --"
+verify = "run --manifest-path xtask/Cargo.toml -- verify"
+verify-fmt = "run --manifest-path xtask/Cargo.toml -- fmt"
+verify-clippy = "run --manifest-path xtask/Cargo.toml -- clippy"
+verify-test = "run --manifest-path xtask/Cargo.toml -- test"
+verify-build = "run --manifest-path xtask/Cargo.toml -- build"
+spec-init = "run --manifest-path xtask/Cargo.toml -- spec-init"
+spec-verify = "run --manifest-path xtask/Cargo.toml -- spec-verify"
+wt-list = "run --manifest-path xtask/Cargo.toml -- wt-list"
+wt-create = "run --manifest-path xtask/Cargo.toml -- wt-create"
+wt-remove = "run --manifest-path xtask/Cargo.toml -- wt-remove"

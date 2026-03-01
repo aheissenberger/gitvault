@@ -1,0 +1,49 @@
+{
+  "name": "gitvault-rust-1.93.1",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "RUST_VERSION": "1.93.1"
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": "true",
+      "username": "vscode"
+    }
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "CARGO_HOME": "/home/vscode/.cargo",
+    "RUSTUP_HOME": "/home/vscode/.rustup",
+    "CARGO_TARGET_DIR": "/workspaces/.cargo-target"
+  },
+  "mounts": [
+    "source=rust-cargo-registry,target=/home/vscode/.cargo/registry,type=volume",
+    "source=rust-cargo-git,target=/home/vscode/.cargo/git,type=volume",
+    "source=rust-rustup-home,target=/home/vscode/.rustup,type=volume",
+    "source=rust-shared-target,target=/workspaces/.cargo-target,type=volume"
+  ],
+  "postCreateCommand": "bash .devcontainer/scripts/post-create.sh",
+  "postStartCommand": "bash .devcontainer/scripts/post-start.sh",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "rust-analyzer.cargo.targetDir": true,
+        "files.watcherExclude": {
+          "**/target/**": true,
+          "**/.cargo-target/**": true
+        }
+      },
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml",
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
+      ]
+    }
+  }
+}

@@ -1,0 +1,62 @@
+name: build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect cargo workspace
+        id: cargo
+        run: |
+          if [[ -f Cargo.toml ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Rust 1.93.1
+        if: steps.cargo.outputs.present == 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.1
+          components: clippy,rustfmt
+
+      - name: Cache cargo artifacts
+        if: steps.cargo.outputs.present == 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify specs
+        if: steps.cargo.outputs.present == 'true'
+        run: cargo spec-verify
+
+      - name: Check format
+        if: steps.cargo.outputs.present == 'true'
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        if: steps.cargo.outputs.present == 'true'
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        if: steps.cargo.outputs.present == 'true'
+        run: cargo test --workspace --all-features
+
+      - name: Build release
+        if: steps.cargo.outputs.present == 'true'
+        run: cargo build --workspace --release
+
+      - name: Skip message
+        if: steps.cargo.outputs.present != 'true'
+        run: echo "No Cargo.toml found; skipping Rust CI checks."

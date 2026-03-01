@@ -1,0 +1,12 @@
+/target
+/.cargo-target
+/.local-cargo-home
+
+.DS_Store
+.idea/
+.vscode/
+
+dist/
+cert.p12
+build.keychain-db
+build.keychain
