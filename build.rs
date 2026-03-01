@@ -4,8 +4,8 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs");
 
-    let git_sha = git_output(&["rev-parse", "--short=12", "HEAD"])
-        .unwrap_or_else(|| "unknown".to_string());
+    let git_sha =
+        git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
     let git_commit_date = git_output(&["show", "-s", "--format=%cI", "HEAD"])
         .unwrap_or_else(|| "unknown".to_string());
 
