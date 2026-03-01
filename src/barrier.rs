@@ -59,7 +59,7 @@ pub fn check_prod_barrier(
     let mut input = String::new();
     std::io::stdin()
         .read_line(&mut input)
-        .map_err(|e| GitvaultError::Io(e))?;
+        .map_err(GitvaultError::Io)?;
 
     if input.trim().eq_ignore_ascii_case("y") {
         Ok(())

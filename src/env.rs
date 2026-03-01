@@ -1,5 +1,5 @@
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 /// Resolve the active environment for a given worktree root.
 ///
@@ -35,13 +35,15 @@ pub fn resolve_env(worktree_root: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_default_env_is_dev() {
         let dir = TempDir::new().unwrap();
-        unsafe { std::env::remove_var("SECRETS_ENV"); }
+        unsafe {
+            std::env::remove_var("SECRETS_ENV");
+        }
         let env = resolve_env(dir.path());
         assert_eq!(env, "dev");
     }
@@ -49,7 +51,9 @@ mod tests {
     #[test]
     fn test_env_file_takes_priority_over_default() {
         let dir = TempDir::new().unwrap();
-        unsafe { std::env::remove_var("SECRETS_ENV"); }
+        unsafe {
+            std::env::remove_var("SECRETS_ENV");
+        }
 
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
         fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
@@ -65,9 +69,13 @@ mod tests {
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
         fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
 
-        unsafe { std::env::set_var("SECRETS_ENV", "prod"); }
+        unsafe {
+            std::env::set_var("SECRETS_ENV", "prod");
+        }
         let env = resolve_env(dir.path());
-        unsafe { std::env::remove_var("SECRETS_ENV"); }
+        unsafe {
+            std::env::remove_var("SECRETS_ENV");
+        }
 
         assert_eq!(env, "prod");
     }
@@ -76,7 +84,9 @@ mod tests {
     fn test_worktree_independence() {
         let dir1 = TempDir::new().unwrap();
         let dir2 = TempDir::new().unwrap();
-        unsafe { std::env::remove_var("SECRETS_ENV"); }
+        unsafe {
+            std::env::remove_var("SECRETS_ENV");
+        }
 
         fs::create_dir_all(dir1.path().join(".secrets")).unwrap();
         fs::write(dir1.path().join(".secrets").join("env"), "staging").unwrap();

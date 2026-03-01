@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::process::Command;
 use crate::error::GitvaultError;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Directory for encrypted artifacts (REQ-7)
 pub const SECRETS_DIR: &str = "secrets";
@@ -18,7 +18,9 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
         let mut out = PathBuf::new();
         for component in path.components() {
             match component {
-                std::path::Component::ParentDir => { out.pop(); }
+                std::path::Component::ParentDir => {
+                    out.pop();
+                }
                 std::path::Component::CurDir => {}
                 c => out.push(c),
             }
@@ -41,7 +43,8 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
     } else {
         Err(GitvaultError::Usage(format!(
             "Path traversal detected: {} is outside repository root {}",
-            target.display(), base.display()
+            target.display(),
+            base.display()
         )))
     }
 }
@@ -53,7 +56,8 @@ pub fn read_recipients(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
         return Ok(vec![]);
     }
     let content = std::fs::read_to_string(&path)?;
-    Ok(content.lines()
+    Ok(content
+        .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(String::from)
@@ -106,14 +110,8 @@ pub fn install_git_hooks(repo_root: &Path) -> Result<(), GitvaultError> {
         return Ok(());
     }
 
-    install_hook(
-        &hooks_dir.join("pre-commit"),
-        PRE_COMMIT_HOOK,
-    )?;
-    install_hook(
-        &hooks_dir.join("pre-push"),
-        PRE_PUSH_HOOK,
-    )?;
+    install_hook(&hooks_dir.join("pre-commit"), PRE_COMMIT_HOOK)?;
+    install_hook(&hooks_dir.join("pre-push"), PRE_PUSH_HOOK)?;
 
     Ok(())
 }
@@ -238,8 +236,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         ensure_dirs(dir.path(), "dev").unwrap();
 
-        assert!(dir.path().join("secrets").exists(), "secrets/ should be created");
-        assert!(dir.path().join(".secrets/plain/dev").exists(), ".secrets/plain/dev/ should be created");
+        assert!(
+            dir.path().join("secrets").exists(),
+            "secrets/ should be created"
+        );
+        assert!(
+            dir.path().join(".secrets/plain/dev").exists(),
+            ".secrets/plain/dev/ should be created"
+        );
     }
 
     #[test]
@@ -280,7 +284,10 @@ mod tests {
         assert!(pre_push.exists(), "pre-push hook should be created");
 
         let content = std::fs::read_to_string(&pre_commit).unwrap();
-        assert!(content.contains("gitvault"), "hook should reference gitvault");
+        assert!(
+            content.contains("gitvault"),
+            "hook should reference gitvault"
+        );
     }
 
     #[test]
@@ -312,7 +319,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let target = dir.path().join("..").join("etc").join("passwd");
         let result = validate_write_path(dir.path(), &target);
-        assert!(result.is_err(), "path traversal outside repo root should be blocked");
+        assert!(
+            result.is_err(),
+            "path traversal outside repo root should be blocked"
+        );
     }
 
     #[test]
@@ -333,7 +343,7 @@ mod tests {
         let pubkey = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string();
 
         // Write once
-        write_recipients(dir.path(), &[pubkey.clone()]).unwrap();
+        write_recipients(dir.path(), std::slice::from_ref(&pubkey)).unwrap();
 
         // Simulate cmd_recipient Add logic (check contains before adding)
         let mut recipients = read_recipients(dir.path()).unwrap();
@@ -369,7 +379,10 @@ mod tests {
         install_git_hooks(dir.path()).unwrap();
 
         let content = std::fs::read_to_string(&hook_path).unwrap();
-        assert!(content.contains("existing hook"), "original content preserved");
+        assert!(
+            content.contains("existing hook"),
+            "original content preserved"
+        );
         assert!(content.contains("gitvault"), "gitvault block appended");
     }
 }

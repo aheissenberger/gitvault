@@ -1,5 +1,5 @@
-use age::{x25519, Decryptor, Encryptor};
 use crate::error::GitvaultError;
+use age::{Decryptor, Encryptor, x25519};
 use std::io::{Read, Write};
 
 /// Gitvault encrypted format version (REQ-55).
@@ -30,9 +30,9 @@ pub fn encrypt(
         .ok_or_else(|| GitvaultError::Encryption("At least one recipient required".to_string()))?;
 
     let mut output = Vec::new();
-    let mut writer = encryptor
-        .wrap_output(&mut output)
-        .map_err(|e| GitvaultError::Encryption(format!("Failed to create encrypted writer: {e}")))?;
+    let mut writer = encryptor.wrap_output(&mut output).map_err(|e| {
+        GitvaultError::Encryption(format!("Failed to create encrypted writer: {e}"))
+    })?;
 
     writer
         .write_all(plaintext)
@@ -76,9 +76,9 @@ pub fn encrypt_stream(
 ) -> Result<(), GitvaultError> {
     let encryptor = Encryptor::with_recipients(recipients)
         .ok_or_else(|| GitvaultError::Encryption("At least one recipient required".to_string()))?;
-    let mut age_writer = encryptor
-        .wrap_output(writer)
-        .map_err(|e| GitvaultError::Encryption(format!("Failed to create encrypted writer: {e}")))?;
+    let mut age_writer = encryptor.wrap_output(writer).map_err(|e| {
+        GitvaultError::Encryption(format!("Failed to create encrypted writer: {e}"))
+    })?;
     std::io::copy(reader, &mut age_writer)
         .map_err(|e| GitvaultError::Encryption(format!("Failed to stream plaintext: {e}")))?;
     age_writer
@@ -165,7 +165,10 @@ mod tests {
         let ciphertext = encrypt(vec![recipient], plaintext).expect("encrypt failed");
 
         let result = decrypt(&wrong_identity, &ciphertext);
-        assert!(result.is_err(), "decryption with wrong identity should fail");
+        assert!(
+            result.is_err(),
+            "decryption with wrong identity should fail"
+        );
     }
 
     #[test]
@@ -196,12 +199,17 @@ mod tests {
         let plaintext = b"STREAM_SECRET=hunter2\nDB_PASSWORD=correct-horse";
         let mut reader = std::io::Cursor::new(plaintext.as_ref());
         let mut ciphertext = Vec::new();
-        encrypt_stream(vec![recipient], &mut reader, &mut ciphertext).expect("encrypt_stream failed");
+        encrypt_stream(vec![recipient], &mut reader, &mut ciphertext)
+            .expect("encrypt_stream failed");
 
-        assert!(!ciphertext.windows(10).any(|w| w == b"STREAM_SEC"), "ciphertext should not contain plaintext");
+        assert!(
+            !ciphertext.windows(10).any(|w| w == b"STREAM_SEC"),
+            "ciphertext should not contain plaintext"
+        );
 
         let mut decrypted = Vec::new();
-        decrypt_stream(&identity, std::io::Cursor::new(&ciphertext), &mut decrypted).expect("decrypt_stream failed");
+        decrypt_stream(&identity, std::io::Cursor::new(&ciphertext), &mut decrypted)
+            .expect("decrypt_stream failed");
         assert_eq!(decrypted, plaintext);
     }
 }

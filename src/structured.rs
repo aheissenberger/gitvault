@@ -1,8 +1,8 @@
+use anyhow::{Context, Result};
 /// REQ-4: Field-level encryption for JSON, YAML, and TOML.
 /// REQ-5: Deterministic encryption — existing ciphertext is preserved when plaintext unchanged.
 use std::io::{Read, Write};
 use std::path::Path;
-use anyhow::{Context, Result};
 
 const AGE_ARMOR_HEADER: &str = "-----BEGIN AGE ENCRYPTED FILE-----";
 /// Prefix used for single-line encrypted values in .env value-only mode.
@@ -107,8 +107,16 @@ fn base64_encode(data: &[u8]) -> String {
     let mut i = 0;
     while i < data.len() {
         let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
+        let b1 = if i + 1 < data.len() {
+            data[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < data.len() {
+            data[i + 2] as u32
+        } else {
+            0
+        };
         result.push(CHARS[((b0 >> 2) & 0x3f) as usize] as char);
         result.push(CHARS[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
         if i + 1 < data.len() {
@@ -191,10 +199,7 @@ fn decrypt_binary_b64(encoded: &str, identity: &dyn age::Identity) -> Result<Vec
 /// Determine the new encrypted value for a field, applying REQ-5 determinism:
 /// if the current value is already age armor, keep it unchanged.
 /// Otherwise, encrypt the current plaintext value.
-fn determine_encrypted_value(
-    current: &str,
-    recipient_keys: &[String],
-) -> Result<String> {
+fn determine_encrypted_value(current: &str, recipient_keys: &[String]) -> Result<String> {
     if is_age_armor(current) {
         return Ok(current.to_string());
     }
@@ -210,9 +215,9 @@ fn json_field_mut<'a>(
         return Some(value);
     }
     match value {
-        serde_json::Value::Object(map) => {
-            map.get_mut(path[0]).and_then(|v| json_field_mut(v, &path[1..]))
-        }
+        serde_json::Value::Object(map) => map
+            .get_mut(path[0])
+            .and_then(|v| json_field_mut(v, &path[1..])),
         _ => None,
     }
 }
@@ -236,17 +241,14 @@ fn yaml_field_mut<'a>(
 }
 
 /// Navigate to a nested field in a TOML value using dot-separated path, returning mutable ref.
-fn toml_field_mut<'a>(
-    value: &'a mut toml::Value,
-    path: &[&str],
-) -> Option<&'a mut toml::Value> {
+fn toml_field_mut<'a>(value: &'a mut toml::Value, path: &[&str]) -> Option<&'a mut toml::Value> {
     if path.is_empty() {
         return Some(value);
     }
     match value {
-        toml::Value::Table(map) => {
-            map.get_mut(path[0]).and_then(|v| toml_field_mut(v, &path[1..]))
-        }
+        toml::Value::Table(map) => map
+            .get_mut(path[0])
+            .and_then(|v| toml_field_mut(v, &path[1..])),
         _ => None,
     }
 }
@@ -360,13 +362,12 @@ fn decrypt_fields_json(
     let mut value: serde_json::Value = serde_json::from_str(content)?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
-        if let Some(v) = json_field_mut(&mut value, &path) {
-            if let Some(s) = v.as_str() {
-                if is_age_armor(s) {
-                    let plain = decrypt_armor(s, identity)?;
-                    *v = serde_json::Value::String(String::from_utf8(plain)?);
-                }
-            }
+        if let Some(v) = json_field_mut(&mut value, &path)
+            && let Some(s) = v.as_str()
+            && is_age_armor(s)
+        {
+            let plain = decrypt_armor(s, identity)?;
+            *v = serde_json::Value::String(String::from_utf8(plain)?);
         }
     }
     Ok(serde_json::to_string_pretty(&value)? + "\n")
@@ -380,13 +381,12 @@ fn decrypt_fields_yaml(
     let mut value: serde_yaml::Value = serde_yaml::from_str(content)?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
-        if let Some(v) = yaml_field_mut(&mut value, &path) {
-            if let Some(s) = v.as_str() {
-                if is_age_armor(s) {
-                    let plain = decrypt_armor(s, identity)?;
-                    *v = serde_yaml::Value::String(String::from_utf8(plain)?);
-                }
-            }
+        if let Some(v) = yaml_field_mut(&mut value, &path)
+            && let Some(s) = v.as_str()
+            && is_age_armor(s)
+        {
+            let plain = decrypt_armor(s, identity)?;
+            *v = serde_yaml::Value::String(String::from_utf8(plain)?);
         }
     }
     Ok(serde_yaml::to_string(&value)?)
@@ -400,13 +400,12 @@ fn decrypt_fields_toml(
     let mut value: toml::Value = content.parse::<toml::Value>()?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
-        if let Some(v) = toml_field_mut(&mut value, &path) {
-            if let Some(s) = v.as_str() {
-                if is_age_armor(s) {
-                    let plain = decrypt_armor(s, identity)?;
-                    *v = toml::Value::String(String::from_utf8(plain)?);
-                }
-            }
+        if let Some(v) = toml_field_mut(&mut value, &path)
+            && let Some(s) = v.as_str()
+            && is_age_armor(s)
+        {
+            let plain = decrypt_armor(s, identity)?;
+            *v = toml::Value::String(String::from_utf8(plain)?);
         }
     }
     Ok(toml::to_string_pretty(&value)?)
@@ -503,8 +502,8 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use age::x25519;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     fn gen_identity() -> x25519::Identity {
         x25519::Identity::generate()
@@ -530,7 +529,11 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&after_enc).unwrap();
         let enc_val = v["password"].as_str().unwrap();
         assert!(is_age_armor(enc_val), "encrypted value should be age armor");
-        assert_eq!(v["user"].as_str().unwrap(), "alice", "other fields unchanged");
+        assert_eq!(
+            v["user"].as_str().unwrap(),
+            "alice",
+            "other fields unchanged"
+        );
 
         decrypt_fields(&path, &["password"], &identity).unwrap();
 
@@ -576,7 +579,10 @@ mod tests {
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: serde_yaml::Value = serde_yaml::from_str(&after_enc).unwrap();
         let enc_val = v["database_password"].as_str().unwrap();
-        assert!(is_age_armor(enc_val), "YAML encrypted value should be age armor");
+        assert!(
+            is_age_armor(enc_val),
+            "YAML encrypted value should be age armor"
+        );
         assert_eq!(v["host"].as_str().unwrap(), "localhost");
 
         decrypt_fields(&path, &["database_password"], &identity).unwrap();
@@ -601,7 +607,10 @@ mod tests {
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: toml::Value = after_enc.parse().unwrap();
         let enc_val = v["api_key"].as_str().unwrap();
-        assert!(is_age_armor(enc_val), "TOML encrypted value should be age armor");
+        assert!(
+            is_age_armor(enc_val),
+            "TOML encrypted value should be age armor"
+        );
         assert_eq!(v["name"].as_str().unwrap(), "app");
 
         decrypt_fields(&path, &["api_key"], &identity).unwrap();
@@ -635,8 +644,12 @@ mod tests {
             .unwrap();
         let new_b_ciphertext = v1["b"].as_str().unwrap().to_string();
         // Manually write a JSON where 'b' is changed plaintext but 'a' keeps its ciphertext
-        write!(f, r#"{{"a":{},"b":"new_beta"}}"#,
-            serde_json::to_string(&a_enc1).unwrap()).unwrap();
+        write!(
+            f,
+            r#"{{"a":{},"b":"new_beta"}}"#,
+            serde_json::to_string(&a_enc1).unwrap()
+        )
+        .unwrap();
         drop(f);
 
         encrypt_fields(&path, &["a", "b"], &identity, &keys).unwrap();
@@ -645,9 +658,16 @@ mod tests {
         let a_enc2 = v2["a"].as_str().unwrap();
 
         // 'a' ciphertext should be identical (plaintext didn't change)
-        assert_eq!(a_enc1, a_enc2, "ciphertext for unchanged field 'a' must be preserved (REQ-5)");
+        assert_eq!(
+            a_enc1, a_enc2,
+            "ciphertext for unchanged field 'a' must be preserved (REQ-5)"
+        );
         // 'b' should have a new ciphertext
-        assert_ne!(new_b_ciphertext, v2["b"].as_str().unwrap(), "ciphertext for changed field 'b' must differ");
+        assert_ne!(
+            new_b_ciphertext,
+            v2["b"].as_str().unwrap(),
+            "ciphertext for changed field 'b' must differ"
+        );
     }
 
     /// REQ-6: .env value-only encrypt/decrypt roundtrip
@@ -658,8 +678,14 @@ mod tests {
 
         let content = "API_KEY=mysecret\nDB_HOST=localhost\n";
         let encrypted = encrypt_env_values(content, &identity, &keys).unwrap();
-        assert!(encrypted.contains("API_KEY=age:"), "value should be encrypted");
-        assert!(encrypted.contains("DB_HOST=age:"), "all values should be encrypted");
+        assert!(
+            encrypted.contains("API_KEY=age:"),
+            "value should be encrypted"
+        );
+        assert!(
+            encrypted.contains("DB_HOST=age:"),
+            "all values should be encrypted"
+        );
 
         let decrypted = decrypt_env_values(&encrypted, &identity).unwrap();
         assert_eq!(decrypted, content);

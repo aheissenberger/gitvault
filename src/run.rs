@@ -94,9 +94,10 @@ mod tests {
 
     #[test]
     fn test_secrets_injected_into_env() {
-        let secrets = vec![
-            ("GITVAULT_TEST_KEY".to_string(), "injected_value".to_string()),
-        ];
+        let secrets = vec![(
+            "GITVAULT_TEST_KEY".to_string(),
+            "injected_value".to_string(),
+        )];
         // sh -c 'test "$VAR" = "value"' exits 0 on match, 1 on mismatch
         let code = run_command(
             &secrets,
@@ -115,7 +116,9 @@ mod tests {
     #[test]
     fn test_clear_env_removes_parent_vars() {
         // Set a var in the current process, verify child does NOT see it with --clear-env
-        unsafe { std::env::set_var("GITVAULT_SHOULD_NOT_PASS", "nope"); }
+        unsafe {
+            std::env::set_var("GITVAULT_SHOULD_NOT_PASS", "nope");
+        }
 
         let code = run_command(
             &[],
@@ -124,18 +127,22 @@ mod tests {
                 "-c".to_string(),
                 r#"test -z "$GITVAULT_SHOULD_NOT_PASS""#.to_string(),
             ],
-            true,  // clear_env
-            &[],   // no pass-through
+            true, // clear_env
+            &[],  // no pass-through
         )
         .unwrap();
 
-        unsafe { std::env::remove_var("GITVAULT_SHOULD_NOT_PASS"); }
+        unsafe {
+            std::env::remove_var("GITVAULT_SHOULD_NOT_PASS");
+        }
         assert_eq!(code, 0, "cleared env should not contain parent var");
     }
 
     #[test]
     fn test_pass_vars_forwarded_with_clear_env() {
-        unsafe { std::env::set_var("GITVAULT_PASS_ME", "hello"); }
+        unsafe {
+            std::env::set_var("GITVAULT_PASS_ME", "hello");
+        }
 
         let code = run_command(
             &[],
@@ -149,17 +156,22 @@ mod tests {
         )
         .unwrap();
 
-        unsafe { std::env::remove_var("GITVAULT_PASS_ME"); }
+        unsafe {
+            std::env::remove_var("GITVAULT_PASS_ME");
+        }
         assert_eq!(code, 0, "passed-through var should be visible in child");
     }
 
     #[test]
     fn test_secrets_override_inherited_vars() {
-        unsafe { std::env::set_var("GITVAULT_OVERRIDE_TEST", "original"); }
+        unsafe {
+            std::env::set_var("GITVAULT_OVERRIDE_TEST", "original");
+        }
 
-        let secrets = vec![
-            ("GITVAULT_OVERRIDE_TEST".to_string(), "overridden".to_string()),
-        ];
+        let secrets = vec![(
+            "GITVAULT_OVERRIDE_TEST".to_string(),
+            "overridden".to_string(),
+        )];
         let code = run_command(
             &secrets,
             "sh",
@@ -172,7 +184,9 @@ mod tests {
         )
         .unwrap();
 
-        unsafe { std::env::remove_var("GITVAULT_OVERRIDE_TEST"); }
+        unsafe {
+            std::env::remove_var("GITVAULT_OVERRIDE_TEST");
+        }
         assert_eq!(code, 0, "secret should override inherited env var");
     }
 

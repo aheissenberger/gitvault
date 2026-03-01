@@ -1,3 +1,4 @@
+mod aws_config;
 mod barrier;
 mod cli;
 mod crypto;
@@ -8,7 +9,6 @@ mod materialize;
 mod repo;
 mod run;
 mod structured;
-mod aws_config;
 
 use clap::Parser;
 use cli::{Cli, Commands, KeyringAction, RecipientAction};
@@ -35,20 +35,58 @@ fn run(mut cli: Cli) -> Result<(), GitvaultError> {
         cli.no_prompt = true;
     }
     match cli.command {
-        Commands::Encrypt { file, recipients, fields, value_only } => {
-            cmd_encrypt(file, recipients, fields, value_only, cli.json, cli.no_prompt)
-        }
-        Commands::Decrypt { file, identity, output, fields, reveal } => {
-            cmd_decrypt(file, identity, output, fields, reveal, cli.json, cli.no_prompt)
-        }
-        Commands::Materialize { env, identity, prod } => {
-            cmd_materialize(env, identity, prod, cli.json, cli.no_prompt)
-        }
+        Commands::Encrypt {
+            file,
+            recipients,
+            fields,
+            value_only,
+        } => cmd_encrypt(
+            file,
+            recipients,
+            fields,
+            value_only,
+            cli.json,
+            cli.no_prompt,
+        ),
+        Commands::Decrypt {
+            file,
+            identity,
+            output,
+            fields,
+            reveal,
+        } => cmd_decrypt(
+            file,
+            identity,
+            output,
+            fields,
+            reveal,
+            cli.json,
+            cli.no_prompt,
+        ),
+        Commands::Materialize {
+            env,
+            identity,
+            prod,
+        } => cmd_materialize(env, identity, prod, cli.json, cli.no_prompt),
         Commands::Status { fail_if_dirty } => cmd_status(cli.json, fail_if_dirty),
         Commands::Harden => cmd_harden(cli.json),
-        Commands::Run { env, identity, prod, clear_env, pass, command } => {
-            cmd_run(env, identity, prod, clear_env, pass, command, cli.json, cli.no_prompt)
-        }
+        Commands::Run {
+            env,
+            identity,
+            prod,
+            clear_env,
+            pass,
+            command,
+        } => cmd_run(
+            env,
+            identity,
+            prod,
+            clear_env,
+            pass,
+            command,
+            cli.json,
+            cli.no_prompt,
+        ),
         Commands::AllowProd { ttl } => cmd_allow_prod(ttl, cli.json),
         Commands::MergeDriver { base, ours, theirs } => cmd_merge_driver(base, ours, theirs),
         Commands::Recipient { action } => cmd_recipient(action, cli.json),
@@ -75,20 +113,32 @@ fn find_repo_root() -> Result<PathBuf, GitvaultError> {
 /// Output a success result, optionally as JSON
 fn output_success(message: &str, json: bool) {
     if json {
-        println!("{}", serde_json::json!({"status": "ok", "message": message}));
+        println!(
+            "{}",
+            serde_json::json!({"status": "ok", "message": message})
+        );
     } else {
         println!("{message}");
     }
 }
 
 /// Encrypt a file and write the .age output under secrets/
-fn cmd_encrypt(file: String, recipient_keys: Vec<String>, fields: Option<String>, value_only: bool, json: bool, _no_prompt: bool) -> Result<(), GitvaultError> {
+fn cmd_encrypt(
+    file: String,
+    recipient_keys: Vec<String>,
+    fields: Option<String>,
+    value_only: bool,
+    json: bool,
+    _no_prompt: bool,
+) -> Result<(), GitvaultError> {
     let repo_root = find_repo_root()?;
     let input_path = PathBuf::from(&file);
 
     // REQ-33: each source file maps to exactly one .age artifact
     if input_path.extension().and_then(|e| e.to_str()) == Some("age") {
-        return Err(GitvaultError::Usage("Cannot encrypt an already-encrypted .age file (REQ-33: no mega-blob)".to_string()));
+        return Err(GitvaultError::Usage(
+            "Cannot encrypt an already-encrypted .age file (REQ-33: no mega-blob)".to_string(),
+        ));
     }
 
     let recipient_keys = resolve_recipient_keys(&repo_root, recipient_keys)?;
@@ -100,23 +150,45 @@ fn cmd_encrypt(file: String, recipient_keys: Vec<String>, fields: Option<String>
         let identity = crypto::parse_identity(&identity_str)?;
         structured::encrypt_fields(&input_path, &fields, &identity, &recipient_keys)
             .map_err(|e| GitvaultError::Encryption(e.to_string()))?;
-        output_success(&format!("Encrypted fields [{fields_str}] in {}", input_path.display()), json);
+        output_success(
+            &format!(
+                "Encrypted fields [{fields_str}] in {}",
+                input_path.display()
+            ),
+            json,
+        );
         return Ok(());
     }
 
     // REQ-6: .env value-only mode
-    let ext = input_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if value_only && (ext == "env" || input_path.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with(".env")) {
+    let ext = input_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if value_only
+        && (ext == "env"
+            || input_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .starts_with(".env"))
+    {
         let identity_str = load_identity(None)?;
         let identity = crypto::parse_identity(&identity_str)?;
         let content = std::fs::read_to_string(&input_path)?;
         let encrypted = structured::encrypt_env_values(&content, &identity, &recipient_keys)
             .map_err(|e| GitvaultError::Encryption(e.to_string()))?;
         // REQ-43: atomic write
-        let tmp = tempfile::NamedTempFile::new_in(input_path.parent().unwrap_or(std::path::Path::new(".")))?;
+        let tmp = tempfile::NamedTempFile::new_in(
+            input_path.parent().unwrap_or(std::path::Path::new(".")),
+        )?;
         std::fs::write(tmp.path(), encrypted)?;
-        tmp.persist(&input_path).map_err(|e| GitvaultError::Io(e.error))?;
-        output_success(&format!("Encrypted .env values in {}", input_path.display()), json);
+        tmp.persist(&input_path)
+            .map_err(|e| GitvaultError::Io(e.error))?;
+        output_success(
+            &format!("Encrypted .env values in {}", input_path.display()),
+            json,
+        );
         return Ok(());
     }
 
@@ -141,19 +213,24 @@ fn cmd_encrypt(file: String, recipient_keys: Vec<String>, fields: Option<String>
     repo::validate_write_path(&repo_root, &out_path)?;
 
     // REQ-51: streaming encryption — no full-file buffer
-    let tmp = tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp =
+        tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
     {
         let mut in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut out_file = std::io::BufWriter::new(tmp.as_file());
         crypto::encrypt_stream(recipients, &mut in_file, &mut out_file)?;
     }
-    tmp.persist(&out_path).map_err(|e| GitvaultError::Io(e.error))?;
+    tmp.persist(&out_path)
+        .map_err(|e| GitvaultError::Io(e.error))?;
 
     output_success(&format!("Encrypted to {}", out_path.display()), json);
     Ok(())
 }
 
-fn resolve_recipient_keys(repo_root: &Path, recipient_keys: Vec<String>) -> Result<Vec<String>, GitvaultError> {
+fn resolve_recipient_keys(
+    repo_root: &Path,
+    recipient_keys: Vec<String>,
+) -> Result<Vec<String>, GitvaultError> {
     if !recipient_keys.is_empty() {
         return Ok(recipient_keys);
     }
@@ -171,7 +248,15 @@ fn resolve_recipient_keys(repo_root: &Path, recipient_keys: Vec<String>) -> Resu
 }
 
 /// Decrypt a .age file and write plaintext
-fn cmd_decrypt(file: String, identity_path: Option<String>, output: Option<String>, fields: Option<String>, reveal: bool, json: bool, _no_prompt: bool) -> Result<(), GitvaultError> {
+fn cmd_decrypt(
+    file: String,
+    identity_path: Option<String>,
+    output: Option<String>,
+    fields: Option<String>,
+    reveal: bool,
+    json: bool,
+    _no_prompt: bool,
+) -> Result<(), GitvaultError> {
     let input_path = PathBuf::from(&file);
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
@@ -181,7 +266,13 @@ fn cmd_decrypt(file: String, identity_path: Option<String>, output: Option<Strin
         let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
         structured::decrypt_fields(&input_path, &fields, &identity)
             .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
-        output_success(&format!("Decrypted fields [{fields_str}] in {}", input_path.display()), json);
+        output_success(
+            &format!(
+                "Decrypted fields [{fields_str}] in {}",
+                input_path.display()
+            ),
+            json,
+        );
         return Ok(());
     }
 
@@ -198,7 +289,10 @@ fn cmd_decrypt(file: String, identity_path: Option<String>, output: Option<Strin
     } else {
         let name = input_path.file_name().unwrap().to_string_lossy();
         let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
-        input_path.parent().unwrap_or(std::path::Path::new(".")).join(out_name)
+        input_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join(out_name)
     };
 
     // REQ-42: prevent path traversal
@@ -206,20 +300,28 @@ fn cmd_decrypt(file: String, identity_path: Option<String>, output: Option<Strin
     repo::validate_write_path(&repo_root, &out_path)?;
 
     // REQ-51: streaming decryption
-    let tmp = tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp =
+        tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
     {
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut out_file = std::io::BufWriter::new(tmp.as_file());
         crypto::decrypt_stream(&identity, in_file, &mut out_file)?;
     }
-    tmp.persist(&out_path).map_err(|e| GitvaultError::Io(e.error))?;
+    tmp.persist(&out_path)
+        .map_err(|e| GitvaultError::Io(e.error))?;
 
     output_success(&format!("Decrypted to {}", out_path.display()), json);
     Ok(())
 }
 
 /// Materialize secrets to root .env
-fn cmd_materialize(env_override: Option<String>, identity_path: Option<String>, prod: bool, json: bool, no_prompt: bool) -> Result<(), GitvaultError> {
+fn cmd_materialize(
+    env_override: Option<String>,
+    identity_path: Option<String>,
+    prod: bool,
+    json: bool,
+    no_prompt: bool,
+) -> Result<(), GitvaultError> {
     let repo_root = find_repo_root()?;
     let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
 
@@ -252,7 +354,12 @@ fn cmd_materialize(env_override: Option<String>, identity_path: Option<String>, 
                         }
                     }
                     // REQ-40: fail closed on any decryption error
-                    Err(e) => return Err(GitvaultError::Decryption(format!("Failed to decrypt {}: {e}", path.display()))),
+                    Err(e) => {
+                        return Err(GitvaultError::Decryption(format!(
+                            "Failed to decrypt {}: {e}",
+                            path.display()
+                        )));
+                    }
                 }
             }
         }
@@ -260,7 +367,13 @@ fn cmd_materialize(env_override: Option<String>, identity_path: Option<String>, 
 
     materialize::materialize_env_file(&repo_root, &secrets)?;
 
-    output_success(&format!("Materialized {} secrets to .env (env: {env})", secrets.len()), json);
+    output_success(
+        &format!(
+            "Materialized {} secrets to .env (env: {env})",
+            secrets.len()
+        ),
+        json,
+    );
     Ok(())
 }
 
@@ -279,11 +392,14 @@ fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<(), GitvaultError> {
     }
 
     if json {
-        println!("{}", serde_json::json!({
-            "status": "ok",
-            "env": env,
-            "plaintext_leaked": false
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "status": "ok",
+                "env": env,
+                "plaintext_leaked": false
+            })
+        );
     } else {
         println!("Status: OK");
         println!("Environment: {env}");
@@ -298,11 +414,15 @@ fn cmd_harden(json: bool) -> Result<(), GitvaultError> {
     let repo_root = find_repo_root()?;
     materialize::ensure_gitignored(&repo_root, materialize::REQUIRED_GITIGNORE_ENTRIES)?;
     repo::install_git_hooks(&repo_root)?;
-    output_success("Repository hardened: .gitignore updated, git hooks installed.", json);
+    output_success(
+        "Repository hardened: .gitignore updated, git hooks installed.",
+        json,
+    );
     Ok(())
 }
 
 /// Run a command with secrets injected as environment variables (REQ-21..25)
+#[allow(clippy::too_many_arguments)]
 fn cmd_run(
     env_override: Option<String>,
     identity_path: Option<String>,
@@ -314,7 +434,9 @@ fn cmd_run(
     no_prompt: bool,
 ) -> Result<(), GitvaultError> {
     if command.is_empty() {
-        return Err(GitvaultError::Usage("No command specified after --".to_string()));
+        return Err(GitvaultError::Usage(
+            "No command specified after --".to_string(),
+        ));
     }
 
     let repo_root = find_repo_root()?;
@@ -341,14 +463,21 @@ fn cmd_run(
                         let text = String::from_utf8_lossy(&plaintext);
                         for line in text.lines() {
                             let line = line.trim();
-                            if line.is_empty() || line.starts_with('#') { continue; }
+                            if line.is_empty() || line.starts_with('#') {
+                                continue;
+                            }
                             if let Some((k, v)) = line.split_once('=') {
                                 secrets.push((k.trim().to_string(), v.trim().to_string()));
                             }
                         }
                     }
                     // REQ-40: fail closed on any decryption error
-                    Err(e) => return Err(GitvaultError::Decryption(format!("Failed to decrypt {}: {e}", path.display()))),
+                    Err(e) => {
+                        return Err(GitvaultError::Decryption(format!(
+                            "Failed to decrypt {}: {e}",
+                            path.display()
+                        )));
+                    }
                 }
             }
         }
@@ -364,7 +493,7 @@ fn cmd_run(
     let args = &command[1..];
 
     // REQ-22, REQ-23: inject and run
-    let exit_code = run::run_command(&secrets, cmd, &args.to_vec(), clear_env, &pass_vars)?;
+    let exit_code = run::run_command(&secrets, cmd, args, clear_env, &pass_vars)?;
     std::process::exit(exit_code);
 }
 
@@ -410,7 +539,8 @@ fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), Gi
     all_keys.extend(theirs_map.keys().cloned());
 
     // Three-way merge per key
-    let mut merged_map: std::collections::BTreeMap<String, Option<String>> = std::collections::BTreeMap::new();
+    let mut merged_map: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
     let mut has_conflict = false;
 
     for key in &all_keys {
@@ -443,7 +573,9 @@ fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), Gi
             let theirs_line = theirs_val
                 .map(|v| format!("{key}={v}"))
                 .unwrap_or_else(|| format!("# {key} deleted in theirs"));
-            Some(format!("<<<<<<< ours\n{ours_line}\n=======\n{theirs_line}\n>>>>>>> theirs"))
+            Some(format!(
+                "<<<<<<< ours\n{ours_line}\n=======\n{theirs_line}\n>>>>>>> theirs"
+            ))
         };
         merged_map.insert(key.clone(), merged);
     }
@@ -458,13 +590,11 @@ fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), Gi
             output_lines.push(line.to_string());
         } else if let Some((k, _)) = trimmed.split_once('=') {
             let k = k.trim().to_string();
-            if let Some(val_opt) = merged_map.get(&k) {
-                if let Some(val) = val_opt {
-                    if val.starts_with("<<<<<<") {
-                        output_lines.push(val.clone());
-                    } else {
-                        output_lines.push(format!("{k}={val}"));
-                    }
+            if let Some(Some(val)) = merged_map.get(&k) {
+                if val.starts_with("<<<<<<") {
+                    output_lines.push(val.clone());
+                } else {
+                    output_lines.push(format!("{k}={val}"));
                 }
                 // If None → key was deleted, skip it
             }
@@ -474,13 +604,13 @@ fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), Gi
 
     // Append keys that are new (not in ours)
     for (k, val_opt) in &merged_map {
-        if !processed_keys.contains(k) {
-            if let Some(val) = val_opt {
-                if val.starts_with("<<<<<<") {
-                    output_lines.push(val.clone());
-                } else {
-                    output_lines.push(format!("{k}={val}"));
-                }
+        if !processed_keys.contains(k)
+            && let Some(val) = val_opt
+        {
+            if val.starts_with("<<<<<<") {
+                output_lines.push(val.clone());
+            } else {
+                output_lines.push(format!("{k}={val}"));
             }
         }
     }
@@ -504,7 +634,9 @@ fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), GitvaultErro
             crypto::parse_recipient(&pubkey)?;
             let mut recipients = repo::read_recipients(&repo_root)?;
             if recipients.contains(&pubkey) {
-                return Err(GitvaultError::Usage(format!("Recipient already present: {pubkey}")));
+                return Err(GitvaultError::Usage(format!(
+                    "Recipient already present: {pubkey}"
+                )));
             }
             recipients.push(pubkey.clone());
             repo::write_recipients(&repo_root, &recipients)?;
@@ -515,7 +647,9 @@ fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), GitvaultErro
             let before = recipients.len();
             recipients.retain(|r| r != &pubkey);
             if recipients.len() == before {
-                return Err(GitvaultError::Usage(format!("Recipient not found: {pubkey}")));
+                return Err(GitvaultError::Usage(format!(
+                    "Recipient not found: {pubkey}"
+                )));
             }
             repo::write_recipients(&repo_root, &recipients)?;
             output_success(&format!("Removed recipient: {pubkey}"), json);
@@ -554,8 +688,11 @@ fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<(), GitvaultE
                 let ciphertext = std::fs::read(&path)?;
                 let plaintext = crypto::decrypt(&identity, &ciphertext)?;
                 // Re-parse recipients fresh for each file (Recipient is not Clone)
-                let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys.iter()
-                    .map(|k| Ok(Box::new(crypto::parse_recipient(k)?) as Box<dyn age::Recipient + Send>))
+                let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
+                    .iter()
+                    .map(|k| {
+                        Ok(Box::new(crypto::parse_recipient(k)?) as Box<dyn age::Recipient + Send>)
+                    })
                     .collect::<Result<Vec<_>, GitvaultError>>()?;
                 let new_ciphertext = crypto::encrypt(recipients, &plaintext)?;
                 let tmp = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
@@ -565,7 +702,13 @@ fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<(), GitvaultE
             }
         }
     }
-    output_success(&format!("Rotated {rotated} secret(s) to {} recipient(s)", recipient_keys.len()), json);
+    output_success(
+        &format!(
+            "Rotated {rotated} secret(s) to {} recipient(s)",
+            recipient_keys.len()
+        ),
+        json,
+    );
     Ok(())
 }
 
@@ -599,7 +742,11 @@ fn cmd_keyring(action: KeyringAction, json: bool) -> Result<(), GitvaultError> {
 }
 
 /// Run preflight validation without side effects (REQ-50)
-fn cmd_check(env_override: Option<String>, identity_path: Option<String>, json: bool) -> Result<(), GitvaultError> {
+fn cmd_check(
+    env_override: Option<String>,
+    identity_path: Option<String>,
+    json: bool,
+) -> Result<(), GitvaultError> {
     let repo_root = find_repo_root()?;
     let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
 
@@ -614,7 +761,9 @@ fn cmd_check(env_override: Option<String>, identity_path: Option<String>, json: 
     let recipients = repo::read_recipients(&repo_root)?;
     for key in &recipients {
         crypto::parse_recipient(key).map_err(|e| {
-            GitvaultError::Usage(format!("Invalid recipient in .secrets/recipients: {key}: {e}"))
+            GitvaultError::Usage(format!(
+                "Invalid recipient in .secrets/recipients: {key}: {e}"
+            ))
         })?;
     }
 
@@ -630,14 +779,17 @@ fn cmd_check(env_override: Option<String>, identity_path: Option<String>, json: 
     };
 
     if json {
-        println!("{}", serde_json::json!({
-            "status": "ok",
-            "env": env,
-            "identity": "valid",
-            "recipients": recipients.len(),
-            "secrets": secrets_count,
-            "format_version": crypto::GITVAULT_FORMAT_VERSION,
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "status": "ok",
+                "env": env,
+                "identity": "valid",
+                "recipients": recipients.len(),
+                "secrets": secrets_count,
+                "format_version": crypto::GITVAULT_FORMAT_VERSION,
+            })
+        );
     } else {
         println!("✅ Preflight check passed");
         println!("   Environment : {env}");
@@ -710,13 +862,20 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let previous = std::env::var("GITVAULT_IDENTITY").ok();
-        unsafe { std::env::set_var("GITVAULT_IDENTITY", identity_secret.expose_secret()); }
+        unsafe {
+            std::env::set_var("GITVAULT_IDENTITY", identity_secret.expose_secret());
+        }
 
-        let resolved = resolve_recipient_keys(dir.path(), vec![]).expect("default recipient resolution should succeed");
+        let resolved = resolve_recipient_keys(dir.path(), vec![])
+            .expect("default recipient resolution should succeed");
 
         match previous {
-            Some(value) => unsafe { std::env::set_var("GITVAULT_IDENTITY", value); },
-            None => unsafe { std::env::remove_var("GITVAULT_IDENTITY"); },
+            Some(value) => unsafe {
+                std::env::set_var("GITVAULT_IDENTITY", value);
+            },
+            None => unsafe {
+                std::env::remove_var("GITVAULT_IDENTITY");
+            },
         }
 
         assert_eq!(resolved, vec![expected_recipient]);
@@ -741,11 +900,16 @@ mod tests {
             );
         }
 
-        let resolved = resolve_recipient_keys(dir.path(), vec![]).expect("default recipient resolution should succeed");
+        let resolved = resolve_recipient_keys(dir.path(), vec![])
+            .expect("default recipient resolution should succeed");
 
         match previous {
-            Some(value) => unsafe { std::env::set_var("GITVAULT_IDENTITY", value); },
-            None => unsafe { std::env::remove_var("GITVAULT_IDENTITY"); },
+            Some(value) => unsafe {
+                std::env::set_var("GITVAULT_IDENTITY", value);
+            },
+            None => unsafe {
+                std::env::remove_var("GITVAULT_IDENTITY");
+            },
         }
 
         assert_eq!(resolved, vec![expected_recipient]);
@@ -764,12 +928,20 @@ mod tests {
         let result = resolve_recipient_keys(dir.path(), vec![]);
 
         match previous {
-            Some(value) => unsafe { std::env::set_var("GITVAULT_IDENTITY", value); },
-            None => unsafe { std::env::remove_var("GITVAULT_IDENTITY"); },
+            Some(value) => unsafe {
+                std::env::set_var("GITVAULT_IDENTITY", value);
+            },
+            None => unsafe {
+                std::env::remove_var("GITVAULT_IDENTITY");
+            },
         }
         match previous_keyring {
-            Some(value) => unsafe { std::env::set_var("GITVAULT_KEYRING", value); },
-            None => unsafe { std::env::remove_var("GITVAULT_KEYRING"); },
+            Some(value) => unsafe {
+                std::env::set_var("GITVAULT_KEYRING", value);
+            },
+            None => unsafe {
+                std::env::remove_var("GITVAULT_KEYRING");
+            },
         }
 
         match result {
@@ -784,13 +956,19 @@ mod tests {
     fn test_resolve_recipient_keys_fails_with_malformed_identity_key() {
         let dir = TempDir::new().unwrap();
         let previous = std::env::var("GITVAULT_IDENTITY").ok();
-        unsafe { std::env::set_var("GITVAULT_IDENTITY", "AGE-SECRET-KEY-INVALID"); }
+        unsafe {
+            std::env::set_var("GITVAULT_IDENTITY", "AGE-SECRET-KEY-INVALID");
+        }
 
         let result = resolve_recipient_keys(dir.path(), vec![]);
 
         match previous {
-            Some(value) => unsafe { std::env::set_var("GITVAULT_IDENTITY", value); },
-            None => unsafe { std::env::remove_var("GITVAULT_IDENTITY"); },
+            Some(value) => unsafe {
+                std::env::set_var("GITVAULT_IDENTITY", value);
+            },
+            None => unsafe {
+                std::env::remove_var("GITVAULT_IDENTITY");
+            },
         }
 
         match result {
@@ -807,14 +985,15 @@ mod tests {
         let identity_secret = identity.to_string();
         let identity_file = NamedTempFile::new().expect("temp file should be created");
 
-        std::fs::write(identity_file.path(), format!("{}\n", identity_secret.expose_secret()))
-            .expect("identity should be written to temp file");
-
-        let loaded = load_identity_source(
-            &identity_file.path().to_string_lossy(),
-            "GITVAULT_IDENTITY",
+        std::fs::write(
+            identity_file.path(),
+            format!("{}\n", identity_secret.expose_secret()),
         )
-        .expect("identity file with newline should parse");
+        .expect("identity should be written to temp file");
+
+        let loaded =
+            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
+                .expect("identity file with newline should parse");
 
         assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
     }
@@ -833,11 +1012,9 @@ mod tests {
         std::fs::write(identity_file.path(), key_file_content)
             .expect("identity should be written to temp file");
 
-        let loaded = load_identity_source(
-            &identity_file.path().to_string_lossy(),
-            "GITVAULT_IDENTITY",
-        )
-        .expect("age-keygen style identity file should parse");
+        let loaded =
+            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
+                .expect("age-keygen style identity file should parse");
 
         assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
     }
@@ -861,10 +1038,12 @@ mod tests {
             base.to_string_lossy().to_string(),
             ours.to_string_lossy().to_string(),
             theirs.to_string_lossy().to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&ours).unwrap();
-        let kv: std::collections::HashMap<_, _> = result.lines()
+        let kv: std::collections::HashMap<_, _> = result
+            .lines()
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .filter_map(|l| l.split_once('='))
             .collect();

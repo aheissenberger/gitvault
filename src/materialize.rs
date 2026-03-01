@@ -6,10 +6,7 @@ use tempfile::NamedTempFile;
 use crate::error::GitvaultError;
 
 /// Entries that must be in .gitignore for safety
-pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[
-    ".env",
-    ".secrets/plain/",
-];
+pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[".env", ".secrets/plain/"];
 
 /// Materialize decrypted secrets to the root-level `.env` file.
 ///
@@ -18,7 +15,10 @@ pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[
 /// REQ-18: 0600 permissions on POSIX
 /// REQ-19: deterministic output (sorted keys, canonical quoting)
 /// REQ-20: ensures .env is in .gitignore first
-pub fn materialize_env_file(repo_root: &Path, secrets: &[(String, String)]) -> Result<(), GitvaultError> {
+pub fn materialize_env_file(
+    repo_root: &Path,
+    secrets: &[(String, String)],
+) -> Result<(), GitvaultError> {
     // REQ-20: ensure .env is in .gitignore before writing
     ensure_gitignored(repo_root, &[".env", ".secrets/plain/"])?;
 
@@ -32,8 +32,7 @@ pub fn materialize_env_file(repo_root: &Path, secrets: &[(String, String)]) -> R
     let content = format_env_content(&sorted);
 
     // REQ-17: atomic write using tempfile in same directory
-    let mut tmp = NamedTempFile::new_in(repo_root)
-        .map_err(GitvaultError::Io)?;
+    let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
 
     tmp.write_all(content.as_bytes())
         .map_err(GitvaultError::Io)?;
@@ -43,17 +42,14 @@ pub fn materialize_env_file(repo_root: &Path, secrets: &[(String, String)]) -> R
     {
         use std::os::unix::fs::PermissionsExt;
         let file = tmp.as_file();
-        let mut perms = file.metadata()
-            .map_err(GitvaultError::Io)?
-            .permissions();
+        let mut perms = file.metadata().map_err(GitvaultError::Io)?.permissions();
         perms.set_mode(0o600);
-        file.set_permissions(perms)
-            .map_err(GitvaultError::Io)?;
+        file.set_permissions(perms).map_err(GitvaultError::Io)?;
     }
 
     // REQ-17: atomically rename to target (persist moves the temp file)
     tmp.persist(&env_path)
-        .map_err(|e| GitvaultError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
 
     Ok(())
 }
@@ -115,12 +111,11 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
     }
 
     if changed {
-        let mut tmp = NamedTempFile::new_in(repo_root)
-            .map_err(GitvaultError::Io)?;
+        let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
         tmp.write_all(content.as_bytes())
             .map_err(GitvaultError::Io)?;
         tmp.persist(&gitignore_path)
-            .map_err(|e| GitvaultError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
     }
 
     Ok(())
@@ -129,14 +124,17 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     fn make_secrets(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
@@ -144,7 +142,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".gitignore"), "").unwrap();
 
-        let secrets = make_secrets(&[("DB_URL", "postgres://localhost/db"), ("API_KEY", "secret123")]);
+        let secrets = make_secrets(&[
+            ("DB_URL", "postgres://localhost/db"),
+            ("API_KEY", "secret123"),
+        ]);
         materialize_env_file(dir.path(), &secrets).unwrap();
 
         assert!(dir.path().join(".env").exists(), ".env should be created");
@@ -179,7 +180,10 @@ mod tests {
         materialize_env_file(dir.path(), &secrets).unwrap();
         let content2 = fs::read_to_string(dir.path().join(".env")).unwrap();
 
-        assert_eq!(content1, content2, "repeated materialization should be identical");
+        assert_eq!(
+            content1, content2,
+            "repeated materialization should be identical"
+        );
     }
 
     #[test]
@@ -205,7 +209,11 @@ mod tests {
 
         let meta = fs::metadata(dir.path().join(".env")).unwrap();
         let mode = meta.permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, ".env should have 0600 permissions, got {:o}", mode);
+        assert_eq!(
+            mode, 0o600,
+            ".env should have 0600 permissions, got {:o}",
+            mode
+        );
     }
 
     #[test]
@@ -216,7 +224,10 @@ mod tests {
 
         let content = fs::read_to_string(dir.path().join(".gitignore")).unwrap();
         assert!(content.contains(".env"), ".gitignore should contain .env");
-        assert!(content.contains(".secrets/plain/"), ".gitignore should contain .secrets/plain/");
+        assert!(
+            content.contains(".secrets/plain/"),
+            ".gitignore should contain .secrets/plain/"
+        );
     }
 
     #[test]
@@ -227,7 +238,11 @@ mod tests {
         ensure_gitignored(dir.path(), &[".env", ".secrets/plain/"]).unwrap();
 
         let content = fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-        assert_eq!(content.matches(".env").count(), 1, ".env should appear exactly once");
+        assert_eq!(
+            content.matches(".env").count(),
+            1,
+            ".env should appear exactly once"
+        );
     }
 
     #[test]
