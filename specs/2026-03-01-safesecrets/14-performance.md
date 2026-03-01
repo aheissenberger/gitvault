@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-014"
 title: "Performance and scaling requirements"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

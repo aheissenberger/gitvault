@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-016"
 title: "Release signing and deterministic versioning"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

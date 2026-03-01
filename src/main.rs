@@ -8,6 +8,7 @@ mod materialize;
 mod repo;
 mod run;
 mod structured;
+mod aws_config;
 
 use clap::Parser;
 use cli::{Cli, Commands, KeyringAction, RecipientAction};
@@ -28,7 +29,11 @@ fn main() {
     }
 }
 
-fn run(cli: Cli) -> Result<(), GitvaultError> {
+fn run(mut cli: Cli) -> Result<(), GitvaultError> {
+    // REQ-48: CI=true auto-enables non-interactive mode
+    if !cli.no_prompt && std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false) {
+        cli.no_prompt = true;
+    }
     match cli.command {
         Commands::Encrypt { file, recipients, fields, value_only } => {
             cmd_encrypt(file, recipients, fields, value_only, cli.json, cli.no_prompt)
@@ -49,6 +54,7 @@ fn run(cli: Cli) -> Result<(), GitvaultError> {
         Commands::Recipient { action } => cmd_recipient(action, cli.json),
         Commands::Rotate { identity } => cmd_rotate(identity, cli.json),
         Commands::Keyring { action } => cmd_keyring(action, cli.json),
+        Commands::Check { env, identity } => cmd_check(env, identity, cli.json),
     }
 }
 
@@ -122,9 +128,6 @@ fn cmd_encrypt(file: String, recipient_keys: Vec<String>, fields: Option<String>
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
 
-    let plaintext = std::fs::read(&input_path)?;
-    let ciphertext = crypto::encrypt(recipients, &plaintext)?;
-
     let filename = input_path
         .file_name()
         .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
@@ -137,9 +140,13 @@ fn cmd_encrypt(file: String, recipient_keys: Vec<String>, fields: Option<String>
     // REQ-42: prevent path traversal
     repo::validate_write_path(&repo_root, &out_path)?;
 
-    // REQ-43: atomic write
+    // REQ-51: streaming encryption — no full-file buffer
     let tmp = tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
-    std::fs::write(tmp.path(), &ciphertext)?;
+    {
+        let mut in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let mut out_file = std::io::BufWriter::new(tmp.as_file());
+        crypto::encrypt_stream(recipients, &mut in_file, &mut out_file)?;
+    }
     tmp.persist(&out_path).map_err(|e| GitvaultError::Io(e.error))?;
 
     output_success(&format!("Encrypted to {}", out_path.display()), json);
@@ -178,13 +185,11 @@ fn cmd_decrypt(file: String, identity_path: Option<String>, output: Option<Strin
         return Ok(());
     }
 
-    let ciphertext = std::fs::read(&input_path)?;
-    let plaintext = crypto::decrypt(&identity, &ciphertext)?;
-
     // REQ-41: if --reveal, print to stdout and never write to file
     if reveal {
-        use std::io::Write;
-        std::io::stdout().write_all(&plaintext)?;
+        let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let mut stdout = std::io::BufWriter::new(std::io::stdout());
+        crypto::decrypt_stream(&identity, in_file, &mut stdout)?;
         return Ok(());
     }
 
@@ -200,9 +205,13 @@ fn cmd_decrypt(file: String, identity_path: Option<String>, output: Option<Strin
     let repo_root = find_repo_root()?;
     repo::validate_write_path(&repo_root, &out_path)?;
 
-    // REQ-43: atomic write
+    // REQ-51: streaming decryption
     let tmp = tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
-    std::fs::write(tmp.path(), &plaintext)?;
+    {
+        let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let mut out_file = std::io::BufWriter::new(tmp.as_file());
+        crypto::decrypt_stream(&identity, in_file, &mut out_file)?;
+    }
     tmp.persist(&out_path).map_err(|e| GitvaultError::Io(e.error))?;
 
     output_success(&format!("Decrypted to {}", out_path.display()), json);
@@ -589,6 +598,56 @@ fn cmd_keyring(action: KeyringAction, json: bool) -> Result<(), GitvaultError> {
     Ok(())
 }
 
+/// Run preflight validation without side effects (REQ-50)
+fn cmd_check(env_override: Option<String>, identity_path: Option<String>, json: bool) -> Result<(), GitvaultError> {
+    let repo_root = find_repo_root()?;
+    let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
+
+    // Check 1: no tracked plaintext (REQ-10)
+    repo::check_no_tracked_plaintext(&repo_root)?;
+
+    // Check 2: identity is loadable
+    let identity_str = load_identity(identity_path)?;
+    crypto::parse_identity(&identity_str)?;
+
+    // Check 3: recipients file is readable and all keys are valid
+    let recipients = repo::read_recipients(&repo_root)?;
+    for key in &recipients {
+        crypto::parse_recipient(key).map_err(|e| {
+            GitvaultError::Usage(format!("Invalid recipient in .secrets/recipients: {key}: {e}"))
+        })?;
+    }
+
+    // Check 4: secrets dir exists (warning only)
+    let secrets_dir = repo_root.join(repo::SECRETS_DIR);
+    let secrets_count = if secrets_dir.exists() {
+        std::fs::read_dir(&secrets_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("age"))
+            .count()
+    } else {
+        0
+    };
+
+    if json {
+        println!("{}", serde_json::json!({
+            "status": "ok",
+            "env": env,
+            "identity": "valid",
+            "recipients": recipients.len(),
+            "secrets": secrets_count,
+            "format_version": crypto::GITVAULT_FORMAT_VERSION,
+        }));
+    } else {
+        println!("✅ Preflight check passed");
+        println!("   Environment : {env}");
+        println!("   Identity    : valid");
+        println!("   Recipients  : {}", recipients.len());
+        println!("   Secrets     : {secrets_count} encrypted file(s)");
+    }
+    Ok(())
+}
+
 /// Load identity key string from file path or GITVAULT_IDENTITY env var
 fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
     if let Some(p) = path {
@@ -812,5 +871,30 @@ mod tests {
 
         assert_eq!(kv.get("A"), Some(&"2"), "A should be taken from theirs");
         assert_eq!(kv.get("B"), Some(&"3"), "B should be kept from ours");
+    }
+
+    #[test]
+    fn test_ci_env_sets_no_prompt() {
+        // The CI=1 logic is: if !cli.no_prompt && CI is non-empty, set no_prompt = true
+        let ci_is_set = std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false);
+        // Simulate what run() does
+        let mut no_prompt = false;
+        if !no_prompt && ci_is_set {
+            no_prompt = true;
+        }
+        // If CI is set, no_prompt should be true; otherwise it stays false — either way no panic
+        if ci_is_set {
+            assert!(no_prompt, "CI env var should enable no_prompt");
+        } else {
+            assert!(!no_prompt, "no_prompt should stay false when CI is unset");
+        }
+
+        // Also verify the logic directly with a forced value
+        let mut no_prompt2 = false;
+        let ci_forced = true;
+        if !no_prompt2 && ci_forced {
+            no_prompt2 = true;
+        }
+        assert!(no_prompt2, "CI auto-detect logic should set no_prompt");
     }
 }

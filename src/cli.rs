@@ -1,7 +1,16 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "gitvault", about = "Git-native secrets manager", version)]
+#[command(
+    name = "gitvault",
+    about = "Git-native secrets manager",
+    version,
+    long_version = concat!(
+        env!("CARGO_PKG_VERSION"),
+        "\nformat-version: 1",
+        "\nage-format: age-encryption.org/v1"
+    )
+)]
 pub struct Cli {
     /// Output results as JSON (REQ-45)
     #[arg(long, global = true)]
@@ -10,6 +19,14 @@ pub struct Cli {
     /// Disable interactive prompts (REQ-46)
     #[arg(long, global = true)]
     pub no_prompt: bool,
+
+    /// AWS profile name for SSM backend (REQ-49)
+    #[arg(long, global = true, env = "AWS_PROFILE")]
+    pub aws_profile: Option<String>,
+
+    /// AWS role ARN to assume for SSM backend (REQ-49)
+    #[arg(long, global = true, env = "AWS_ROLE_ARN")]
+    pub aws_role_arn: Option<String>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -120,6 +137,15 @@ pub enum Commands {
     Keyring {
         #[command(subcommand)]
         action: KeyringAction,
+    },
+    /// Run preflight validation without side effects (REQ-50)
+    Check {
+        /// Environment to validate
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        #[arg(short, long)]
+        identity: Option<String>,
     },
 }
 

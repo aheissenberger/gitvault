@@ -2,6 +2,10 @@ use age::{x25519, Decryptor, Encryptor};
 use crate::error::GitvaultError;
 use std::io::{Read, Write};
 
+/// Gitvault encrypted format version (REQ-55).
+/// Increment when the encryption format changes incompatibly.
+pub const GITVAULT_FORMAT_VERSION: u32 = 1;
+
 /// Parse an age X25519 public key string into a Recipient.
 pub fn parse_recipient(pubkey: &str) -> Result<x25519::Recipient, GitvaultError> {
     pubkey
@@ -62,6 +66,48 @@ pub fn decrypt(identity: &dyn age::Identity, ciphertext: &[u8]) -> Result<Vec<u8
         .map_err(|e| GitvaultError::Decryption(format!("Failed to read decrypted data: {e}")))?;
 
     Ok(plaintext)
+}
+
+/// REQ-51: Streaming encryption from a reader to a writer.
+pub fn encrypt_stream(
+    recipients: Vec<Box<dyn age::Recipient + Send>>,
+    reader: &mut impl std::io::Read,
+    writer: &mut impl std::io::Write,
+) -> Result<(), GitvaultError> {
+    let encryptor = Encryptor::with_recipients(recipients)
+        .ok_or_else(|| GitvaultError::Encryption("At least one recipient required".to_string()))?;
+    let mut age_writer = encryptor
+        .wrap_output(writer)
+        .map_err(|e| GitvaultError::Encryption(format!("Failed to create encrypted writer: {e}")))?;
+    std::io::copy(reader, &mut age_writer)
+        .map_err(|e| GitvaultError::Encryption(format!("Failed to stream plaintext: {e}")))?;
+    age_writer
+        .finish()
+        .map_err(|e| GitvaultError::Encryption(format!("Failed to finalize encryption: {e}")))?;
+    Ok(())
+}
+
+/// REQ-51: Streaming decryption from a reader to a writer.
+pub fn decrypt_stream(
+    identity: &dyn age::Identity,
+    reader: impl std::io::Read,
+    writer: &mut impl std::io::Write,
+) -> Result<(), GitvaultError> {
+    let decryptor = Decryptor::new(reader)
+        .map_err(|e| GitvaultError::Decryption(format!("Failed to create decryptor: {e}")))?;
+    let mut age_reader = match decryptor {
+        Decryptor::Recipients(d) => d
+            .decrypt(std::iter::once(identity))
+            .map_err(|e| GitvaultError::Decryption(format!("Decryption failed: {e}")))?,
+        Decryptor::Passphrase(_) => {
+            return Err(GitvaultError::Decryption(
+                "Passphrase-encrypted files not supported".to_string(),
+            ));
+        }
+    };
+    std::io::copy(&mut age_reader, writer)
+        .map_err(|e| GitvaultError::Decryption(format!("Failed to stream plaintext: {e}")))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -139,6 +185,23 @@ mod tests {
         let plaintext = b"test";
         let ciphertext = encrypt(recipients, plaintext).expect("encrypt failed");
         let decrypted = decrypt(&identity, &ciphertext).expect("decrypt failed");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_stream_decrypt_stream_roundtrip() {
+        let identity = gen_identity();
+        let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
+
+        let plaintext = b"STREAM_SECRET=hunter2\nDB_PASSWORD=correct-horse";
+        let mut reader = std::io::Cursor::new(plaintext.as_ref());
+        let mut ciphertext = Vec::new();
+        encrypt_stream(vec![recipient], &mut reader, &mut ciphertext).expect("encrypt_stream failed");
+
+        assert!(!ciphertext.windows(10).any(|w| w == b"STREAM_SEC"), "ciphertext should not contain plaintext");
+
+        let mut decrypted = Vec::new();
+        decrypt_stream(&identity, std::io::Cursor::new(&ciphertext), &mut decrypted).expect("decrypt_stream failed");
         assert_eq!(decrypted, plaintext);
     }
 }

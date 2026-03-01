@@ -3,7 +3,7 @@
 A Git-native secrets manager for multi-developer and multi-agent workflows. Secrets are encrypted
 with [age](https://age-encryption.org) and stored in your repository — never plaintext.
 
-## Features (MVP — 96% of full spec)
+## Features (MVP — 91% of full spec; SSM backend pending)
 
 - **age encryption** — standard file format, native Rust, no external binaries required (REQ-1, 2)
 - **Multi-recipient** — encrypt once for every team member; any recipient can decrypt (REQ-3)
@@ -33,8 +33,20 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager) (REQ-39)
 - **Security hardening** — fail-closed on decrypt error, `--reveal` required to print secrets,
   path-traversal guard, atomic writes everywhere, `status` never decrypts (REQ-40–44)
-- **JSON output & non-interactive mode** — all commands accept `--json` and `--no-prompt` (REQ-45, 46)
+- **JSON output & non-interactive mode** — all commands accept `--json` and `--no-prompt`;
+  `CI=true` auto-enables non-interactive mode (REQ-45–48)
+- **Preflight check** — `gitvault check` validates identity, recipients, and secrets dir without
+  side effects (REQ-50)
+- **Streaming crypto** — encryption and decryption are streaming-capable; no full-file buffering
+  for large files (REQ-51, 52)
+- **AWS auth config** — `--aws-profile` / `--aws-role-arn` global flags (and env vars) for future
+  SSM backend integration (REQ-49)
+- **Signed releases** — CI produces cosign-signed binaries for Linux, macOS, and Windows (REQ-54)
+- **Format versioning** — `GITVAULT_FORMAT_VERSION=1`; visible in `gitvault --version` (REQ-55)
 - **Stable exit codes** — documented, machine-readable (REQ-47)
+- **Spec gate** — `cargo xtask spec-verify` enforces frontmatter on every requirement spec (REQ-56)
+
+> **Not yet implemented**: REQ-26..30 (AWS SSM backend — pull/push/diff/set with SSM Parameter Store)
 
 ---
 
@@ -109,8 +121,10 @@ gitvault --json status   # machine-readable
 gitvault [OPTIONS] <COMMAND>
 
 Options:
-  --json        Output as JSON (all commands)
-  --no-prompt   Non-interactive / CI mode (all commands)
+  --json           Output as JSON (all commands)
+  --no-prompt      Non-interactive / CI mode (all commands; auto-set when CI=true)
+  --aws-profile    AWS profile for SSM backend (or AWS_PROFILE env var)
+  --aws-role-arn   AWS role ARN to assume for SSM backend (or AWS_ROLE_ARN env var)
 
 Commands:
   encrypt       Encrypt a file → secrets/<name>.age  (or field-level for JSON/YAML/TOML)
@@ -124,6 +138,7 @@ Commands:
   rotate        Re-encrypt all secrets with the current recipients list
   keyring       Store/retrieve identity key in the OS keyring
   merge-driver  Git merge driver for key-level .env merges
+  check         Preflight validation without side effects
   help          Print help
 ```
 
@@ -259,6 +274,24 @@ Register once per repository:
 ```bash
 git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"
 echo '.env merge=gitvault-env' >> .gitattributes
+```
+
+### `check`
+
+```
+gitvault check [--env <ENV>] [--identity <KEY_FILE>]
+```
+
+Preflight validation without any side effects (REQ-50). Checks:
+1. No tracked plaintext in the repository
+2. Identity is loadable and parseable
+3. All keys in `.secrets/recipients` are valid age public keys
+4. Reports secret file count and resolved environment
+
+```bash
+gitvault check                        # human-readable
+gitvault --json check                 # machine-readable (includes format_version)
+CI=true gitvault check --no-prompt   # CI usage (auto-set by CI=true)
 ```
 
 ---
@@ -400,9 +433,38 @@ parallel multi-agent development without environment cross-contamination.
 | `MACOS_CERTIFICATE_PASSWORD` | Certificate password |
 | `MACOS_KEYCHAIN_PASSWORD` | Keychain password |
 | `MACOS_SIGNING_IDENTITY` | Signing identity name |
-| `APPLE_ID` | Apple ID for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password |
-| `APPLE_TEAM_ID` | Apple team ID |
+| `APPLE_API_KEY_ID` | App Store Connect API key ID |
+| `APPLE_API_ISSUER_ID` | App Store Connect issuer ID |
+| `APPLE_API_PRIVATE_KEY_P8_BASE64` | Base64-encoded App Store Connect `.p8` private key |
+
+#### API key setup (notarization)
+
+1. In App Store Connect, open [Users and Access → Integrations → App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api), create an API key, and copy the key metadata.
+  - Required role: `Developer` or higher (`App Manager`, `Admin`, or `Account Holder`).
+2. Save the key ID as GitHub secret `APPLE_API_KEY_ID`.
+3. Save the issuer ID as GitHub secret `APPLE_API_ISSUER_ID`.
+4. Base64-encode the downloaded `AuthKey_<KEY_ID>.p8` file and save it as `APPLE_API_PRIVATE_KEY_P8_BASE64`.
+5. Keep the four macOS signing secrets above (`MACOS_*`) unchanged.
+
+#### Migration note (from Apple ID auth)
+
+If no other workflow depends on Apple ID-based notarization, you can remove these old secrets:
+
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+Example (macOS) to encode `.p8`:
+
+```bash
+base64 -i AuthKey_<KEY_ID>.p8 | pbcopy
+```
+
+Example (Linux) to encode `.p8`:
+
+```bash
+base64 -w 0 AuthKey_<KEY_ID>.p8
+```
 
 #### Optional Homebrew tap automation
 

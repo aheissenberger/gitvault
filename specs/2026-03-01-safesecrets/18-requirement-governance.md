@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-018"
 title: "Requirement governance and spec gating"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:

@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-015"
 title: "Cross-platform testing matrix"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:
