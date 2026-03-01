@@ -289,6 +289,8 @@ jobs:
 
       - name: Create pull request in tap repo
         if: steps.tapmeta.outputs.skip == 'false'
+        continue-on-error: true
+        id: tap_pr
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -300,3 +302,9 @@ jobs:
             Automated update from ${{ github.repository }} release.
             - Version: ${{ needs.build-sign-notarize.outputs.version }}
             - SHA256: ${{ needs.build-sign-notarize.outputs.archive_sha256 }}
+
+      - name: Warn if tap PR failed
+        if: steps.tapmeta.outputs.skip == 'false' && steps.tap_pr.outcome == 'failure'
+        run: |
+          echo "Homebrew tap PR creation failed (likely token/repo permissions)."
+          echo "Release artifacts were still published successfully."
