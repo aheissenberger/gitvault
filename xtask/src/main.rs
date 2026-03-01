@@ -30,6 +30,7 @@ enum Task {
     Clippy,
     Test,
     Build,
+    ReleaseCheck,
     Verify,
     SpecInit { spec_name: String },
     SpecVerify,
@@ -53,6 +54,7 @@ impl Task {
             "clippy" => Self::Clippy,
             "test" => Self::Test,
             "build" => Self::Build,
+            "release-check" => Self::ReleaseCheck,
             "verify" => Self::Verify,
             "spec-init" => {
                 if let Some(spec_name) = args.get(1).cloned() {
@@ -104,6 +106,7 @@ impl Task {
             ),
             Self::Test => run("cargo", &["test", "--workspace", "--all-features"]),
             Self::Build => run("cargo", &["build", "--workspace", "--release"]),
+            Self::ReleaseCheck => run_release_check(),
             Self::Verify => run_verify(),
             Self::SpecInit { spec_name } => run_spec_init(&spec_name),
             Self::SpecVerify => run_spec_verify(),
@@ -131,6 +134,77 @@ fn run_verify() -> Result<(), String> {
     Task::Test.run()?;
     Task::Build.run()?;
     Ok(())
+}
+
+fn run_release_check() -> Result<(), String> {
+    let version = read_package_version(Path::new("Cargo.toml"))?;
+    let expected_tag = format!("v{version}");
+
+    let current_tag = run_output("git", &["describe", "--tags", "--exact-match"])?;
+    if current_tag != expected_tag {
+        return Err(format!(
+            "Release check failed: current HEAD tag is '{current_tag}', expected '{expected_tag}' from Cargo.toml version {version}"
+        ));
+    }
+
+    let status = run_output("git", &["status", "--porcelain"])?;
+    if !status.is_empty() {
+        return Err("Release check failed: working tree is dirty".to_string());
+    }
+
+    let object_type = run_output(
+        "git",
+        &[
+            "for-each-ref",
+            &format!("refs/tags/{current_tag}"),
+            "--format=%(objecttype)",
+        ],
+    )?;
+    if object_type != "tag" {
+        return Err(format!(
+            "Release check failed: tag '{current_tag}' is lightweight; annotated tag required"
+        ));
+    }
+
+    println!(
+        "✅ Release check passed: Cargo version {version} matches tag {current_tag}, tree clean, tag annotated"
+    );
+    Ok(())
+}
+
+fn read_package_version(path: &Path) -> Result<String, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+
+    let mut in_package = false;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+
+        if line.starts_with('[') && line.ends_with(']') {
+            in_package = line == "[package]";
+            continue;
+        }
+
+        if !in_package || line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("version") {
+            let Some(rest) = rest.strip_prefix('=') else {
+                continue;
+            };
+
+            let value = rest.trim();
+            if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                return Ok(value[1..value.len() - 1].to_string());
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to locate [package].version in {}",
+        path.display()
+    ))
 }
 
 fn run_spec_init(spec_name: &str) -> Result<(), String> {
@@ -543,10 +617,33 @@ fn run(cmd: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+fn run_output(cmd: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(cmd)
+        .args(args)
+        .output()
+        .map_err(|error| format!("Failed to run `{cmd}`: {error}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!(
+            "Command failed: `{cmd} {}`{}",
+            args.join(" "),
+            if stderr.is_empty() {
+                "".to_string()
+            } else {
+                format!(" ({stderr})")
+            }
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn print_help() {
     println!("Usage: cargo xtask <command> [args]");
     println!("  verify (default): run fmt + clippy + instructions-lint + test + build");
     println!("  fmt|clippy|test|build");
+    println!("  release-check: validate tag/version parity and release hygiene");
     println!("  spec-init <SPEC_FOLDER_NAME>");
     println!("  spec-verify");
     println!("  instructions-lint");
@@ -801,6 +898,12 @@ mod tests {
     }
 
     #[test]
+    fn from_args_parses_release_check() {
+        let parsed = Task::from_args(&args(&["release-check"]));
+        assert!(matches!(parsed, Task::ReleaseCheck));
+    }
+
+    #[test]
     fn validate_spec_name_allows_relative_names() {
         assert!(validate_spec_name("2026-03-01-feature-x").is_ok());
         assert!(validate_spec_name("features/2026-03-01-feature-x").is_ok());
@@ -836,19 +939,19 @@ mod tests {
 
         write_file(
             &root.join(".copilot/context.md"),
-            "Use `cargo xtask`/aliases for spec/worktree actions\nDo not add or use shell wrappers for spec/worktree flows.\n",
+            "Use `cargo xtask`/aliases for spec/worktree actions\nDo not add or use shell wrappers for spec/worktree flows.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
         write_file(
             &root.join(".copilot/instructions.vscode-ui.md"),
-            "Work only from the referenced spec/task.\nUse `cargo xtask`/aliases for spec/worktree operations.\n",
+            "Work only from the referenced spec/task.\nUse `cargo xtask`/aliases for spec/worktree operations.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
         write_file(
             &root.join(".copilot/instructions.vscode-bg.md"),
-            "Implement only the assigned Task block\nRun `cargo xtask spec-verify`\n",
+            "Implement only the assigned Task block\nRun `cargo xtask spec-verify`\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
         write_file(
             &root.join(".copilot/instructions.cli.md"),
-            "Plan first, then patch.\nUse `cargo xtask`/aliases for spec and worktree tasks.\n",
+            "Plan first, then patch.\nUse `cargo xtask`/aliases for spec and worktree tasks.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
 
         let result = lint_instructions(&root);

@@ -8,7 +8,11 @@ use clap::{Parser, Subcommand};
     long_version = concat!(
         env!("CARGO_PKG_VERSION"),
         "\nformat-version: 1",
-        "\nage-format: age-encryption.org/v1"
+        "\nage-format: age-encryption.org/v1",
+        "\ngit-sha: ",
+        env!("GITVAULT_GIT_SHA"),
+        "\ngit-commit-date: ",
+        env!("GITVAULT_GIT_COMMIT_DATE")
     )
 )]
 pub struct Cli {
