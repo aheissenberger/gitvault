@@ -256,12 +256,31 @@ jobs:
           RELEASE_URL: ${{ steps.tapmeta.outputs.release_url }}
           VERSION: ${{ steps.tapmeta.outputs.version }}
           SHA256: ${{ steps.tapmeta.outputs.sha256 }}
+          BINARY_NAME: ${{ needs.build-sign-notarize.outputs.binary_name }}
         run: |
           set -euo pipefail
           file="tap/${FORMULA_PATH}"
           if [[ ! -f "$file" ]]; then
-            echo "Formula file not found: $file. Skipping tap update."
-            exit 0
+            echo "Formula file not found: $file. Creating new formula."
+            mkdir -p "$(dirname "$file")"
+            class_name="$(echo "${BINARY_NAME}" | tr '-_' ' ' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}}1' | tr -d ' ')"
+            {
+              printf 'class %s < Formula\n' "$class_name"
+              printf '  desc "%s CLI"\n' "$BINARY_NAME"
+              printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
+              printf '  url "%s"\n' "$RELEASE_URL"
+              printf '  version "%s"\n' "$VERSION"
+              printf '  sha256 "%s"\n' "$SHA256"
+              printf '\n'
+              printf '  def install\n'
+              printf '    bin.install "%s"\n' "$BINARY_NAME"
+              printf '  end\n'
+              printf '\n'
+              printf '  test do\n'
+              printf '    system "#{bin}/%s", "--help"\n' "$BINARY_NAME"
+              printf '  end\n'
+              printf 'end\n'
+            } > "$file"
           fi
 
           perl -0777 -i -pe "s|url \\\"[^\\\"]+\\\"|url \\\"${RELEASE_URL}\\\"|g" "$file"
