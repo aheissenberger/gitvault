@@ -42,7 +42,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && contains(matrix.target, 'musl')
         run: sudo apt-get install -y musl-tools
 
-      - name: Build release binary
+      - name: Build release binary (stripped via Cargo profile)
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename artifact (Unix)

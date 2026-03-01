@@ -35,8 +35,10 @@ jobs:
       binary_name: ${{ steps.meta.outputs.binary_name }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
       version: ${{ steps.meta.outputs.version }}
-      archive_name: ${{ steps.package.outputs.archive_name }}
-      archive_sha256: ${{ steps.package.outputs.archive_sha256 }}
+      archive_name_aarch64: ${{ steps.package.outputs.archive_name_aarch64 }}
+      archive_sha256_aarch64: ${{ steps.package.outputs.archive_sha256_aarch64 }}
+      archive_name_x86_64: ${{ steps.package.outputs.archive_name_x86_64 }}
+      archive_sha256_x86_64: ${{ steps.package.outputs.archive_sha256_x86_64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,7 +90,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
-      - name: Build both macOS targets
+      - name: Build both macOS targets (stripped via Cargo profile)
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
         run: |
@@ -98,17 +100,15 @@ jobs:
           [[ -f "target/aarch64-apple-darwin/release/${BINARY_NAME}" ]] || { echo "Missing ARM binary" >&2; exit 1; }
           [[ -f "target/x86_64-apple-darwin/release/${BINARY_NAME}" ]] || { echo "Missing x86_64 binary" >&2; exit 1; }
 
-      - name: Create universal binary
+      - name: Prepare per-arch binaries (already stripped)
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-          lipo -create \
-            "target/aarch64-apple-darwin/release/${BINARY_NAME}" \
-            "target/x86_64-apple-darwin/release/${BINARY_NAME}" \
-            -output "dist/${BINARY_NAME}"
-          chmod +x "dist/${BINARY_NAME}"
+          mkdir -p dist/aarch64-apple-darwin dist/x86_64-apple-darwin
+          cp "target/aarch64-apple-darwin/release/${BINARY_NAME}" "dist/aarch64-apple-darwin/${BINARY_NAME}"
+          cp "target/x86_64-apple-darwin/release/${BINARY_NAME}" "dist/x86_64-apple-darwin/${BINARY_NAME}"
+          chmod +x "dist/aarch64-apple-darwin/${BINARY_NAME}" "dist/x86_64-apple-darwin/${BINARY_NAME}"
 
       - name: Import signing certificate
         env:
@@ -129,15 +129,18 @@ jobs:
           security list-keychain -d user -s build.keychain login.keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k "${MACOS_KEYCHAIN_PASSWORD}" build.keychain
 
-      - name: Code sign binary
+      - name: Code sign binaries
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
           MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           [[ -n "${MACOS_SIGNING_IDENTITY}" ]] || { echo "Missing MACOS_SIGNING_IDENTITY" >&2; exit 1; }
-          codesign --force --options runtime --timestamp --sign "${MACOS_SIGNING_IDENTITY}" "dist/${BINARY_NAME}"
-          codesign --verify --verbose=2 "dist/${BINARY_NAME}"
+          for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+            bin="dist/${arch}/${BINARY_NAME}"
+            codesign --force --options runtime --timestamp --sign "${MACOS_SIGNING_IDENTITY}" "${bin}"
+            codesign --verify --verbose=2 "${bin}"
+          done
 
       - name: Package and checksum
         id: package
@@ -146,13 +149,21 @@ jobs:
           RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         run: |
           set -euo pipefail
-          archive_name="${BINARY_NAME}-${RELEASE_TAG}-universal-apple-darwin.tar.gz"
-          tar -C dist -czf "dist/${archive_name}" "${BINARY_NAME}"
-          archive_sha256="$(shasum -a 256 "dist/${archive_name}" | awk '{print $1}')"
-          echo "archive_name=${archive_name}" >> "$GITHUB_OUTPUT"
-          echo "archive_sha256=${archive_sha256}" >> "$GITHUB_OUTPUT"
+          archive_name_aarch64="${BINARY_NAME}-${RELEASE_TAG}-aarch64-apple-darwin.tar.gz"
+          archive_name_x86_64="${BINARY_NAME}-${RELEASE_TAG}-x86_64-apple-darwin.tar.gz"
 
-      - name: Notarize packaged binary
+          tar -C "dist/aarch64-apple-darwin" -czf "dist/${archive_name_aarch64}" "${BINARY_NAME}"
+          tar -C "dist/x86_64-apple-darwin" -czf "dist/${archive_name_x86_64}" "${BINARY_NAME}"
+
+          archive_sha256_aarch64="$(shasum -a 256 "dist/${archive_name_aarch64}" | awk '{print $1}')"
+          archive_sha256_x86_64="$(shasum -a 256 "dist/${archive_name_x86_64}" | awk '{print $1}')"
+
+          echo "archive_name_aarch64=${archive_name_aarch64}" >> "$GITHUB_OUTPUT"
+          echo "archive_sha256_aarch64=${archive_sha256_aarch64}" >> "$GITHUB_OUTPUT"
+          echo "archive_name_x86_64=${archive_name_x86_64}" >> "$GITHUB_OUTPUT"
+          echo "archive_sha256_x86_64=${archive_sha256_x86_64}" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize packaged binaries
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
@@ -163,8 +174,6 @@ jobs:
           [[ -n "${APPLE_API_KEY_ID}" ]] || { echo "Missing APPLE_API_KEY_ID" >&2; exit 1; }
           [[ -n "${APPLE_API_ISSUER_ID}" ]] || { echo "Missing APPLE_API_ISSUER_ID" >&2; exit 1; }
           [[ -n "${APPLE_API_PRIVATE_KEY_P8_BASE64}" ]] || { echo "Missing APPLE_API_PRIVATE_KEY_P8_BASE64" >&2; exit 1; }
-          notarize_zip="dist/${BINARY_NAME}-notarize.zip"
-          ditto -c -k --sequesterRsrc --keepParent "dist/${BINARY_NAME}" "${notarize_zip}"
           api_key_file="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
 
           # Accept both base64-encoded and raw/escaped .p8 secret content.
@@ -177,24 +186,36 @@ jobs:
 
           grep -q "BEGIN PRIVATE KEY" "${api_key_file}" || { echo "APPLE_API_PRIVATE_KEY_P8_BASE64 does not contain a valid .p8 private key" >&2; exit 1; }
 
-          xcrun notarytool submit "${notarize_zip}" \
-            --key "${api_key_file}" \
-            --key-id "${APPLE_API_KEY_ID}" \
-            --issuer "${APPLE_API_ISSUER_ID}" \
-            --wait
+          for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+            notarize_zip="dist/${BINARY_NAME}-${arch}-notarize.zip"
+            ditto -c -k --sequesterRsrc --keepParent "dist/${arch}/${BINARY_NAME}" "${notarize_zip}"
+            xcrun notarytool submit "${notarize_zip}" \
+              --key "${api_key_file}" \
+              --key-id "${APPLE_API_KEY_ID}" \
+              --issuer "${APPLE_API_ISSUER_ID}" \
+              --wait
+          done
           rm -f "${api_key_file}"
 
-      - name: Upload workflow artifact
+      - name: Upload workflow artifact (aarch64)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.package.outputs.archive_name }}
-          path: dist/${{ steps.package.outputs.archive_name }}
+          name: ${{ steps.package.outputs.archive_name_aarch64 }}
+          path: dist/${{ steps.package.outputs.archive_name_aarch64 }}
+
+      - name: Upload workflow artifact (x86_64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.archive_name_x86_64 }}
+          path: dist/${{ steps.package.outputs.archive_name_x86_64 }}
 
       - name: Publish GitHub release asset
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ steps.package.outputs.archive_name }}
+          files: |
+            dist/${{ steps.package.outputs.archive_name_aarch64 }}
+            dist/${{ steps.package.outputs.archive_name_x86_64 }}
 
   update-homebrew-tap:
     environment: homebrew
@@ -214,8 +235,10 @@ jobs:
           BINARY_NAME: ${{ needs.build-sign-notarize.outputs.binary_name }}
           RELEASE_TAG: ${{ needs.build-sign-notarize.outputs.release_tag }}
           VERSION: ${{ needs.build-sign-notarize.outputs.version }}
-          ARCHIVE_NAME: ${{ needs.build-sign-notarize.outputs.archive_name }}
-          ARCHIVE_SHA256: ${{ needs.build-sign-notarize.outputs.archive_sha256 }}
+          ARCHIVE_NAME_AARCH64: ${{ needs.build-sign-notarize.outputs.archive_name_aarch64 }}
+          ARCHIVE_SHA256_AARCH64: ${{ needs.build-sign-notarize.outputs.archive_sha256_aarch64 }}
+          ARCHIVE_NAME_X86_64: ${{ needs.build-sign-notarize.outputs.archive_name_x86_64 }}
+          ARCHIVE_SHA256_X86_64: ${{ needs.build-sign-notarize.outputs.archive_sha256_x86_64 }}
         run: |
           set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
@@ -232,14 +255,17 @@ jobs:
           fi
 
           formula_path="${INPUT_FORMULA_PATH:-${DEFAULT_FORMULA_PATH:-Formula/${BINARY_NAME}.rb}}"
-          release_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME}"
+          release_url_aarch64="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME_AARCH64}"
+          release_url_x86_64="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME_X86_64}"
 
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "tap_repo=${tap_repo}" >> "$GITHUB_OUTPUT"
           echo "formula_path=${formula_path}" >> "$GITHUB_OUTPUT"
-          echo "release_url=${release_url}" >> "$GITHUB_OUTPUT"
+          echo "release_url_aarch64=${release_url_aarch64}" >> "$GITHUB_OUTPUT"
+          echo "release_url_x86_64=${release_url_x86_64}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "sha256=${ARCHIVE_SHA256}" >> "$GITHUB_OUTPUT"
+          echo "sha256_aarch64=${ARCHIVE_SHA256_AARCH64}" >> "$GITHUB_OUTPUT"
+          echo "sha256_x86_64=${ARCHIVE_SHA256_X86_64}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap repository
         if: steps.tapmeta.outputs.skip == 'false'
@@ -253,39 +279,42 @@ jobs:
         if: steps.tapmeta.outputs.skip == 'false'
         env:
           FORMULA_PATH: ${{ steps.tapmeta.outputs.formula_path }}
-          RELEASE_URL: ${{ steps.tapmeta.outputs.release_url }}
+          RELEASE_URL_AARCH64: ${{ steps.tapmeta.outputs.release_url_aarch64 }}
+          RELEASE_URL_X86_64: ${{ steps.tapmeta.outputs.release_url_x86_64 }}
           VERSION: ${{ steps.tapmeta.outputs.version }}
-          SHA256: ${{ steps.tapmeta.outputs.sha256 }}
+          SHA256_AARCH64: ${{ steps.tapmeta.outputs.sha256_aarch64 }}
+          SHA256_X86_64: ${{ steps.tapmeta.outputs.sha256_x86_64 }}
           BINARY_NAME: ${{ needs.build-sign-notarize.outputs.binary_name }}
         run: |
           set -euo pipefail
           file="tap/${FORMULA_PATH}"
-          if [[ ! -f "$file" ]]; then
-            echo "Formula file not found: $file. Creating new formula."
-            mkdir -p "$(dirname "$file")"
-            class_name="$(echo "${BINARY_NAME}" | sed 's/[-_]/ /g' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}}1' | tr -d ' ')"
-            {
-              printf 'class %s < Formula\n' "$class_name"
-              printf '  desc "%s CLI"\n' "$BINARY_NAME"
-              printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
-              printf '  url "%s"\n' "$RELEASE_URL"
-              printf '  version "%s"\n' "$VERSION"
-              printf '  sha256 "%s"\n' "$SHA256"
-              printf '\n'
-              printf '  def install\n'
-              printf '    bin.install "%s"\n' "$BINARY_NAME"
-              printf '  end\n'
-              printf '\n'
-              printf '  test do\n'
-              printf '    system "#{bin}/%s", "--help"\n' "$BINARY_NAME"
-              printf '  end\n'
-              printf 'end\n'
-            } > "$file"
-          fi
-
-          perl -0777 -i -pe "s|url \\\"[^\\\"]+\\\"|url \\\"${RELEASE_URL}\\\"|g" "$file"
-          perl -0777 -i -pe "s|sha256 \\\"[a-f0-9]+\\\"|sha256 \\\"${SHA256}\\\"|g" "$file"
-          perl -0777 -i -pe "s|version \\\"[^\\\"]+\\\"|version \\\"${VERSION}\\\"|g" "$file"
+          mkdir -p "$(dirname "$file")"
+          class_name="$(echo "${BINARY_NAME}" | sed 's/[-_]/ /g' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}}1' | tr -d ' ')"
+          {
+            printf 'class %s < Formula\n' "$class_name"
+            printf '  desc "%s CLI"\n' "$BINARY_NAME"
+            printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
+            printf '  version "%s"\n' "$VERSION"
+            printf '\n'
+            printf '  on_macos do\n'
+            printf '    if Hardware::CPU.arm?\n'
+            printf '      url "%s"\n' "$RELEASE_URL_AARCH64"
+            printf '      sha256 "%s"\n' "$SHA256_AARCH64"
+            printf '    else\n'
+            printf '      url "%s"\n' "$RELEASE_URL_X86_64"
+            printf '      sha256 "%s"\n' "$SHA256_X86_64"
+            printf '    end\n'
+            printf '  end\n'
+            printf '\n'
+            printf '  def install\n'
+            printf '    bin.install "%s"\n' "$BINARY_NAME"
+            printf '  end\n'
+            printf '\n'
+            printf '  test do\n'
+            printf '    system "#{bin}/%s", "--help"\n' "$BINARY_NAME"
+            printf '  end\n'
+            printf 'end\n'
+          } > "$file"
 
       - name: Create pull request in tap repo
         if: steps.tapmeta.outputs.skip == 'false'
@@ -301,7 +330,8 @@ jobs:
           body: |
             Automated update from ${{ github.repository }} release.
             - Version: ${{ needs.build-sign-notarize.outputs.version }}
-            - SHA256: ${{ needs.build-sign-notarize.outputs.archive_sha256 }}
+            - macOS arm64 SHA256: ${{ needs.build-sign-notarize.outputs.archive_sha256_aarch64 }}
+            - macOS x86_64 SHA256: ${{ needs.build-sign-notarize.outputs.archive_sha256_x86_64 }}
 
       - name: Warn if tap PR failed
         if: steps.tapmeta.outputs.skip == 'false' && steps.tap_pr.outcome == 'failure'

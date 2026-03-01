@@ -52,6 +52,28 @@ with [age](https://age-encryption.org) and stored in your repository — never p
 
 ## Installation
 
+### macOS (Homebrew)
+
+```bash
+# 1) Add the tap that publishes gitvault formula updates
+brew tap <owner>/<tap>
+
+# 2) Install
+brew install <owner>/<tap>/gitvault
+
+# 3) Verify
+gitvault --version
+```
+
+Use the tap value your team configured for `HOMEBREW_TAP_REPO` in CI/CD.
+If your team uses a non-default formula path, install with:
+
+```bash
+brew install <owner>/<tap>/gitvault
+```
+
+### Build from source (all platforms)
+
 ```bash
 cargo build --release
 # binary is at target/release/gitvault (or /workspaces/.cargo-target/release/gitvault in devcontainer)
@@ -423,7 +445,7 @@ parallel multi-agent development without environment cross-contamination.
 
 - **Workflow**: `.github/workflows/release-macos-sign-notarize.yml`
 - Triggers on `v*` tags and manual dispatch.
-- Produces a universal Apple Darwin binary, signs and notarizes it.
+- Produces separate macOS arm64 and x86_64 binaries, signs and notarizes both.
 
 #### Required secrets
 
