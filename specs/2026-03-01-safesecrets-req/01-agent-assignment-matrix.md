@@ -10,7 +10,7 @@ scope:
   avoid: ["target/**"]
 acceptance:
   - id: "AC1"
-    text: "Defines execution order with dependencies for REQ-1..REQ-55."
+    text: "Defines execution order with dependencies for REQ-1..REQ-56."
   - id: "AC2"
     text: "Provides per-REQ effort estimates and parallelization guidance for multi-agent delivery."
 verification:
@@ -24,7 +24,7 @@ links: { issue: "", pr: "" }
 This matrix enables parallel delivery across multiple agents while preserving prerequisite order and minimizing merge contention.
 
 ## Goal
-Provide a practical assignment and sequencing plan for implementing [00-index.md](specs/2026-03-01-safesecrets-req/00-index.md) and [req-001.md](specs/2026-03-01-safesecrets-req/req-001.md) through [req-055.md](specs/2026-03-01-safesecrets-req/req-055.md).
+Provide a practical assignment and sequencing plan for implementing [00-index.md](specs/2026-03-01-safesecrets-req/00-index.md) and [req-001.md](specs/2026-03-01-safesecrets-req/req-001.md) through [req-056.md](specs/2026-03-01-safesecrets-req/req-056.md).
 
 ## Effort Legend
 - S: 0.5 to 1 day
@@ -63,7 +63,7 @@ Provide a practical assignment and sequencing plan for implementing [00-index.md
 - Depends on: Waves 3-5
 
 ### Wave 7 (Release integrity)
-- REQ-54 (M), REQ-55 (S)
+- REQ-54 (M), REQ-55 (S), REQ-56 (S)
 - Depends on: Waves 0-6
 
 ## Suggested 6-Agent Split
@@ -89,7 +89,7 @@ Provide a practical assignment and sequencing plan for implementing [00-index.md
 - Owns diff quality, merge mechanics, and key lifecycle.
 
 ### Agent F: Security and Automation Contracts
-- REQ-40..REQ-48, REQ-50, REQ-54, REQ-55
+- REQ-40..REQ-48, REQ-50, REQ-54, REQ-55, REQ-56
 - Owns fail-closed semantics, CLI contracts, CI behavior, and release integrity.
 
 ## Merge Strategy

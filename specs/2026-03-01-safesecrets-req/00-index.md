@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**"]
 acceptance:
   - id: "AC1"
-    text: "Contains exactly one individual spec per REQ-1..REQ-55."
+    text: "Contains exactly one individual spec per REQ-1..REQ-56."
 verification:
   commands: ["cargo xtask spec-verify"]
 risk:
@@ -74,3 +74,4 @@ links: { issue: "", pr: "" }
 - `req-053.md` -> REQ-53
 - `req-054.md` -> REQ-54
 - `req-055.md` -> REQ-55
+- `req-056.md` -> REQ-56

@@ -3,6 +3,8 @@
 Rules:
 - Plan first, then patch.
 - Do not exceed requested scope.
+- Before implementing any newly requested requirement, ask whether it is part of an existing requirement or a new requirement.
+- Do not implement new requirements without an approved spec entry.
 - Use `cargo xtask`/aliases for spec and worktree tasks.
 - For Rust changes, ensure full test coverage.
 - If verification fails, apply the smallest viable fix.
