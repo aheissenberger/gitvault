@@ -186,7 +186,7 @@ jobs:
 
   update-homebrew-tap:
     environment: homebrew
-    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     needs: build-sign-notarize
     env:
@@ -206,6 +206,12 @@ jobs:
           ARCHIVE_SHA256: ${{ needs.build-sign-notarize.outputs.archive_sha256 }}
         run: |
           set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is not configured; skipping tap update."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           tap_repo="${INPUT_TAP_REPO:-${DEFAULT_TAP_REPO:-}}"
           if [[ -z "${tap_repo}" ]]; then
             echo "No tap repo provided; skipping tap update."
