@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   build-sign-notarize:
+    environment: MacOS App Signing
     runs-on: macos-14
     outputs:
       binary_name: ${{ steps.meta.outputs.binary_name }}
