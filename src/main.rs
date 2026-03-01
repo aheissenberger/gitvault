@@ -227,11 +227,25 @@ fn load_identity_source(source: &str, source_name: &str) -> Result<String, Gitva
         return Ok(value.to_string());
     }
 
-    std::fs::read_to_string(value).map_err(|e| {
+    let file_content = std::fs::read_to_string(value).map_err(|e| {
         GitvaultError::Usage(format!(
             "{source_name} must be an identity file path or AGE-SECRET-KEY value: {e}"
         ))
+    })?;
+
+    extract_identity_key(&file_content).ok_or_else(|| {
+        GitvaultError::Usage(format!(
+            "{source_name} file does not contain a valid AGE-SECRET-KEY line"
+        ))
     })
+}
+
+fn extract_identity_key(content: &str) -> Option<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("AGE-SECRET-KEY-"))
+        .map(|line| line.to_string())
 }
 
 #[cfg(test)]
@@ -326,5 +340,46 @@ mod tests {
             }
             other => panic!("expected decryption error for malformed identity, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_load_identity_source_accepts_key_file_with_newline() {
+        let identity = x25519::Identity::generate();
+        let identity_secret = identity.to_string();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+
+        std::fs::write(identity_file.path(), format!("{}\n", identity_secret.expose_secret()))
+            .expect("identity should be written to temp file");
+
+        let loaded = load_identity_source(
+            &identity_file.path().to_string_lossy(),
+            "GITVAULT_IDENTITY",
+        )
+        .expect("identity file with newline should parse");
+
+        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
+    }
+
+    #[test]
+    fn test_load_identity_source_accepts_age_keygen_style_file() {
+        let identity = x25519::Identity::generate();
+        let identity_secret = identity.to_string();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+
+        let key_file_content = format!(
+            "# created: 2026-03-01T00:00:00Z\n# public key: {}\n{}\n",
+            identity.to_public(),
+            identity_secret.expose_secret()
+        );
+        std::fs::write(identity_file.path(), key_file_content)
+            .expect("identity should be written to temp file");
+
+        let loaded = load_identity_source(
+            &identity_file.path().to_string_lossy(),
+            "GITVAULT_IDENTITY",
+        )
+        .expect("age-keygen style identity file should parse");
+
+        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
     }
 }
