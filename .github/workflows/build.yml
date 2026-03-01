@@ -13,6 +13,9 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - name: Checkout
         uses: actions/checkout@v4

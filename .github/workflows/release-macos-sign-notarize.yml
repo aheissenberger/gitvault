@@ -27,6 +27,9 @@ jobs:
   build-sign-notarize:
     environment: MacOS App Signing
     runs-on: macos-14
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     outputs:
       binary_name: ${{ steps.meta.outputs.binary_name }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
