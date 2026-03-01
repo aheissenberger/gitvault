@@ -263,7 +263,7 @@ jobs:
           if [[ ! -f "$file" ]]; then
             echo "Formula file not found: $file. Creating new formula."
             mkdir -p "$(dirname "$file")"
-            class_name="$(echo "${BINARY_NAME}" | tr '-_' ' ' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}}1' | tr -d ' ')"
+            class_name="$(echo "${BINARY_NAME}" | sed 's/[-_]/ /g' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}}1' | tr -d ' ')"
             {
               printf 'class %s < Formula\n' "$class_name"
               printf '  desc "%s CLI"\n' "$BINARY_NAME"
