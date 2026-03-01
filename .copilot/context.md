@@ -1,16 +1,19 @@
-# Repo context (read-only)
-- Prefer smallest diff
-- Follow existing patterns
-- Do not touch generated/vendor files unless spec explicitly allows it
-- Always update/add tests when behavior changes
-- Always run verification commands from spec frontmatter if present
+# Repo context
 
-## Worktree discipline
-- One task = one worktree
-- Never broaden scope
-- Keep commits small and reviewable
-- Update specs/<id>/04-progress.md after completing a task
+## Core rules
+- Keep diffs minimal and aligned with existing patterns.
+- Do not edit generated/vendor files unless the spec explicitly allows it.
+- Add or update tests for changed behavior.
+- Run required verification commands from spec frontmatter.
 
-## Conventions
-- Commit messages should reference spec id and AC ids: (S-... / AC1)
-- PRs must link the spec folder path
+## Spec workflow
+- One task per worktree; do not broaden scope.
+- Update `specs/<id>/04-progress.md` after task completion.
+- Use `cargo xtask`/aliases for spec/worktree actions: `spec-init`, `spec-verify`, `wt-*`.
+- Do not add or use shell wrappers for spec/worktree flows.
+
+## Collaboration
+- Keep commits small and reviewable.
+- Reference spec/AC ids in commits (e.g., `S-... / AC1`).
+- Link the spec path in PRs.
+- Treat `.cargo-home/` as local cache (untracked).

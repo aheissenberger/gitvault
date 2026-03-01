@@ -24,11 +24,15 @@ This repository is bootstrapped for deterministic Rust development in a devconta
 
 Expected Rust version is `1.93.1`.
 
+Local cache directories (for example `.cargo-home/`) are machine-specific and intentionally gitignored.
+
 Run full local verification (inside devcontainer):
 
 ```bash
 cargo verify
 ```
+
+`cargo verify` runs `fmt`, `clippy`, `instructions-lint`, `test`, and `build`.
 
 Available targets:
 
@@ -73,15 +77,14 @@ cargo wt-remove -- ../wt-feature-x-t1
   - `/.copilot/instructions.vscode-ui.md`
   - `/.copilot/instructions.vscode-bg.md`
   - `/.copilot/instructions.cli.md`
-- Helper scripts:
-  - `tools/spec_init.sh`
-  - `tools/spec_verify.sh`
-  - `tools/worktree.sh`
-- Rust verifier implementation:
-  - `tools/specguard/Cargo.toml`
-  - `tools/specguard/src/main.rs`
-
-`tools/spec_verify.sh` is language-adaptive and currently prefers Rust when `Cargo.toml`/`Cargo.lock` exists.
+- Xtask commands (preferred):
+  - `cargo xtask spec-init <spec-folder>`
+  - `cargo xtask spec-verify`
+  - `cargo xtask wt-list`
+  - `cargo xtask wt-create <branch> <dir>`
+  - `cargo xtask wt-remove <dir>`
+`cargo xtask spec-verify` validates `specs` frontmatter directly in xtask.
+`cargo xtask` is the only supported entrypoint for spec/worktree automation in this repository.
 
 ## Multi-worktree workflow
 
