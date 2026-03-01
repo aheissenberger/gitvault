@@ -5,6 +5,7 @@ Rules:
 - Ask one short clarifying question only when blocked; otherwise proceed.
 - Before implementing any newly requested requirement, ask whether it is part of an existing requirement or a new requirement.
 - Do not implement new requirements without an approved spec entry.
+- After implementing a requirement, update the corresponding requirement spec status to reflect completion.
 - Keep edits minimal and reviewable.
 - Use `cargo xtask`/aliases for spec/worktree operations.
 - For Rust changes, ensure full test coverage.

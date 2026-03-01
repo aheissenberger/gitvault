@@ -13,6 +13,8 @@ acceptance:
     text: "REQ-56: before implementing newly requested work, the agent asks whether it belongs to an existing requirement or a new requirement."
   - id: "AC2"
     text: "REQ-56: new requirements are not implemented unless an approved spec entry exists."
+  - id: "AC3"
+    text: "REQ-56: after implementing a requirement, the agent updates the corresponding requirement spec status to reflect completion."
 verification:
   commands:
     - "cargo xtask instructions-lint"
@@ -43,6 +45,7 @@ Define governance for requirement classification and enforce a spec-first gate f
 ## Acceptance Criteria
 - AC1: Agent asks whether a new ask maps to an existing requirement or defines a new requirement.
 - AC2: Agent blocks implementation of truly new requirements without an approved spec entry.
+- AC3: Agent updates the corresponding requirement spec status after implementing a requirement.
 
 ## Test Plan
 - Run instruction lint and spec verification checks.
