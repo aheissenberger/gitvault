@@ -9,6 +9,7 @@ Hard rules:
 - After implementing a requirement, update the corresponding requirement spec status to reflect completion.
 - Write/update tests (Rust changes require full test coverage).
 - Run `cargo xtask spec-verify` (or `cargo spec-verify`) and fix failures.
+- Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - Use `cargo xtask wt-*` for worktree operations only.
 
 Deliverables:

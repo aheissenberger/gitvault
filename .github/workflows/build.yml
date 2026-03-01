@@ -40,25 +40,9 @@ jobs:
         if: steps.cargo.outputs.present == 'true'
         uses: Swatinem/rust-cache@v2
 
-      - name: Verify specs
+      - name: Verify via xtask
         if: steps.cargo.outputs.present == 'true'
-        run: cargo spec-verify
-
-      - name: Check format
-        if: steps.cargo.outputs.present == 'true'
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        if: steps.cargo.outputs.present == 'true'
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        if: steps.cargo.outputs.present == 'true'
-        run: cargo test --workspace --all-features
-
-      - name: Build release
-        if: steps.cargo.outputs.present == 'true'
-        run: cargo build --workspace --release
+        run: cargo xtask verify
 
       - name: Skip message
         if: steps.cargo.outputs.present != 'true'

@@ -9,6 +9,7 @@ Rules:
 - Keep edits minimal and reviewable.
 - Use `cargo xtask`/aliases for spec/worktree operations.
 - For Rust changes, ensure full test coverage.
+- Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 
 Output:
 - Short plan

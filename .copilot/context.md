@@ -5,6 +5,7 @@
 - Do not edit generated/vendor files unless the spec explicitly allows it.
 - Add or update tests for changed behavior.
 - Run required verification commands from spec frontmatter.
+- Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 
 ## Spec workflow
 - One task per worktree; do not broaden scope.

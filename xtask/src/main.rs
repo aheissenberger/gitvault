@@ -207,12 +207,15 @@ struct InstructionRequirement {
 }
 
 fn instruction_requirements() -> [InstructionRequirement; 4] {
+    const VERIFY_RULE: &str = "Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.";
+
     [
         InstructionRequirement {
             path: ".copilot/context.md",
             required_phrases: &[
                 "Use `cargo xtask`/aliases for spec/worktree actions",
                 "Do not add or use shell wrappers for spec/worktree flows.",
+                VERIFY_RULE,
             ],
         },
         InstructionRequirement {
@@ -220,6 +223,7 @@ fn instruction_requirements() -> [InstructionRequirement; 4] {
             required_phrases: &[
                 "Work only from the referenced spec/task.",
                 "Use `cargo xtask`/aliases for spec/worktree operations.",
+                VERIFY_RULE,
             ],
         },
         InstructionRequirement {
@@ -227,6 +231,7 @@ fn instruction_requirements() -> [InstructionRequirement; 4] {
             required_phrases: &[
                 "Implement only the assigned Task block",
                 "Run `cargo xtask spec-verify`",
+                VERIFY_RULE,
             ],
         },
         InstructionRequirement {
@@ -234,6 +239,7 @@ fn instruction_requirements() -> [InstructionRequirement; 4] {
             required_phrases: &[
                 "Plan first, then patch.",
                 "Use `cargo xtask`/aliases for spec and worktree tasks.",
+                VERIFY_RULE,
             ],
         },
     ]
