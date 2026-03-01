@@ -1,9 +1,9 @@
 {
-  "name": "gitvault-rust-1.93.1",
+  "name": "gitvault-rust-stable",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "RUST_VERSION": "1.93.1"
+      "RUST_VERSION": "stable"
     }
   },
   "features": {

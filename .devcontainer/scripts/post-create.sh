@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-required_rust="1.93.1"
-actual_rust="$(rustc --version | awk '{print $2}')"
-
-if [[ "$actual_rust" != "$required_rust" ]]; then
-  echo "Expected rustc ${required_rust}, got ${actual_rust}" >&2
+if ! command -v rustc >/dev/null 2>&1; then
+  echo "rustc not found on PATH" >&2
   exit 1
 fi
 

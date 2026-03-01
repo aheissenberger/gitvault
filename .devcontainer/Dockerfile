@@ -1,7 +1,7 @@
 FROM mcr.microsoft.com/devcontainers/base:bookworm
 
 ARG USERNAME=vscode
-ARG RUST_VERSION=1.93.1
+ARG RUST_VERSION=stable
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

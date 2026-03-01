@@ -56,20 +56,19 @@ with [age](https://age-encryption.org) and stored in your repository — never p
 
 ```bash
 # 1) Add the tap that publishes gitvault formula updates
-brew tap <owner>/<tap>
+brew tap aheissenberger/tools
 
 # 2) Install
-brew install <owner>/<tap>/gitvault
+brew install gitvault
 
 # 3) Verify
 gitvault --version
 ```
 
-Use the tap value your team configured for `HOMEBREW_TAP_REPO` in CI/CD.
-If your team uses a non-default formula path, install with:
+One-line install (without pre-tapping):
 
 ```bash
-brew install <owner>/<tap>/gitvault
+brew install aheissenberger/tools/gitvault
 ```
 
 ### Build from source (all platforms)
@@ -436,15 +435,17 @@ parallel multi-agent development without environment cross-contamination.
 
 ## CI / CD
 
-- **Workflow**: `.github/workflows/build.yml`
+- **Workflow**: `.github/workflows/ci-verify.yml`
 - Runs on push to `main` and pull requests.
-- Enforces `cargo spec-verify` (spec frontmatter validation).
-- Enforces `cargo fmt`, `clippy`, tests, and release build.
+- Enforces `cargo fmt`, `clippy`, and tests.
+- Does **not** build release binaries.
 
-### macOS signed release
+### Release builds (tag/manual only)
 
-- **Workflow**: `.github/workflows/release-macos-sign-notarize.yml`
+- **Workflow**: `.github/workflows/release-tag.yml`
 - Triggers on `v*` tags and manual dispatch.
+- Runs verification once, then builds platform binaries.
+- Produces Linux and Windows cosign-signed binaries.
 - Produces separate macOS arm64 and x86_64 binaries, signs and notarizes both.
 
 #### Required secrets
@@ -493,17 +494,21 @@ base64 -w 0 AuthKey_<KEY_ID>.p8
 Set secret `HOMEBREW_TAP_TOKEN` (PAT with repo write access) and variables `HOMEBREW_TAP_REPO` /
 `HOMEBREW_TAP_FORMULA_PATH` to auto-open formula update PRs on tagged releases.
 
+For this repository:
+- `HOMEBREW_TAP_REPO=aheissenberger/homebrew-tools`
+- `HOMEBREW_TAP_FORMULA_PATH=Formula/gitvault.rb`
+
 ---
 
 ## Local development environment
 
-- Devcontainer pinned to Rust `1.93.1`
+- Devcontainer tracks Rust `stable`
 - Multi-worktree-friendly git defaults and shared Cargo caches (named Docker volumes)
 - Target directory: `/workspaces/.cargo-target` (shared across worktrees)
 - Apple signing/notarization runs on `macos-14` GitHub Actions runners; development stays in the
   Linux devcontainer
 
 ```bash
-rustc --version   # 1.93.1
+rustc --version   # stable channel version
 cargo --version
 ```
