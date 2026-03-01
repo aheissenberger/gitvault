@@ -166,7 +166,17 @@ jobs:
           notarize_zip="dist/${BINARY_NAME}-notarize.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/${BINARY_NAME}" "${notarize_zip}"
           api_key_file="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
-          echo "${APPLE_API_PRIVATE_KEY_P8_BASE64}" | base64 --decode > "${api_key_file}"
+
+          # Accept both base64-encoded and raw/escaped .p8 secret content.
+          if echo "${APPLE_API_PRIVATE_KEY_P8_BASE64}" | base64 --decode > "${api_key_file}.decoded" 2>/dev/null \
+            && grep -q "BEGIN PRIVATE KEY" "${api_key_file}.decoded"; then
+            mv "${api_key_file}.decoded" "${api_key_file}"
+          else
+            printf '%b' "${APPLE_API_PRIVATE_KEY_P8_BASE64}" | sed $'s/\r$//' > "${api_key_file}"
+          fi
+
+          grep -q "BEGIN PRIVATE KEY" "${api_key_file}" || { echo "APPLE_API_PRIVATE_KEY_P8_BASE64 does not contain a valid .p8 private key" >&2; exit 1; }
+
           xcrun notarytool submit "${notarize_zip}" \
             --key "${api_key_file}" \
             --key-id "${APPLE_API_KEY_ID}" \
