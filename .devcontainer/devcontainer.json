@@ -7,11 +7,7 @@
     }
   },
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/common-utils:2": {
-      "installZsh": "true",
-      "username": "vscode"
-    }
+    "ghcr.io/devcontainers/features/copilot-cli:1": {}
   },
   "remoteUser": "vscode",
   "containerEnv": {
