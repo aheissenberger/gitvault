@@ -14,6 +14,8 @@ age = { version = "0.10", features = ["armor"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+toml = { version = "0.8", features = ["preserve_order"] }
 anyhow = "1"
 thiserror = "1"
 tempfile = "3"

@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-006"
 title: "Fileless run mode and process environment injection"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

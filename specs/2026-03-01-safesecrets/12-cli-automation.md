@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-012"
 title: "CLI automation contracts"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-017"
 title: "NFR: interactive developer sandbox shell"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

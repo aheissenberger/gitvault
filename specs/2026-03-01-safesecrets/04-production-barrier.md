@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-004"
 title: "Production barrier enforcement"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

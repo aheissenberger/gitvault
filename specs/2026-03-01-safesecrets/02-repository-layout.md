@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-002"
 title: "Repository layout and tracked plaintext protection"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

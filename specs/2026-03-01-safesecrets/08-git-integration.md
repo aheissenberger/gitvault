@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-008"
 title: "Git hardening and drift checks"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

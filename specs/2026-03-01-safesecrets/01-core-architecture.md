@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-001"
 title: "Core architecture and encryption format"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

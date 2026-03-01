@@ -5,6 +5,7 @@ pub const EXIT_ERROR: i32 = 1;
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_PLAINTEXT_LEAK: i32 = 3;
 pub const EXIT_DECRYPT_ERROR: i32 = 4;
+pub const EXIT_BARRIER: i32 = 5;
 
 #[derive(Error, Debug)]
 pub enum GitvaultError {
@@ -20,6 +21,8 @@ pub enum GitvaultError {
     Usage(String),
     #[error("{0}")]
     Other(String),
+    #[error("Production barrier not satisfied: {0}")]
+    BarrierNotSatisfied(String),
 }
 
 impl GitvaultError {
@@ -31,6 +34,7 @@ impl GitvaultError {
             GitvaultError::PlaintextLeak(_) => EXIT_PLAINTEXT_LEAK,
             GitvaultError::Usage(_) => EXIT_USAGE,
             GitvaultError::Other(_) => EXIT_ERROR,
+            GitvaultError::BarrierNotSatisfied(_) => EXIT_BARRIER,
         }
     }
 }
