@@ -9,6 +9,7 @@
 pub mod drift;
 pub mod hooks;
 pub mod paths;
+pub mod plugin;
 pub mod recipients;
 
 // Re-export the full public API so callers using `crate::repo::*` continue to work
@@ -22,3 +23,5 @@ pub use paths::{
     get_plain_path, list_all_encrypted_files, list_encrypted_files_for_env, validate_write_path,
 };
 pub use recipients::{RECIPIENTS_FILE, read_recipients, write_recipients};
+
+pub use plugin::{AdapterLookup, find_adapter_binary, invoke_adapter_harden};

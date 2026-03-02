@@ -95,7 +95,7 @@ pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, Git
 /// Returns [`GitvaultError`] if the repository root cannot be found, `.gitignore` or
 /// `.gitattributes` update fails, git hook installation fails, or git config
 /// registration fails.
-pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_harden(json: bool, no_prompt: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     crate::materialize::ensure_gitignored(
         &repo_root,
@@ -107,6 +107,27 @@ pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
         &[crate::materialize::GITATTRIBUTES_MERGE_DRIVER_ENTRY],
     )?;
     ensure_merge_driver_git_config(&repo_root)?;
+
+    // REQ-64/65/66/67: external hook-manager adapter
+    let config = crate::config::load_config(&repo_root)?;
+    if let Some(adapter) = &config.hooks.adapter {
+        match crate::repo::find_adapter_binary(adapter) {
+            crate::repo::AdapterLookup::Found(path) => {
+                crate::repo::invoke_adapter_harden(&path, &repo_root)?;
+            }
+            crate::repo::AdapterLookup::NotFound { binary } => {
+                let msg = format!(
+                    "hook adapter '{binary}' not found on PATH. Install it with: cargo install {binary}"
+                );
+                if no_prompt {
+                    return Err(GitvaultError::Usage(msg));
+                } else {
+                    eprintln!("warning: {msg}");
+                }
+            }
+        }
+    }
+
     crate::output::output_success(
         "Repository hardened: .gitignore updated, git hooks installed, .gitattributes updated, merge driver configured.",
         json,
@@ -297,7 +318,7 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        cmd_harden(false).expect("harden should succeed");
+        cmd_harden(false, false).expect("harden should succeed");
 
         let gitattributes = std::fs::read_to_string(dir.path().join(".gitattributes"))
             .expect(".gitattributes should exist after harden");
@@ -315,8 +336,8 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         // Run harden twice — entry must appear exactly once.
-        cmd_harden(false).expect("first harden should succeed");
-        cmd_harden(false).expect("second harden should succeed");
+        cmd_harden(false, false).expect("first harden should succeed");
+        cmd_harden(false, false).expect("second harden should succeed");
 
         let gitattributes = std::fs::read_to_string(dir.path().join(".gitattributes"))
             .expect(".gitattributes should exist after harden");
@@ -334,7 +355,7 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        cmd_harden(false).expect("harden should succeed");
+        cmd_harden(false, false).expect("harden should succeed");
 
         let value = local_git_config(dir.path(), MERGE_DRIVER_CONFIG_KEY)
             .expect("merge driver git config should be set");
@@ -356,7 +377,7 @@ mod tests {
             .expect("git config should run");
         assert!(status.success());
 
-        cmd_harden(false).expect("harden should succeed");
+        cmd_harden(false, false).expect("harden should succeed");
 
         let value = local_git_config(dir.path(), MERGE_DRIVER_CONFIG_KEY)
             .expect("merge driver git config should remain set");
@@ -370,7 +391,7 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        cmd_harden(false).expect("harden should succeed");
+        cmd_harden(false, false).expect("harden should succeed");
         cmd_status(false, false).expect("status should succeed in clean repo");
 
         let gitignore = std::fs::read_to_string(dir.path().join(".gitignore"))
@@ -418,7 +439,7 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        cmd_harden(false).expect("harden should succeed");
+        cmd_harden(false, false).expect("harden should succeed");
         // json=true covers the JSON output branch (lines 649-656).
         cmd_status(true, false).expect("status json should succeed");
     }
@@ -658,6 +679,105 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         // json=true exercises the output_success(json=true) path in cmd_harden.
-        cmd_harden(true).expect("harden with json flag should succeed");
+        cmd_harden(true, false).expect("harden with json flag should succeed");
+    }
+
+    // -----------------------------------------------------------------------
+    // REQ-64/65/66/67: hook-manager adapter tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_cmd_harden_no_config_uses_builtin() {
+        // No .gitvault/config.toml present → harden succeeds using built-in hooks.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        cmd_harden(false, false).expect("harden without config should succeed");
+
+        // Built-in hooks should be installed.
+        assert!(dir.path().join(".git/hooks/pre-commit").exists());
+        assert!(dir.path().join(".git/hooks/pre-push").exists());
+    }
+
+    #[test]
+    fn test_cmd_harden_unknown_adapter_fails() {
+        // A config.toml with an unknown adapter name must return a Usage error.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let gitvault_dir = dir.path().join(".gitvault");
+        std::fs::create_dir_all(&gitvault_dir).unwrap();
+        std::fs::write(
+            gitvault_dir.join("config.toml"),
+            "[hooks]\nadapter = \"unknown-adapter\"\n",
+        )
+        .unwrap();
+
+        let err = cmd_harden(false, false).expect_err("unknown adapter should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_harden_missing_adapter_no_prompt_fails() {
+        // Valid adapter name but binary not on PATH + no_prompt=true → Usage error.
+        // gitvault-husky is not installed in this environment, so it will not be found.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let gitvault_dir = dir.path().join(".gitvault");
+        std::fs::create_dir_all(&gitvault_dir).unwrap();
+        std::fs::write(
+            gitvault_dir.join("config.toml"),
+            "[hooks]\nadapter = \"husky\"\n",
+        )
+        .unwrap();
+
+        // gitvault-husky is not installed, so find_adapter_binary returns NotFound.
+        // no_prompt=true should turn that into a Usage error.
+        let err =
+            cmd_harden(false, true).expect_err("missing adapter with no_prompt should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("not found"),
+            "error should mention 'not found': {err}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_harden_missing_adapter_interactive_warns() {
+        // Valid adapter name but binary not on PATH + no_prompt=false → succeeds (warning to stderr).
+        // gitvault-husky is not installed in this environment, so it will not be found.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let gitvault_dir = dir.path().join(".gitvault");
+        std::fs::create_dir_all(&gitvault_dir).unwrap();
+        std::fs::write(
+            gitvault_dir.join("config.toml"),
+            "[hooks]\nadapter = \"husky\"\n",
+        )
+        .unwrap();
+
+        // gitvault-husky is not installed; no_prompt=false means we just warn and continue.
+        let result = cmd_harden(false, false);
+        assert!(
+            result.is_ok(),
+            "missing adapter in interactive mode should succeed (with warning): {result:?}"
+        );
+        assert_eq!(result.unwrap(), CommandOutcome::Success);
     }
 }
