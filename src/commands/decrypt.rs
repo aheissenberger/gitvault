@@ -1,0 +1,154 @@
+//! `gitvault decrypt` command implementation.
+
+use std::path::PathBuf;
+
+use crate::error::GitvaultError;
+use crate::identity::{load_identity, load_identity_from_source};
+use crate::{crypto, fhsm, repo, structured};
+
+/// Decrypt a .age file and write plaintext
+pub(crate) fn cmd_decrypt(
+    file: String,
+    identity_path: Option<String>,
+    output: Option<String>,
+    fields: Option<String>,
+    reveal: bool,
+    json: bool,
+    no_prompt: bool,
+) -> Result<(), GitvaultError> {
+    // Use FHSM to resolve the identity source; file I/O remains here.
+    let event = fhsm::Event::Decrypt {
+        file: file.clone(),
+        identity: identity_path,
+        no_prompt,
+        output: output.clone(),
+    };
+    let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
+    let identity_str = effects
+        .iter()
+        .find_map(|e| {
+            if let fhsm::Effect::ResolveIdentity { source } = e {
+                Some(load_identity_from_source(source))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| load_identity(None))?;
+
+    let input_path = PathBuf::from(&file);
+    let identity = crypto::parse_identity(&identity_str)?;
+
+    // REQ-4: field-level decryption for JSON/YAML/TOML
+    if let Some(fields_str) = &fields {
+        let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
+        structured::decrypt_fields(&input_path, &fields, &identity)
+            .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
+        crate::output_success(
+            &format!(
+                "Decrypted fields [{fields_str}] in {}",
+                input_path.display()
+            ),
+            json,
+        );
+        return Ok(());
+    }
+
+    // REQ-41: if --reveal, print to stdout and never write to file
+    if reveal {
+        let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let mut stdout = std::io::BufWriter::new(std::io::stdout());
+        crypto::decrypt_stream(&identity, in_file, &mut stdout)?;
+        return Ok(());
+    }
+
+    let out_path = if let Some(out) = output {
+        PathBuf::from(out)
+    } else {
+        let name = input_path.file_name().unwrap().to_string_lossy();
+        let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
+        input_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join(out_name)
+    };
+
+    // REQ-42: prevent path traversal
+    let repo_root = crate::find_repo_root()?;
+    repo::validate_write_path(&repo_root, &out_path)?;
+
+    // REQ-51: streaming decryption
+    let tmp =
+        tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    {
+        let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let mut out_file = std::io::BufWriter::new(tmp.as_file());
+        crypto::decrypt_stream(&identity, in_file, &mut out_file)?;
+    }
+    tmp.persist(&out_path)
+        .map_err(|e| GitvaultError::Io(e.error))?;
+
+    crate::output_success(&format!("Decrypted to {}", out_path.display()), json);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_helpers::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_cmd_decrypt_reveal_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crypto::encrypt(recipients, b"TOP_SECRET=1\n").unwrap();
+        let encrypted_file = dir.path().join("secret.env.age");
+        std::fs::write(&encrypted_file, ciphertext).unwrap();
+
+        cmd_decrypt(
+            encrypted_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            None,
+            None,
+            true,
+            true,
+            true,
+        )
+        .expect("reveal mode should decrypt to stdout without error");
+    }
+
+    #[test]
+    fn test_cmd_decrypt_default_output_path_writes_plaintext() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crypto::encrypt(recipients, b"X=42\n").unwrap();
+        let encrypted_file = dir.path().join("app.env.age");
+        std::fs::write(&encrypted_file, ciphertext).unwrap();
+
+        cmd_decrypt(
+            encrypted_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            None,
+            None,
+            false,
+            true,
+            true,
+        )
+        .expect("default output decrypt should succeed");
+
+        let plain = std::fs::read_to_string(dir.path().join("app.env")).unwrap();
+        assert!(plain.contains("X=42"));
+    }
+}
