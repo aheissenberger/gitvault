@@ -8,7 +8,7 @@ use crate::identity::{load_identity, load_identity_from_source};
 use crate::{crypto, fhsm, repo, structured};
 
 /// Decrypt a .age file and write plaintext
-pub(crate) fn cmd_decrypt(
+pub fn cmd_decrypt(
     file: String,
     identity_path: Option<String>,
     output: Option<String>,

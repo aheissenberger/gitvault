@@ -7,7 +7,7 @@ use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, repo};
 
 /// Manage persistent recipients (REQ-37)
-pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     match action {
         RecipientAction::Add { pubkey } => {
@@ -52,7 +52,7 @@ pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<Comma
 }
 
 /// Re-encrypt all secrets with the current recipients list (REQ-38)
-pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;

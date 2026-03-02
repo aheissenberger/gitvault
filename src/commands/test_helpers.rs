@@ -12,17 +12,17 @@ use tempfile::NamedTempFile;
 use crate::crypto;
 use crate::repo;
 
-pub(crate) fn global_test_lock() -> &'static Mutex<()> {
+pub fn global_test_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-pub(crate) struct CwdGuard {
-    pub(crate) previous: std::path::PathBuf,
+pub struct CwdGuard {
+    pub previous: std::path::PathBuf,
 }
 
 impl CwdGuard {
-    pub(crate) fn enter(path: &Path) -> Self {
+    pub fn enter(path: &Path) -> Self {
         let previous = std::env::current_dir().expect("current dir should be readable");
         std::env::set_current_dir(path).expect("should switch cwd");
         Self { previous }
@@ -35,7 +35,7 @@ impl Drop for CwdGuard {
     }
 }
 
-pub(crate) fn init_git_repo(path: &Path) {
+pub fn init_git_repo(path: &Path) {
     let status = Command::new("git")
         .args(["init", "-q"])
         .current_dir(path)
@@ -44,7 +44,7 @@ pub(crate) fn init_git_repo(path: &Path) {
     assert!(status.success());
 }
 
-pub(crate) fn setup_identity_file() -> (NamedTempFile, x25519::Identity) {
+pub fn setup_identity_file() -> (NamedTempFile, x25519::Identity) {
     let identity = x25519::Identity::generate();
     let identity_file = NamedTempFile::new().expect("temp file should be created");
     std::fs::write(identity_file.path(), identity.to_string().expose_secret())
@@ -52,7 +52,7 @@ pub(crate) fn setup_identity_file() -> (NamedTempFile, x25519::Identity) {
     (identity_file, identity)
 }
 
-pub(crate) fn with_identity_env<T>(identity_path: &Path, f: impl FnOnce() -> T) -> T {
+pub fn with_identity_env<T>(identity_path: &Path, f: impl FnOnce() -> T) -> T {
     with_env_var(
         "GITVAULT_IDENTITY",
         Some(identity_path.to_string_lossy().as_ref()),
@@ -60,7 +60,7 @@ pub(crate) fn with_identity_env<T>(identity_path: &Path, f: impl FnOnce() -> T) 
     )
 }
 
-pub(crate) fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+pub fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
     let previous = std::env::var(name).ok();
     match value {
         Some(v) => unsafe {
@@ -85,7 +85,7 @@ pub(crate) fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() 
     out
 }
 
-pub(crate) fn write_encrypted_env_file(
+pub fn write_encrypted_env_file(
     repo_root: &Path,
     env_name: &str,
     file_name: &str,

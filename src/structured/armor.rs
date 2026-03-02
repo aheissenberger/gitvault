@@ -3,7 +3,7 @@ use base64::Engine;
 use std::io::{Read, Write};
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
-pub(crate) fn encrypt_armor(
+pub fn encrypt_armor(
     plaintext: &[u8],
     recipient_keys: &[String],
 ) -> Result<String, GitvaultError> {
@@ -44,7 +44,7 @@ pub(crate) fn encrypt_armor(
 }
 
 /// Decrypt an age armor string using the given identity.
-pub(crate) fn decrypt_armor(
+pub fn decrypt_armor(
     armored: &str,
     identity: &dyn age::Identity,
 ) -> Result<Vec<u8>, GitvaultError> {
@@ -69,7 +69,7 @@ pub(crate) fn decrypt_armor(
 }
 
 /// Encrypt plaintext bytes using binary age (no armor), returning base64-encoded result.
-pub(crate) fn encrypt_binary_b64(
+pub fn encrypt_binary_b64(
     plaintext: &[u8],
     recipient_keys: &[String],
 ) -> Result<String, GitvaultError> {
@@ -100,7 +100,7 @@ pub(crate) fn encrypt_binary_b64(
     Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
 
-pub(crate) fn decrypt_binary_b64(
+pub fn decrypt_binary_b64(
     encoded: &str,
     identity: &dyn age::Identity,
 ) -> Result<Vec<u8>, GitvaultError> {

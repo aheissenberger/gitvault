@@ -4,7 +4,7 @@ use regex::Regex;
 use std::path::Path;
 use std::sync::OnceLock;
 
-pub(crate) fn extract_identity_key(content: &str) -> Option<String> {
+pub fn extract_identity_key(content: &str) -> Option<String> {
     static IDENTITY_LINE_RE: OnceLock<Regex> = OnceLock::new();
     let identity_line_re = IDENTITY_LINE_RE.get_or_init(|| {
         Regex::new(r"(?m)^\s*(AGE-SECRET-KEY-[A-Z0-9]+)\s*(?:#.*)?$")
@@ -16,7 +16,7 @@ pub(crate) fn extract_identity_key(content: &str) -> Option<String> {
         .map(|captures| captures[1].to_string())
 }
 
-pub(crate) fn load_identity_source(
+pub fn load_identity_source(
     source: &str,
     source_name: &str,
 ) -> Result<String, GitvaultError> {
@@ -40,11 +40,11 @@ pub(crate) fn load_identity_source(
 }
 
 /// Load identity key string from file path or GITVAULT_IDENTITY env var
-pub(crate) fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
+pub fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
     load_identity_with(path, keyring_store::keyring_get)
 }
 
-pub(crate) fn load_identity_with<F>(
+pub fn load_identity_with<F>(
     path: Option<String>,
     keyring_get_fn: F,
 ) -> Result<String, GitvaultError>
@@ -70,7 +70,7 @@ where
 ///
 /// The `Unresolved` variant (emitted by the FHSM when no path was supplied)
 /// triggers the standard env-var / keyring fallback via [`load_identity`].
-pub(crate) fn load_identity_from_source(
+pub fn load_identity_from_source(
     source: &fhsm::IdentitySource,
 ) -> Result<String, GitvaultError> {
     match source {
@@ -84,7 +84,7 @@ pub(crate) fn load_identity_from_source(
     }
 }
 
-pub(crate) fn resolve_recipient_keys(
+pub fn resolve_recipient_keys(
     repo_root: &Path,
     recipient_keys: Vec<String>,
 ) -> Result<Vec<String>, GitvaultError> {

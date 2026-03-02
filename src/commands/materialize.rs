@@ -6,7 +6,7 @@ use crate::error::GitvaultError;
 use crate::fhsm;
 
 /// Materialize secrets to root .env
-pub(crate) fn cmd_materialize(
+pub fn cmd_materialize(
     env_override: Option<String>,
     identity_path: Option<String>,
     prod: bool,

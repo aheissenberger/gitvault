@@ -9,7 +9,7 @@ use crate::{barrier, crypto, fhsm, materialize, run};
 
 /// Outcome returned by the top-level command dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CommandOutcome {
+pub enum CommandOutcome {
     Success,
     Exit(i32),
 }
@@ -18,7 +18,7 @@ pub(crate) enum CommandOutcome {
 ///
 /// Each method corresponds to one [`fhsm::Effect`] variant that requires I/O.
 /// Implementations receive the repo root and accumulated state as parameters.
-pub(crate) trait EffectRunner {
+pub trait EffectRunner {
     fn check_prod_barrier(
         &self,
         repo_root: &Path,
@@ -52,7 +52,7 @@ pub(crate) trait EffectRunner {
 }
 
 /// Production implementation — delegates to the real I/O functions.
-pub(crate) struct DefaultRunner;
+pub struct DefaultRunner;
 
 impl EffectRunner for DefaultRunner {
     fn check_prod_barrier(
@@ -105,7 +105,7 @@ impl EffectRunner for DefaultRunner {
 /// State (resolved identity, decrypted secrets) is accumulated across effects so
 /// that later effects can depend on earlier ones.  Returns early with the
 /// subprocess exit code for [`fhsm::Effect::RunCommand`].
-pub(crate) fn execute_effects_with(
+pub fn execute_effects_with(
     effects: Vec<fhsm::Effect>,
     repo_root: &Path,
     runner: &dyn EffectRunner,
@@ -178,7 +178,7 @@ pub(crate) fn execute_effects_with(
 }
 
 /// Execute an ordered list of FHSM [`fhsm::Effect`]s using the real I/O functions.
-pub(crate) fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
+pub fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     execute_effects_with(effects, &repo_root, &DefaultRunner)
 }

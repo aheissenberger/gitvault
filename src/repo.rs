@@ -219,7 +219,7 @@ pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
 ///
 /// Reads all `.age` files for `env`, decrypts them with `identity`, and returns
 /// the key-value pairs parsed from the plaintext.
-pub(crate) fn decrypt_env_secrets(
+pub fn decrypt_env_secrets(
     repo_root: &Path,
     env: &str,
     identity: &dyn age::Identity,

@@ -46,21 +46,21 @@ pub fn keyring_delete() -> Result<(), GitvaultError> {
 
 // ── Platform-independent injectable helpers (testable on all platforms) ───────
 
-pub(crate) fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
+pub fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str, &str) -> Result<(), GitvaultError>,
 {
     set_password(SERVICE, USERNAME, key)
 }
 
-pub(crate) fn keyring_get_with<F>(get_password: F) -> Result<String, GitvaultError>
+pub fn keyring_get_with<F>(get_password: F) -> Result<String, GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<String, GitvaultError>,
 {
     get_password(SERVICE, USERNAME)
 }
 
-pub(crate) fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
+pub fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<(), GitvaultError>,
 {

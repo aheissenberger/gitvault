@@ -8,7 +8,7 @@ use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, env, repo, structured};
 
 /// Encrypt a file and write the .age output under secrets/
-pub(crate) fn cmd_encrypt(
+pub fn cmd_encrypt(
     file: String,
     recipient_keys: Vec<String>,
     fields: Option<String>,

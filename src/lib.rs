@@ -1,8 +1,25 @@
-//! gitvault — Git-native secrets manager library.
+//! gitvault — git-native age-encrypted secrets manager.
 //!
-//! Re-exports the public API for use as a library crate.
-//! This minimal set exposes the core error types and pure-logic modules
-//! that are safe to use from downstream crates without pulling in binary-only deps.
+//! This library crate exposes the core modules for use in integration tests,
+//! benchmarks, and as a dependency in other tools.
 
+#[cfg(feature = "ssm")]
+pub mod aws_config;
+pub mod barrier;
+pub mod cli;
+pub mod commands;
+pub mod crypto;
+pub mod env;
 pub mod error;
 pub mod fhsm;
+pub mod identity;
+pub mod keyring_store;
+pub mod materialize;
+pub mod merge;
+pub mod output;
+pub mod permissions;
+pub mod repo;
+pub mod run;
+#[cfg(feature = "ssm")]
+pub mod ssm;
+pub mod structured;

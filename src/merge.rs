@@ -1,13 +1,13 @@
 use crate::error::GitvaultError;
 
 /// Parse a `.env`-formatted string into a list of `(key, value)` pairs.
-pub(crate) fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultError> {
+pub fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultError> {
     dotenvy::from_read_iter(content.as_bytes())
         .map(|pair| pair.map_err(|e| GitvaultError::Usage(format!("Invalid .env content: {e}"))))
         .collect()
 }
 
-pub(crate) fn parse_env_key_from_line(line: &str) -> Option<String> {
+pub fn parse_env_key_from_line(line: &str) -> Option<String> {
     let input = format!("{line}\n");
     let mut iter = dotenvy::from_read_iter(input.as_bytes());
     match iter.next() {
@@ -17,7 +17,7 @@ pub(crate) fn parse_env_key_from_line(line: &str) -> Option<String> {
 }
 
 /// Parse the key and value from a single `.env` assignment line, or `None` for blanks/comments.
-pub(crate) fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
+pub fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
     let input = format!("{line}\n");
     let mut iter = dotenvy::from_read_iter(input.as_bytes());
     match iter.next() {
@@ -27,7 +27,7 @@ pub(crate) fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
 }
 
 /// Rewrite the value portion of a `.env` assignment line, preserving spacing and inline comments.
-pub(crate) fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
+pub fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
     let Some(eq_index) = original_line.find('=') else {
         return original_line.to_string();
     };
@@ -54,7 +54,7 @@ pub(crate) fn rewrite_env_assignment_line(original_line: &str, new_value: &str) 
 /// Uses a standard three-way merge algorithm: for each key, if only one side changed
 /// relative to base, take that change; if both changed identically, accept it; if both
 /// changed differently, emit a conflict marker block.
-pub(crate) fn merge_env_content(base: &str, ours: &str, theirs: &str) -> (String, bool) {
+pub fn merge_env_content(base: &str, ours: &str, theirs: &str) -> (String, bool) {
     // Parse errors are treated as empty maps; callers should validate content first.
     fn to_map(content: &str) -> std::collections::HashMap<String, String> {
         parse_env_pairs(content)

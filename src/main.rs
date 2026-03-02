@@ -1,30 +1,9 @@
-#[cfg(feature = "ssm")]
-mod aws_config;
-mod barrier;
-mod cli;
-mod commands;
-mod crypto;
-mod env;
-mod error;
-mod fhsm;
-mod identity;
-mod keyring_store;
-mod materialize;
-mod merge;
-mod output;
-mod permissions;
-mod repo;
-mod run;
-#[cfg(feature = "ssm")]
-mod ssm;
-mod structured;
-
 use clap::Parser;
 #[cfg(feature = "ssm")]
-use cli::SsmAction;
-use cli::{Cli, Commands};
-use commands::CommandOutcome;
-use error::GitvaultError;
+use gitvault::cli::SsmAction;
+use gitvault::cli::{Cli, Commands};
+use gitvault::commands::CommandOutcome;
+use gitvault::error::{self, GitvaultError};
 use std::process;
 
 fn main() {
@@ -42,21 +21,21 @@ fn main() {
 }
 
 fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
-    cli.no_prompt = output::resolve_no_prompt(cli.no_prompt);
+    cli.no_prompt = gitvault::output::resolve_no_prompt(cli.no_prompt);
     match cli.command {
         Commands::Encrypt {
             file,
             recipients,
             fields,
             value_only,
-        } => commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json),
+        } => gitvault::commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json),
         Commands::Decrypt {
             file,
             identity,
             output,
             fields,
             reveal,
-        } => commands::decrypt::cmd_decrypt(
+        } => gitvault::commands::decrypt::cmd_decrypt(
             file,
             identity,
             output,
@@ -69,11 +48,11 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             env,
             identity,
             prod,
-        } => commands::materialize::cmd_materialize(env, identity, prod, cli.json, cli.no_prompt),
+        } => gitvault::commands::materialize::cmd_materialize(env, identity, prod, cli.json, cli.no_prompt),
         Commands::Status { fail_if_dirty } => {
-            commands::admin::cmd_status(cli.json, fail_if_dirty)
+            gitvault::commands::admin::cmd_status(cli.json, fail_if_dirty)
         }
-        Commands::Harden => commands::admin::cmd_harden(cli.json),
+        Commands::Harden => gitvault::commands::admin::cmd_harden(cli.json),
         Commands::Run {
             env,
             identity,
@@ -81,7 +60,7 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             clear_env,
             pass,
             command,
-        } => commands::run_cmd::cmd_run(
+        } => gitvault::commands::run_cmd::cmd_run(
             env,
             identity,
             prod,
@@ -91,45 +70,45 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cli.json,
             cli.no_prompt,
         ),
-        Commands::AllowProd { ttl } => commands::admin::cmd_allow_prod(ttl, cli.json),
+        Commands::AllowProd { ttl } => gitvault::commands::admin::cmd_allow_prod(ttl, cli.json),
         Commands::MergeDriver { base, ours, theirs } => {
-            commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
+            gitvault::commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
         }
         Commands::Recipient { action } => {
-            commands::recipients::cmd_recipient(action, cli.json)
+            gitvault::commands::recipients::cmd_recipient(action, cli.json)
         }
         Commands::Rotate { identity } => {
-            commands::recipients::cmd_rotate(identity, cli.json)
+            gitvault::commands::recipients::cmd_rotate(identity, cli.json)
         }
-        Commands::Keyring { action } => commands::keyring::cmd_keyring(action, cli.json),
+        Commands::Keyring { action } => gitvault::commands::keyring::cmd_keyring(action, cli.json),
         Commands::Check { env, identity } => {
-            commands::admin::cmd_check(env, identity, cli.json)
+            gitvault::commands::admin::cmd_check(env, identity, cli.json)
         }
-        Commands::RevokeProd => commands::admin::cmd_revoke_prod(cli.json),
+        Commands::RevokeProd => gitvault::commands::admin::cmd_revoke_prod(cli.json),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
-            let aws = crate::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);
-            let repo_root = crate::repo::find_repo_root()?;
+            let aws = gitvault::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);
+            let repo_root = gitvault::repo::find_repo_root()?;
             tokio::runtime::Runtime::new()
                 .map_err(|e| GitvaultError::Other(e.to_string()))?
                 .block_on(async {
                     match action {
                         SsmAction::Pull { env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_pull(&repo_root, &env, &aws).await
+                            gitvault::ssm::cmd_ssm_pull(&repo_root, &env, &aws).await
                         }
                         SsmAction::Diff { env, reveal } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal).await
+                            gitvault::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal).await
                         }
                         SsmAction::Set { key, value, env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json)
+                            gitvault::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json)
                                 .await
                         }
                         SsmAction::Push { env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_push(&repo_root, &env, &aws, cli.json).await
+                            gitvault::ssm::cmd_ssm_push(&repo_root, &env, &aws, cli.json).await
                         }
                     }
                 })
@@ -141,22 +120,22 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_helpers::*;
-    use cli::{Commands, KeyringAction};
+    use gitvault::commands::test_helpers::*;
+    use gitvault::cli::{Commands, KeyringAction};
     use tempfile::TempDir;
 
     #[test]
     fn test_ci_env_sets_no_prompt() {
         with_env_var("CI", Some("1"), || {
-            assert!(output::resolve_no_prompt(false));
-            assert!(output::resolve_no_prompt(true));
-            assert!(output::ci_is_non_interactive());
+            assert!(gitvault::output::resolve_no_prompt(false));
+            assert!(gitvault::output::resolve_no_prompt(true));
+            assert!(gitvault::output::ci_is_non_interactive());
         });
 
         with_env_var("CI", None, || {
-            assert!(!output::resolve_no_prompt(false));
-            assert!(output::resolve_no_prompt(true));
-            assert!(!output::ci_is_non_interactive());
+            assert!(!gitvault::output::resolve_no_prompt(false));
+            assert!(gitvault::output::resolve_no_prompt(true));
+            assert!(!gitvault::output::ci_is_non_interactive());
         });
     }
 

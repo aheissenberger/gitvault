@@ -7,7 +7,7 @@ use crate::identity::load_identity;
 use crate::{crypto, keyring_store};
 
 /// Manage identity key in OS keyring (REQ-39)
-pub(crate) fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     cmd_keyring_with_ops(
         action,
         json,
@@ -17,7 +17,7 @@ pub(crate) fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOu
     )
 }
 
-pub(crate) fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
+pub fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
     action: KeyringAction,
     json: bool,
     keyring_set_fn: SetFn,

@@ -6,7 +6,7 @@ use crate::fhsm;
 
 /// Run a command with secrets injected as environment variables (REQ-21..25)
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn cmd_run(
+pub fn cmd_run(
     env_override: Option<String>,
     identity_path: Option<String>,
     prod: bool,
