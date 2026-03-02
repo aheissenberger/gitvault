@@ -22,23 +22,25 @@ pub(crate) fn encrypt_armor(
 
     let mut output = Vec::new();
     {
+        // ArmoredWriter on a Vec<u8> is infallible; the Result is a type-system artefact.
         let armor =
             age::armor::ArmoredWriter::wrap_output(&mut output, age::armor::Format::AsciiArmor)
-                .map_err(|e| GitvaultError::Encryption(format!("Armor writer: {e}")))?;
+                .expect("ArmoredWriter on Vec<u8> is infallible");
         let mut writer = encryptor
             .wrap_output(armor)
-            .map_err(|e| GitvaultError::Encryption(format!("Encrypt wrap: {e}")))?;
+            .expect("age encryption wrapping is infallible");
         writer
             .write_all(plaintext)
-            .map_err(|e| GitvaultError::Encryption(format!("Encrypt write: {e}")))?;
+            .expect("Vec<u8> write is infallible");
         let armor = writer
             .finish()
-            .map_err(|e| GitvaultError::Encryption(format!("Encrypt finish: {e}")))?;
+            .expect("age encryption finalize is infallible");
         armor
             .finish()
-            .map_err(|e| GitvaultError::Encryption(format!("Armor finish: {e}")))?;
+            .expect("ArmoredWriter finalize is infallible");
     }
-    String::from_utf8(output).map_err(|e| GitvaultError::Encryption(format!("UTF-8 error: {e}")))
+    // age ASCII armor is always valid UTF-8
+    Ok(String::from_utf8(output).expect("age armor output is always UTF-8"))
 }
 
 /// Decrypt an age armor string using the given identity.
@@ -87,13 +89,13 @@ pub(crate) fn encrypt_binary_b64(
     let mut output = Vec::new();
     let mut writer = encryptor
         .wrap_output(&mut output)
-        .map_err(|e| GitvaultError::Encryption(format!("Encrypt wrap: {e}")))?;
+        .expect("age binary encryption wrapping is infallible");
     writer
         .write_all(plaintext)
-        .map_err(|e| GitvaultError::Encryption(format!("Encrypt write: {e}")))?;
+        .expect("Vec<u8> write is infallible");
     writer
         .finish()
-        .map_err(|e| GitvaultError::Encryption(format!("Encrypt finish: {e}")))?;
+        .expect("age binary encryption finalize is infallible");
 
     Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
@@ -205,5 +207,96 @@ mod tests {
         let encoded = encrypt_binary_b64(plain, &keys).unwrap();
         let decrypted = decrypt_binary_b64(&encoded, &identity).unwrap();
         assert_eq!(decrypted, plain);
+    }
+
+    // ── invalid recipient key ────────────────────────────────────────────────
+
+    #[test]
+    fn test_encrypt_armor_invalid_key_errors() {
+        let keys = vec!["not-a-valid-age-key".to_string()];
+        let err = encrypt_armor(b"data", &keys).unwrap_err();
+        assert!(
+            err.to_string().contains("Invalid recipient key"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_encrypt_binary_b64_invalid_key_errors() {
+        let keys = vec!["not-a-valid-age-key".to_string()];
+        let err = encrypt_binary_b64(b"data", &keys).unwrap_err();
+        assert!(
+            err.to_string().contains("Invalid recipient key"),
+            "got: {err}"
+        );
+    }
+
+    // ── empty recipients ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_encrypt_armor_no_recipients_errors() {
+        let err = encrypt_armor(b"data", &[]).unwrap_err();
+        assert!(
+            err.to_string().contains("At least one recipient"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_encrypt_binary_b64_no_recipients_errors() {
+        let err = encrypt_binary_b64(b"data", &[]).unwrap_err();
+        assert!(
+            err.to_string().contains("At least one recipient"),
+            "got: {err}"
+        );
+    }
+
+    // ── wrong identity (decrypt with a different key) ────────────────────────
+
+    #[test]
+    fn test_decrypt_armor_wrong_identity_errors() {
+        let enc_id = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_id);
+        let wrong_id = gen_identity();
+
+        let armored = encrypt_armor(b"secret", &keys).unwrap();
+        let err = decrypt_armor(&armored, &wrong_id).unwrap_err();
+        assert!(err.to_string().contains("Decrypt"), "got: {err}");
+    }
+
+    #[test]
+    fn test_decrypt_binary_b64_wrong_identity_errors() {
+        let enc_id = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_id);
+        let wrong_id = gen_identity();
+
+        let encoded = encrypt_binary_b64(b"secret", &keys).unwrap();
+        let err = decrypt_binary_b64(&encoded, &wrong_id).unwrap_err();
+        assert!(err.to_string().contains("Decrypt"), "got: {err}");
+    }
+
+    // ── malformed ciphertext (Decryptor::new failure) ────────────────────────
+
+    #[test]
+    fn test_decrypt_armor_malformed_input_errors() {
+        let identity = gen_identity();
+        // Valid base structure but garbage body — Decryptor::new must fail
+        let err = decrypt_armor("-----BEGIN AGE ENCRYPTED FILE-----\ngarbage\n-----END AGE ENCRYPTED FILE-----\n", &identity).unwrap_err();
+        assert!(
+            err.to_string().contains("Decryptor create") || err.to_string().contains("Decrypt"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decrypt_binary_b64_malformed_ciphertext_errors() {
+        let identity = gen_identity();
+        // Valid base64 of non-age data — Decryptor::new must fail
+        let garbage_b64 = base64::engine::general_purpose::STANDARD.encode(b"this is not age ciphertext at all");
+        let err = decrypt_binary_b64(&garbage_b64, &identity).unwrap_err();
+        assert!(
+            err.to_string().contains("Decryptor create") || err.to_string().contains("Decrypt"),
+            "got: {err}"
+        );
     }
 }
