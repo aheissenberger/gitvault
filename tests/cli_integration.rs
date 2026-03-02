@@ -416,3 +416,114 @@ fn check_succeeds_with_valid_setup() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// Integration: gitvault rotate re-encrypts secrets to current recipients.
+#[test]
+fn rotate_re_encrypts_secrets() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_id_tmp, identity_path, pubkey) = write_identity_file();
+
+    // Add a recipient and harden first.
+    bin().args(["harden"]).current_dir(repo.path()).status().unwrap();
+    bin()
+        .args(["recipient", "add", &pubkey])
+        .current_dir(repo.path())
+        .status()
+        .unwrap();
+
+    // Write a plaintext file and encrypt it.
+    let env_file = repo.path().join("app.env");
+    std::fs::write(&env_file, "SECRET=rotate_me\n").unwrap();
+    let enc = bin()
+        .args(["encrypt", "app.env", "--recipient", &pubkey])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("encrypt should run");
+    assert!(enc.status.success(), "encrypt: {}", String::from_utf8_lossy(&enc.stderr));
+
+    // Rotate secrets.
+    let rotate = bin()
+        .args(["rotate"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("rotate should run");
+    assert!(
+        rotate.status.success(),
+        "rotate failed: {}",
+        String::from_utf8_lossy(&rotate.stderr)
+    );
+}
+
+/// Integration: gitvault allow-prod and revoke-prod round-trip.
+#[test]
+fn allow_and_revoke_prod_round_trip() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+
+    let allow = bin()
+        .args(["allow-prod", "--ttl", "60"])
+        .current_dir(repo.path())
+        .output()
+        .expect("allow-prod should run");
+    assert!(
+        allow.status.success(),
+        "allow-prod failed: {}",
+        String::from_utf8_lossy(&allow.stderr)
+    );
+
+    let revoke = bin()
+        .args(["revoke-prod"])
+        .current_dir(repo.path())
+        .output()
+        .expect("revoke-prod should run");
+    assert!(
+        revoke.status.success(),
+        "revoke-prod failed: {}",
+        String::from_utf8_lossy(&revoke.stderr)
+    );
+}
+
+/// Integration: gitvault decrypt --reveal prints plaintext to stdout.
+#[test]
+fn decrypt_reveal_prints_plaintext() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_id_tmp, identity_path, pubkey) = write_identity_file();
+
+    // Write and encrypt a secrets file.
+    let env_file = repo.path().join("secrets.env");
+    std::fs::write(&env_file, "TOKEN=reveal_me\n").unwrap();
+    let enc = bin()
+        .args(["encrypt", "secrets.env", "--recipient", &pubkey])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .env("SECRETS_ENV", "dev")
+        .current_dir(repo.path())
+        .output()
+        .expect("encrypt should run");
+    assert!(enc.status.success(), "encrypt: {}", String::from_utf8_lossy(&enc.stderr));
+
+    // The encrypted file goes to secrets/dev/secrets.env.age.
+    let age_file = repo.path().join("secrets/dev/secrets.env.age");
+    assert!(age_file.exists(), "expected secrets/dev/secrets.env.age to exist after encrypt");
+
+    // Decrypt with --reveal (prints to stdout, no output file).
+    let dec = bin()
+        .args(["decrypt", "secrets/dev/secrets.env.age", "--reveal"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("decrypt --reveal should run");
+    assert!(
+        dec.status.success(),
+        "decrypt --reveal failed: {}",
+        String::from_utf8_lossy(&dec.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&dec.stdout).contains("TOKEN=reveal_me"),
+        "expected TOKEN=reveal_me in output, got: {}",
+        String::from_utf8_lossy(&dec.stdout)
+    );
+}

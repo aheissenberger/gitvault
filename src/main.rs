@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_check_and_status() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_run_returns_exit_outcome() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_encrypt_then_decrypt_arms() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_allow_prod_succeeds() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_rotate_succeeds() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_merge_driver_outcomes() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
 
         let base = dir.path().join("base.env");
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_keyring_set_invalid_identity_errors() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_with_env_var_restores_existing_value() {
-        let _lock = global_test_lock().lock().unwrap();
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             std::env::set_var("GITVAULT_TEST_VAR", "before");
         }
@@ -436,5 +436,89 @@ mod tests {
         unsafe {
             std::env::remove_var("GITVAULT_TEST_VAR");
         }
+    }
+
+    #[test]
+    fn test_run_dispatch_revoke_prod_succeeds() {
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Allow prod first so there's a token to revoke.
+        let allow_cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::AllowProd { ttl: 60 },
+        };
+        run(allow_cli).expect("allow-prod should succeed");
+
+        let revoke_cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::RevokeProd,
+        };
+        let outcome = run(revoke_cli).expect("revoke-prod dispatch should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    #[test]
+    fn test_run_dispatch_keyring_set_exercises_dispatch() {
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        let cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::Keyring {
+                action: KeyringAction::Set {
+                    identity: Some(identity_file.path().to_string_lossy().to_string()),
+                },
+            },
+        };
+        // The dispatch path is exercised regardless of whether the OS keyring
+        // is available. On headless CI the real keyring returns an error; on
+        // developer machines it succeeds.  Both are acceptable — we only assert
+        // that the error (if any) is a Keyring error, not an unexpected panic.
+        match run(cli) {
+            Ok(outcome) => assert_eq!(outcome, CommandOutcome::Success),
+            Err(crate::error::GitvaultError::Keyring(_)) => {}
+            Err(other) => panic!("Unexpected error from keyring dispatch: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_run_dispatch_decrypt_nonexistent_file_propagates_error() {
+        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        let cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::Decrypt {
+                file: dir.path().join("no_such_file.age").to_string_lossy().to_string(),
+                identity: Some(identity_file.path().to_string_lossy().to_string()),
+                output: None,
+                fields: None,
+                reveal: false,
+            },
+        };
+        // Decrypting a nonexistent file should propagate the error through the `?` (line 71).
+        let err = run(cli).expect_err("decrypt of nonexistent file should fail");
+        assert!(matches!(err, GitvaultError::Io(_)));
     }
 }

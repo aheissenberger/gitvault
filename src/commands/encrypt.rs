@@ -205,4 +205,92 @@ mod tests {
         assert_eq!(value["secret"], "abc");
         assert_eq!(value["name"], "demo");
     }
+
+    #[test]
+    fn test_cmd_encrypt_fields_on_nonexistent_file_propagates_error() {
+        // Covers the `|e| GitvaultError::Encryption(e.to_string())` closure in the fields branch.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let recipient = identity.to_public().to_string();
+
+        // A non-existent JSON file causes encrypt_fields to return an error.
+        let nonexistent = dir.path().join("no_such_file.json");
+
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_encrypt(
+                nonexistent.to_string_lossy().to_string(),
+                vec![recipient],
+                Some("field".to_string()),
+                false,
+                false,
+            )
+            .expect_err("encrypt fields on nonexistent file should fail");
+            assert!(
+                matches!(err, GitvaultError::Encryption(_)),
+                "expected Encryption error, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn test_cmd_encrypt_invalid_recipient_in_normal_path_errors() {
+        // Covers the error branch of the recipient-map closure in the normal encrypt path.
+        // The key passes resolve_recipient_keys (returned as-is) but fails parse_recipient.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let plain_file = dir.path().join("data.txt");
+        std::fs::write(&plain_file, "VALUE=123\n").unwrap();
+
+        // A syntactically-valid age1 key that fails the actual bech32 parse.
+        let bad_recipient = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        let err = cmd_encrypt(
+            plain_file.to_string_lossy().to_string(),
+            vec![bad_recipient.to_string()],
+            None,
+            false,
+            false,
+        )
+        .expect_err("invalid recipient should fail encrypt");
+        assert!(
+            matches!(err, GitvaultError::Encryption(_)),
+            "expected Encryption error from bad recipient, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_encrypt_no_filename_in_path_errors() {
+        // Covers the ok_or_else("Invalid file path") branch when input_path has no filename.
+        // A path ending in "/" or "." has no file_name component.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let recipient = identity.to_public().to_string();
+
+        // The path "." has no meaningful filename (file_name() returns Some(".")).
+        // Use "/" which has no file_name().
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_encrypt(
+                "/".to_string(),
+                vec![recipient],
+                None,
+                false,
+                false,
+            )
+            .expect_err("root path should fail with no filename");
+            // Either Usage (no filename) or Io (can't read /) is acceptable.
+            assert!(
+                matches!(err, GitvaultError::Usage(_) | GitvaultError::Io(_)),
+                "expected Usage or Io error for root path, got: {err:?}"
+            );
+        });
+    }
 }

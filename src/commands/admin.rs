@@ -386,4 +386,84 @@ mod tests {
 
         assert_eq!(outcome, CommandOutcome::Exit(1));
     }
+
+    #[test]
+    fn test_cmd_revoke_prod_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Create a token first so revoke has something to remove.
+        cmd_allow_prod(60, false).expect("allow-prod should create token");
+        assert!(dir.path().join(".secrets/.prod-token").exists());
+
+        cmd_revoke_prod(false).expect("revoke-prod should succeed");
+        // After revoking, the token should be gone.
+        assert!(!dir.path().join(".secrets/.prod-token").exists());
+
+        // Also test json=true path.
+        cmd_allow_prod(60, false).expect("allow-prod for json test");
+        cmd_revoke_prod(true).expect("revoke-prod json should succeed");
+    }
+
+    #[test]
+    fn test_merge_driver_conflict_json_output() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().join("base.env");
+        let ours = dir.path().join("ours.env");
+        let theirs = dir.path().join("theirs.env");
+
+        // Both sides change A → conflict.
+        std::fs::write(&base, "A=1\n").unwrap();
+        std::fs::write(&ours, "A=2\n").unwrap();
+        std::fs::write(&theirs, "A=3\n").unwrap();
+
+        // json=true exercises the JSON conflict output branch (lines 100-103).
+        let outcome = cmd_merge_driver(
+            base.to_string_lossy().to_string(),
+            ours.to_string_lossy().to_string(),
+            theirs.to_string_lossy().to_string(),
+            true,
+        )
+        .expect("merge driver conflict with json should return outcome");
+        assert_eq!(outcome, CommandOutcome::Exit(1));
+    }
+
+    #[test]
+    fn test_cmd_check_age_format_valid_but_crypto_invalid_recipient() {
+        // Write a recipient that passes the read_recipients regex (age1[0-9a-z]+)
+        // but is rejected by crypto::parse_recipient (invalid bech32 checksum).
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        // This key matches age1[0-9a-z]+ but has an invalid bech32 checksum.
+        let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let recipients_path = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(recipients_path.parent().unwrap()).unwrap();
+        std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_check(None, None, false).unwrap_err();
+            // The error should come from the parse_recipient call in the for loop.
+            assert!(
+                matches!(err, GitvaultError::Usage(_)),
+                "expected Usage error, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn test_cmd_harden_json_output() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // json=true exercises the output_success(json=true) path in cmd_harden.
+        cmd_harden(true).expect("harden with json flag should succeed");
+    }
 }

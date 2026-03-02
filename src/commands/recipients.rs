@@ -95,27 +95,19 @@ mod tests {
     fn test_resolve_recipient_keys_defaults_to_local_identity_public_key() {
         let _lock = global_test_lock().lock().unwrap();
         let identity = x25519::Identity::generate();
-        let identity_secret = identity.to_string();
         let expected_recipient = identity.to_public().to_string();
 
         use age::secrecy::ExposeSecret;
         let dir = TempDir::new().unwrap();
-        let previous = std::env::var("GITVAULT_IDENTITY").ok();
-        unsafe {
-            std::env::set_var("GITVAULT_IDENTITY", identity_secret.expose_secret());
-        }
 
-        let resolved = resolve_recipient_keys(dir.path(), vec![])
-            .expect("default recipient resolution should succeed");
-
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var("GITVAULT_IDENTITY", value);
+        let resolved = with_env_var(
+            "GITVAULT_IDENTITY",
+            Some(identity.to_string().expose_secret()),
+            || {
+                resolve_recipient_keys(dir.path(), vec![])
+                    .expect("default recipient resolution should succeed")
             },
-            None => unsafe {
-                std::env::remove_var("GITVAULT_IDENTITY");
-            },
-        }
+        );
 
         assert_eq!(resolved, vec![expected_recipient]);
     }
@@ -124,34 +116,23 @@ mod tests {
     fn test_resolve_recipient_keys_defaults_from_identity_file_path() {
         let _lock = global_test_lock().lock().unwrap();
         let identity = x25519::Identity::generate();
-        let identity_secret = identity.to_string();
         let expected_recipient = identity.to_public().to_string();
 
         use age::secrecy::ExposeSecret;
         let identity_file = tempfile::NamedTempFile::new().expect("temp file should be created");
-        std::fs::write(identity_file.path(), identity_secret.expose_secret())
+        std::fs::write(identity_file.path(), identity.to_string().expose_secret())
             .expect("identity should be written to temp file");
 
         let dir = TempDir::new().unwrap();
-        let previous = std::env::var("GITVAULT_IDENTITY").ok();
-        unsafe {
-            std::env::set_var(
-                "GITVAULT_IDENTITY",
-                identity_file.path().to_string_lossy().to_string(),
-            );
-        }
 
-        let resolved = resolve_recipient_keys(dir.path(), vec![])
-            .expect("default recipient resolution should succeed");
-
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var("GITVAULT_IDENTITY", value);
+        let resolved = with_env_var(
+            "GITVAULT_IDENTITY",
+            Some(&identity_file.path().to_string_lossy()),
+            || {
+                resolve_recipient_keys(dir.path(), vec![])
+                    .expect("default recipient resolution should succeed")
             },
-            None => unsafe {
-                std::env::remove_var("GITVAULT_IDENTITY");
-            },
-        }
+        );
 
         assert_eq!(resolved, vec![expected_recipient]);
     }
@@ -160,66 +141,36 @@ mod tests {
     fn test_resolve_recipient_keys_fails_without_identity_source() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
-        let previous = std::env::var("GITVAULT_IDENTITY").ok();
-        let previous_keyring = std::env::var("GITVAULT_KEYRING").ok();
-        unsafe {
-            std::env::remove_var("GITVAULT_IDENTITY");
-            std::env::remove_var("GITVAULT_KEYRING");
-        }
 
-        let result = resolve_recipient_keys(dir.path(), vec![]);
+        let result = with_env_var("GITVAULT_IDENTITY", None, || {
+            with_env_var("GITVAULT_KEYRING", None, || {
+                resolve_recipient_keys(dir.path(), vec![])
+            })
+        });
 
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var("GITVAULT_IDENTITY", value);
-            },
-            None => unsafe {
-                std::env::remove_var("GITVAULT_IDENTITY");
-            },
-        }
-        match previous_keyring {
-            Some(value) => unsafe {
-                std::env::set_var("GITVAULT_KEYRING", value);
-            },
-            None => unsafe {
-                std::env::remove_var("GITVAULT_KEYRING");
-            },
-        }
-
-        match result {
-            Err(GitvaultError::Usage(message)) => {
-                assert!(message.contains("No identity provided"));
-            }
-            other => panic!("expected usage error for missing identity, got: {other:?}"),
-        }
+        let err = result.expect_err("expected usage error for missing identity");
+        let msg = match err {
+            GitvaultError::Usage(msg) => msg,
+            _ => panic!("expected Usage error, got: {err:?}"),
+        };
+        assert!(msg.contains("No identity provided"));
     }
 
     #[test]
     fn test_resolve_recipient_keys_fails_with_malformed_identity_key() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
-        let previous = std::env::var("GITVAULT_IDENTITY").ok();
-        unsafe {
-            std::env::set_var("GITVAULT_IDENTITY", "AGE-SECRET-KEY-INVALID");
-        }
 
-        let result = resolve_recipient_keys(dir.path(), vec![]);
+        let result = with_env_var("GITVAULT_IDENTITY", Some("AGE-SECRET-KEY-INVALID"), || {
+            resolve_recipient_keys(dir.path(), vec![])
+        });
 
-        match previous {
-            Some(value) => unsafe {
-                std::env::set_var("GITVAULT_IDENTITY", value);
-            },
-            None => unsafe {
-                std::env::remove_var("GITVAULT_IDENTITY");
-            },
-        }
-
-        match result {
-            Err(GitvaultError::Decryption(message)) => {
-                assert!(message.contains("Invalid identity key"));
-            }
-            other => panic!("expected decryption error for malformed identity, got: {other:?}"),
-        }
+        let err = result.expect_err("expected decryption error for malformed identity");
+        let msg = match err {
+            GitvaultError::Decryption(msg) => msg,
+            _ => panic!("expected Decryption error, got: {err:?}"),
+        };
+        assert!(msg.contains("Invalid identity key"));
     }
 
     #[test]
@@ -326,5 +277,34 @@ mod tests {
 
         // No recipients added → empty list message (lines 883-884).
         cmd_recipient(RecipientAction::List, false).expect("list empty plain should succeed");
+    }
+
+    #[test]
+    fn test_cmd_rotate_with_invalid_crypto_recipient_fails() {
+        // Covers the error branch of the recipient-map closure in cmd_rotate.
+        // The key passes read_recipients (matches age1[0-9a-z]+) but fails parse_recipient.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Write an encrypted file so cmd_rotate has something to iterate over.
+        write_encrypted_env_file(dir.path(), "dev", "rotate.env.age", &identity, "K=1\n");
+
+        // Write a recipient that passes the regex but fails actual crypto parsing.
+        let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let recipients_path = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(recipients_path.parent().unwrap()).unwrap();
+        std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_rotate(None, false)
+                .expect_err("rotate with invalid recipient should fail");
+            assert!(
+                matches!(err, GitvaultError::Encryption(_)),
+                "expected Encryption error, got: {err:?}"
+            );
+        });
     }
 }
