@@ -232,6 +232,8 @@ gitvault harden
 
 Ensures `.env` and `.secrets/plain/` are in `.gitignore` and installs idempotent pre-commit /
 pre-push hooks. `pre-push` runs `gitvault status --no-prompt --fail-if-dirty` to block drift.
+Also ensures `.gitattributes` contains `*.env merge=gitvault-env` and sets local git config
+`merge.gitvault-env.driver="gitvault merge-driver %O %A %B"`.
 
 ### `run`
 
@@ -309,8 +311,11 @@ Exit `0` on clean merge; exit `1` with conflict markers on same-key conflict.
 Register once per repository:
 
 ```bash
+gitvault harden
+
+# Manual equivalent:
 git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"
-echo '.env merge=gitvault-env' >> .gitattributes
+echo '*.env merge=gitvault-env' >> .gitattributes
 ```
 
 ### `check`

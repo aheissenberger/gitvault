@@ -1,12 +1,55 @@
 //! Admin/status commands: harden, status, check, allow-prod, revoke-prod, merge-driver.
 
+use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::load_identity;
 use crate::merge::merge_env_content;
 use crate::{barrier, crypto, env, repo};
+
+const MERGE_DRIVER_CONFIG_KEY: &str = "merge.gitvault-env.driver";
+const MERGE_DRIVER_CONFIG_VALUE: &str = "gitvault merge-driver %O %A %B";
+
+fn ensure_merge_driver_git_config(repo_root: &Path) -> Result<(), GitvaultError> {
+    let get_output = Command::new("git")
+        .args(["config", "--local", "--get", MERGE_DRIVER_CONFIG_KEY])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| GitvaultError::Other(format!("failed to run git config --get: {e}")))?;
+
+    if get_output.status.success() {
+        return Ok(());
+    }
+
+    if get_output.status.code() != Some(1) {
+        let stderr = String::from_utf8_lossy(&get_output.stderr);
+        return Err(GitvaultError::Other(format!(
+            "git config --get {MERGE_DRIVER_CONFIG_KEY} failed: {stderr}"
+        )));
+    }
+
+    let set_status = Command::new("git")
+        .args([
+            "config",
+            "--local",
+            MERGE_DRIVER_CONFIG_KEY,
+            MERGE_DRIVER_CONFIG_VALUE,
+        ])
+        .current_dir(repo_root)
+        .status()
+        .map_err(|e| GitvaultError::Other(format!("failed to run git config --set: {e}")))?;
+
+    if !set_status.success() {
+        return Err(GitvaultError::Other(format!(
+            "git config --local {MERGE_DRIVER_CONFIG_KEY} failed with status {set_status}"
+        )));
+    }
+
+    Ok(())
+}
 
 /// Check repository safety status
 ///
@@ -50,7 +93,8 @@ pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, Git
 /// # Errors
 ///
 /// Returns [`GitvaultError`] if the repository root cannot be found, `.gitignore` or
-/// `.gitattributes` update fails, or git hook installation fails.
+/// `.gitattributes` update fails, git hook installation fails, or git config
+/// registration fails.
 pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     crate::materialize::ensure_gitignored(
@@ -62,8 +106,9 @@ pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
         &repo_root,
         &[crate::materialize::GITATTRIBUTES_MERGE_DRIVER_ENTRY],
     )?;
+    ensure_merge_driver_git_config(&repo_root)?;
     crate::output::output_success(
-        "Repository hardened: .gitignore updated, git hooks installed, .gitattributes updated.",
+        "Repository hardened: .gitignore updated, git hooks installed, .gitattributes updated, merge driver configured.",
         json,
     );
     Ok(CommandOutcome::Success)
@@ -208,7 +253,22 @@ pub fn cmd_check(
 mod tests {
     use super::*;
     use crate::commands::test_helpers::*;
+    use std::process::Command;
     use tempfile::TempDir;
+
+    fn local_git_config(repo_root: &Path, key: &str) -> Option<String> {
+        let output = Command::new("git")
+            .args(["config", "--local", "--get", key])
+            .current_dir(repo_root)
+            .output()
+            .expect("git config should run");
+
+        if !output.status.success() {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
 
     #[test]
     fn test_cmd_harden_writes_gitattributes() {
@@ -245,6 +305,47 @@ mod tests {
             1,
             "merge driver entry should appear exactly once even after running harden twice"
         );
+    }
+
+    #[test]
+    fn test_cmd_harden_registers_merge_driver_git_config() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        cmd_harden(false).expect("harden should succeed");
+
+        let value = local_git_config(dir.path(), MERGE_DRIVER_CONFIG_KEY)
+            .expect("merge driver git config should be set");
+        assert_eq!(value, MERGE_DRIVER_CONFIG_VALUE);
+    }
+
+    #[test]
+    fn test_cmd_harden_preserves_existing_merge_driver_git_config() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let custom_value = "custom-merge-command %O %A %B";
+        let status = Command::new("git")
+            .args([
+                "config",
+                "--local",
+                MERGE_DRIVER_CONFIG_KEY,
+                custom_value,
+            ])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config should run");
+        assert!(status.success());
+
+        cmd_harden(false).expect("harden should succeed");
+
+        let value = local_git_config(dir.path(), MERGE_DRIVER_CONFIG_KEY)
+            .expect("merge driver git config should remain set");
+        assert_eq!(value, custom_value);
     }
 
     #[test]

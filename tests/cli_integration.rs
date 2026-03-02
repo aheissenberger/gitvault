@@ -16,6 +16,20 @@ fn init_git_repo(path: &Path) {
     assert!(status.success());
 }
 
+fn git_config_local(path: &Path, key: &str) -> Option<String> {
+    let out = Command::new("git")
+        .args(["config", "--local", "--get", key])
+        .current_dir(path)
+        .output()
+        .expect("git config should run");
+
+    if !out.status.success() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 fn write_identity_file() -> (TempDir, String, String) {
     let tmp = TempDir::new().expect("temp dir should be created");
     let identity = x25519::Identity::generate();
@@ -50,6 +64,121 @@ fn harden_and_status_work_in_repo() {
         .output()
         .expect("status should run");
     assert!(status.status.success());
+}
+
+#[test]
+fn harden_installs_merge_driver_and_git_merge_uses_it() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+
+    let set_email = Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git config user.email should run");
+    assert!(set_email.success());
+
+    let set_name = Command::new("git")
+        .args(["config", "user.name", "Gitvault Test"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git config user.name should run");
+    assert!(set_name.success());
+
+    let harden = bin()
+        .arg("harden")
+        .current_dir(repo.path())
+        .output()
+        .expect("harden should run");
+    assert!(
+        harden.status.success(),
+        "harden failed: {}",
+        String::from_utf8_lossy(&harden.stderr)
+    );
+
+    let configured = git_config_local(repo.path(), "merge.gitvault-env.driver")
+        .expect("harden should set merge.gitvault-env.driver");
+    assert_eq!(configured, "gitvault merge-driver %O %A %B");
+
+    let driver_for_test = format!("{} merge-driver %O %A %B", env!("CARGO_BIN_EXE_gitvault"));
+    let set_driver = Command::new("git")
+        .args(["config", "--local", "merge.gitvault-env.driver", &driver_for_test])
+        .current_dir(repo.path())
+        .status()
+        .expect("git config merge driver should run");
+    assert!(set_driver.success());
+
+    std::fs::write(repo.path().join("app.env"), "A=1\n").unwrap();
+    let add = Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo.path())
+        .status()
+        .expect("git add should run");
+    assert!(add.success());
+    let commit = Command::new("git")
+        .args(["commit", "-m", "base"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git commit should run");
+    assert!(commit.success());
+
+    let base_branch_out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(repo.path())
+        .output()
+        .expect("git rev-parse should run");
+    assert!(base_branch_out.status.success());
+    let base_branch = String::from_utf8_lossy(&base_branch_out.stdout)
+        .trim()
+        .to_string();
+
+    let checkout_feature = Command::new("git")
+        .args(["checkout", "-b", "feature"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git checkout -b should run");
+    assert!(checkout_feature.success());
+
+    std::fs::write(repo.path().join("app.env"), "A=2\n").unwrap();
+    let commit_feature = Command::new("git")
+        .args(["commit", "-am", "feature change"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git commit on feature should run");
+    assert!(commit_feature.success());
+
+    let checkout_base = Command::new("git")
+        .args(["checkout", &base_branch])
+        .current_dir(repo.path())
+        .status()
+        .expect("git checkout base branch should run");
+    assert!(checkout_base.success());
+
+    std::fs::write(repo.path().join("app.env"), "A=3\n").unwrap();
+    let commit_base = Command::new("git")
+        .args(["commit", "-am", "base change"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git commit on base branch should run");
+    assert!(commit_base.success());
+
+    let merge = Command::new("git")
+        .args(["merge", "feature"])
+        .current_dir(repo.path())
+        .output()
+        .expect("git merge should run");
+    assert_eq!(
+        merge.status.code(),
+        Some(1),
+        "expected merge conflict (exit 1), stderr: {}",
+        String::from_utf8_lossy(&merge.stderr)
+    );
+
+    let merged_file = std::fs::read_to_string(repo.path().join("app.env")).unwrap();
+    assert!(
+        merged_file.contains("<<<<<<< ours") && merged_file.contains(">>>>>>> theirs"),
+        "expected gitvault merge-driver conflict markers in app.env, got: {merged_file}"
+    );
 }
 
 #[test]
