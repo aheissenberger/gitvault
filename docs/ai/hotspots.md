@@ -1,7 +1,7 @@
 # Architecture Hotspots
 
 Curated from the 2026-03-01 multi-agent review so future agents can jump directly to high-value areas.
-Last updated: 2026-03-02 (fifth refactor pass — nursery clippy applied).
+Last updated: 2026-03-02 (sixth refactor pass — items_after_statements, dispatch split, bools).
 
 ## Resolved Issues (no longer actionable)
 
@@ -28,6 +28,12 @@ All previously-open issues have been resolved in this session:
   let-else patterns, unnested or-patterns, identical match arms, raw string hashes cleaned up.
 - Nursery clippy pass → **applied**: `or_fun_call` (11 sites — `unwrap_or(f())` → `unwrap_or_else(|| f())`),
   `redundant_clone`, `option_if_let_else`, `redundant_closure_for_method_calls`.
+- `items_after_statements` (5 sites) → **fixed**: `use` statements moved to top of function bodies
+  in `decrypt.rs`, `keyring.rs`, `recipients.rs`.
+- `too_many_lines` in `dispatch.rs` (108/100) → **fixed**: `dispatch_ssm()` helper extracted,
+  `run()` reduced to ~72 lines.
+- `struct_excessive_bools` on `DecryptOptions` → **suppressed with rationale**: each bool is a
+  direct CLI flag mapping; idiomatic for CLI option structs.
 
 ## Remaining Low Priority Items
 
@@ -45,11 +51,14 @@ These items are known but reviewed and deemed low-value relative to refactor ris
 - 17 `#[must_use]` candidates (13 functions + 4 methods) — API annotation work; deferred.
 - 5 `needless_pass_by_value` — all public API `String` params; changing to `&str` would be
   API-breaking and require updating all callers in `dispatch.rs`.
-- 3 `map_or` suggestions in test code — current `match` is clearer; skipped.
-- 2 `unnecessary_wraps` in `keyring.rs` test helpers — functions must match `Result`-returning
+- 38 doc backtick warnings — pedantic doc formatting; not blocking CI, deferred.
+- 5 `needless_pass_by_value` — all public API `String` params; changing to `&str` would be
+  API-breaking and require updating all callers in `dispatch.rs`.
+- 3 `map_or` test code style suggestions — current `match` is clearer.
+- 2 remaining `match` → `if let` suggestions — both arms are meaningful; pedantic style only.
+- 2 + 1 `unnecessary_wraps` in `keyring.rs` test helpers — must match `Result`-returning
   function pointer signatures; cannot change.
-- 2 remaining `match` → `if let` suggestions — both arms are meaningful (not single-pattern);
-  pedantic style preference only.
+- 1 `similar_names` (`keyring_get_fn`/`keyring_set_fn`) — names are intentionally descriptive.
 
 ## Unfulfilled Acceptance Criteria
 
