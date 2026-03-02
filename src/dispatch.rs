@@ -62,7 +62,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Status { fail_if_dirty } => {
             crate::commands::admin::cmd_status(cli.json, fail_if_dirty)
         }
-        Commands::Harden => crate::commands::admin::cmd_harden(cli.json),
+        Commands::Harden => crate::commands::admin::cmd_harden(cli.json, cli.no_prompt),
         Commands::Run {
             env,
             identity,
