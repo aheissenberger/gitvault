@@ -79,6 +79,9 @@ pub fn cmd_revoke_prod(json: bool) -> Result<CommandOutcome, GitvaultError> {
 }
 
 /// Run as git merge driver for .env files (REQ-34, REQ-48)
+// String params are intentionally owned: this is a public API called from CLI
+// dispatch where the values are moved out of the parsed command struct.
+#[allow(clippy::needless_pass_by_value)]
 pub fn cmd_merge_driver(
     base: String,
     ours: String,

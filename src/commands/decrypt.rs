@@ -65,10 +65,10 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
             print!("{decrypted}");
             return Ok(CommandOutcome::Success);
         }
-        let out_path = match &opts.output {
-            Some(p) => std::path::PathBuf::from(p),
-            None => input_path,
-        };
+        let out_path = opts
+            .output
+            .as_ref()
+            .map_or(input_path, std::path::PathBuf::from);
         repo::validate_write_path(&repo_root, &out_path)?;
         let mut tmp = tempfile::Builder::new()
             .prefix(".gitvault-tmp-")

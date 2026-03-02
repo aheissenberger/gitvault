@@ -46,9 +46,9 @@ pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, 
 pub fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
     action: KeyringAction,
     json: bool,
-    keyring_set_fn: SetFn,
-    keyring_get_fn: GetFn,
-    keyring_delete_fn: DeleteFn,
+    set_fn: SetFn,
+    get_fn: GetFn,
+    delete_fn: DeleteFn,
 ) -> Result<CommandOutcome, GitvaultError>
 where
     SetFn: Fn(&str) -> Result<(), GitvaultError>,
@@ -58,11 +58,11 @@ where
     match action {
         KeyringAction::Set { identity } => {
             let key = load_identity(identity)?;
-            keyring_set_fn(&key)?;
+            set_fn(&key)?;
             crate::output::output_success("Identity stored in OS keyring.", json);
         }
         KeyringAction::Get => {
-            let key = keyring_get_fn()?;
+            let key = get_fn()?;
             let identity = crypto::parse_identity(&key)?;
             let pubkey = identity.to_public().to_string();
             if json {
@@ -72,7 +72,7 @@ where
             }
         }
         KeyringAction::Delete => {
-            keyring_delete_fn()?;
+            delete_fn()?;
             crate::output::output_success("Identity removed from OS keyring.", json);
         }
     }
@@ -92,11 +92,15 @@ mod tests {
     // as an "unused" parameter to the wrong action arm.
 
     /// Succeeds silently – used as a stand-in set_fn in Get / Delete tests.
+    // Must return Result to match SetFn: Fn(&str) -> Result<(), _> bound.
+    #[allow(clippy::unnecessary_wraps)]
     fn set_ok(_key: &str) -> Result<(), GitvaultError> {
         Ok(())
     }
 
     /// Succeeds silently – used as a stand-in delete_fn in Set / Get tests.
+    // Must return Result to match DeleteFn: Fn() -> Result<(), _> bound.
+    #[allow(clippy::unnecessary_wraps)]
     fn delete_ok() -> Result<(), GitvaultError> {
         Ok(())
     }
@@ -104,6 +108,8 @@ mod tests {
     /// Generates a fresh age identity string – used as a stand-in get_fn in
     /// Set / Delete tests, and as the real get_fn in Get tests (so the body
     /// is actually executed and covered during Get-action tests).
+    // Must return Result to match GetFn: Fn() -> Result<Zeroizing<String>, _> bound.
+    #[allow(clippy::unnecessary_wraps)]
     fn gen_get() -> Result<Zeroizing<String>, GitvaultError> {
         use age::secrecy::ExposeSecret;
         Ok(Zeroizing::new(

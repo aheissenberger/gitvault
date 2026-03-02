@@ -162,24 +162,21 @@ pub fn execute_effects_with(
                 })?;
                 let in_file =
                     std::io::BufReader::new(std::fs::File::open(&file).map_err(GitvaultError::Io)?);
-                match output {
-                    Some(out_path) => {
-                        let tmp = tempfile::NamedTempFile::new_in(
-                            out_path
-                                .parent()
-                                .unwrap_or_else(|| std::path::Path::new(".")),
-                        )?;
-                        {
-                            let mut out_file = std::io::BufWriter::new(tmp.as_file());
-                            crypto::decrypt_stream(identity, in_file, &mut out_file)?;
-                        }
-                        tmp.persist(&out_path)
-                            .map_err(|e| GitvaultError::Io(e.error))?;
+                if let Some(out_path) = output {
+                    let tmp = tempfile::NamedTempFile::new_in(
+                        out_path
+                            .parent()
+                            .unwrap_or_else(|| std::path::Path::new(".")),
+                    )?;
+                    {
+                        let mut out_file = std::io::BufWriter::new(tmp.as_file());
+                        crypto::decrypt_stream(identity, in_file, &mut out_file)?;
                     }
-                    None => {
-                        let mut stdout = std::io::BufWriter::new(std::io::stdout());
-                        crypto::decrypt_stream(identity, in_file, &mut stdout)?;
-                    }
+                    tmp.persist(&out_path)
+                        .map_err(|e| GitvaultError::Io(e.error))?;
+                } else {
+                    let mut stdout = std::io::BufWriter::new(std::io::stdout());
+                    crypto::decrypt_stream(identity, in_file, &mut stdout)?;
                 }
             }
         }
@@ -228,10 +225,9 @@ mod tests {
             _prod: bool,
             _no_prompt: bool,
         ) -> Result<(), GitvaultError> {
-            match &self.barrier_err {
-                None => Ok(()),
-                Some(msg) => Err(GitvaultError::Other(msg.clone())),
-            }
+            self.barrier_err
+                .as_ref()
+                .map_or(Ok(()), |msg| Err(GitvaultError::Other(msg.clone())))
         }
 
         fn load_identity_str(
@@ -271,10 +267,9 @@ mod tests {
             _repo_root: &Path,
             _secrets: &[(String, String)],
         ) -> Result<(), GitvaultError> {
-            match &self.materialize_err {
-                None => Ok(()),
-                Some(msg) => Err(GitvaultError::Other(msg.clone())),
-            }
+            self.materialize_err
+                .as_ref()
+                .map_or(Ok(()), |msg| Err(GitvaultError::Other(msg.clone())))
         }
     }
 

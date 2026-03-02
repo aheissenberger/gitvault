@@ -8,6 +8,9 @@ use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, env, repo, structured};
 
 /// Encrypt a file and write the .age output under secrets/
+// String params are intentionally owned: public API called from CLI dispatch
+// where values are moved out of the parsed command struct.
+#[allow(clippy::needless_pass_by_value)]
 pub fn cmd_encrypt(
     file: String,
     recipient_keys: Vec<String>,

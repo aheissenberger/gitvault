@@ -181,15 +181,12 @@ pub(super) async fn cmd_ssm_push_with<B: SsmBackend>(
     let mut skipped = 0usize;
 
     for (key, path) in &refs {
-        match std::env::var(key) {
-            Ok(value) => {
-                backend.put_param(path, &value).await?;
-                pushed += 1;
-            }
-            Err(_) => {
-                skipped += 1;
-                eprintln!("Skipping '{key}' — not set in environment");
-            }
+        if let Ok(value) = std::env::var(key) {
+            backend.put_param(path, &value).await?;
+            pushed += 1;
+        } else {
+            skipped += 1;
+            eprintln!("Skipping '{key}' — not set in environment");
         }
     }
 
