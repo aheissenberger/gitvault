@@ -171,9 +171,8 @@ mod tests {
         });
 
         let err = result.expect_err("expected usage error for missing identity");
-        let msg = match err {
-            GitvaultError::Usage(msg) => msg,
-            _ => panic!("expected Usage error, got: {err:?}"),
+        let GitvaultError::Usage(msg) = err else {
+            panic!("expected Usage error, got: {err:?}")
         };
         assert!(msg.contains("No identity provided"));
     }
@@ -188,9 +187,8 @@ mod tests {
         });
 
         let err = result.expect_err("expected decryption error for malformed identity");
-        let msg = match err {
-            GitvaultError::Decryption(msg) => msg,
-            _ => panic!("expected Decryption error, got: {err:?}"),
+        let GitvaultError::Decryption(msg) = err else {
+            panic!("expected Decryption error, got: {err:?}")
         };
         assert!(msg.contains("Invalid identity key"));
     }

@@ -49,15 +49,15 @@ impl GitvaultError {
     /// scripts can distinguish encryption failures from permission errors, etc.
     pub fn exit_code(&self) -> i32 {
         match self {
-            GitvaultError::Io(_) => EXIT_ERROR,
-            GitvaultError::Encryption(_) => EXIT_ERROR,
             GitvaultError::Decryption(_) => EXIT_DECRYPT_ERROR,
             GitvaultError::PlaintextLeak(_) => EXIT_PLAINTEXT_LEAK,
             GitvaultError::Usage(_) => EXIT_USAGE,
-            GitvaultError::Other(_) => EXIT_ERROR,
             GitvaultError::BarrierNotSatisfied(_) => EXIT_BARRIER,
-            GitvaultError::Keyring(_) => EXIT_ERROR,
             GitvaultError::Drift(_) => EXIT_DRIFT,
+            GitvaultError::Io(_)
+            | GitvaultError::Encryption(_)
+            | GitvaultError::Other(_)
+            | GitvaultError::Keyring(_) => EXIT_ERROR,
         }
     }
 }

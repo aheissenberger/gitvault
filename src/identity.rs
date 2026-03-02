@@ -81,9 +81,8 @@ pub fn load_identity_from_source(
         fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),
         fhsm::IdentitySource::Keyring => keyring_store::keyring_get(),
         fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(Zeroizing::new(s.clone())),
-        fhsm::IdentitySource::Inline(_) => load_identity(None),
         // Unresolved: executor must run the full priority chain at runtime
-        fhsm::IdentitySource::Unresolved => load_identity(None),
+        fhsm::IdentitySource::Inline(_) | fhsm::IdentitySource::Unresolved => load_identity(None),
     }
 }
 

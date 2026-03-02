@@ -82,9 +82,8 @@ mod tests {
         )
         .expect_err("invalid ciphertext must fail closed");
 
-        let msg = match err {
-            GitvaultError::Decryption(msg) => msg,
-            _ => panic!("expected Decryption error, got: {err:?}"),
+        let GitvaultError::Decryption(msg) = err else {
+            panic!("expected Decryption error, got: {err:?}")
         };
         assert!(msg.contains("Failed to decrypt"));
     }
