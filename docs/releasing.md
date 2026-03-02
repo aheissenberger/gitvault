@@ -110,6 +110,27 @@ Long output includes:
 - git SHA
 - git commit date
 
+## Release notes template
+
+Use this block in the GitHub Release description:
+
+```markdown
+## Downloads
+
+Preferred (smaller) assets:
+- Linux: `gitvault-linux-x86_64.tar.gz`
+- macOS (Apple Silicon): `gitvault-macos-aarch64.tar.gz`
+- macOS (Intel): `gitvault-macos-x86_64.tar.gz`
+- Windows: `gitvault-windows-x86_64.zip`
+
+Raw binaries are also available.
+
+## Verification
+
+- Verify checksums with `SHA256SUMS`.
+- Verify signatures with the matching `.sig` and `.pem` files (Sigstore keyless).
+```
+
 ## Troubleshooting
 
 - `release-check` fails with `no tag exactly matches`: create the local annotated tag first (`git tag -a v<version> -m "v<version>"`).

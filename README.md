@@ -81,6 +81,17 @@ cargo build --release
 # binary is at target/release/gitvault (or /workspaces/.cargo-target/release/gitvault in devcontainer)
 ```
 
+### Download prebuilt binaries (GitHub Releases)
+
+Prefer compressed assets for smaller downloads:
+
+- Linux: `gitvault-linux-x86_64.tar.gz`
+- macOS Apple Silicon: `gitvault-macos-aarch64.tar.gz`
+- macOS Intel: `gitvault-macos-x86_64.tar.gz`
+- Windows: `gitvault-windows-x86_64.zip`
+
+All assets are published with `SHA256SUMS` plus Sigstore cosign `.sig` / `.pem` files.
+
 ---
 
 ## Quick start
