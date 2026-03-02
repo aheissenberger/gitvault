@@ -156,7 +156,7 @@ fn has_valid_token(repo_root: &Path) -> bool {
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .unwrap_or_else(|_| std::time::Duration::from_secs(u64::MAX))
         .as_secs()
 }
 
@@ -167,7 +167,8 @@ mod tests {
     use std::sync::Mutex;
     use tempfile::TempDir;
 
-    static CONFIRM_LOCK: Mutex<()> = Mutex::new(());
+    // Guards GITVAULT_TEST_CONFIRM env var to prevent concurrent modification in tests.
+    static GITVAULT_TEST_CONFIRM_LOCK: Mutex<()> = Mutex::new(());
 
     fn root() -> TempDir {
         TempDir::new().unwrap()
@@ -276,11 +277,15 @@ mod tests {
     #[test]
     fn check_prod_barrier_interactive_yes_via_prompt_helper() {
         let dir = root();
-        let _guard = CONFIRM_LOCK.lock().unwrap();
+        let _guard = GITVAULT_TEST_CONFIRM_LOCK.lock().unwrap();
+        // SAFETY: GITVAULT_TEST_CONFIRM_LOCK is held for the duration of this env var
+        // modification, serializing access across all test threads in this process.
         unsafe {
             std::env::set_var("GITVAULT_TEST_CONFIRM", "y");
         }
         let result = check_prod_barrier(dir.path(), "prod", true, false);
+        // SAFETY: GITVAULT_TEST_CONFIRM_LOCK is held for the duration of this env var
+        // modification, serializing access across all test threads in this process.
         unsafe {
             std::env::remove_var("GITVAULT_TEST_CONFIRM");
         }
@@ -290,11 +295,15 @@ mod tests {
     #[test]
     fn check_prod_barrier_interactive_no_via_prompt_helper() {
         let dir = root();
-        let _guard = CONFIRM_LOCK.lock().unwrap();
+        let _guard = GITVAULT_TEST_CONFIRM_LOCK.lock().unwrap();
+        // SAFETY: GITVAULT_TEST_CONFIRM_LOCK is held for the duration of this env var
+        // modification, serializing access across all test threads in this process.
         unsafe {
             std::env::set_var("GITVAULT_TEST_CONFIRM", "n");
         }
         let result = check_prod_barrier(dir.path(), "prod", true, false);
+        // SAFETY: GITVAULT_TEST_CONFIRM_LOCK is held for the duration of this env var
+        // modification, serializing access across all test threads in this process.
         unsafe {
             std::env::remove_var("GITVAULT_TEST_CONFIRM");
         }
