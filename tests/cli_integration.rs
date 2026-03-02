@@ -7,7 +7,6 @@ use tempfile::TempDir;
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_gitvault"))
 }
-
 fn init_git_repo(path: &Path) {
     let status = Command::new("git")
         .args(["init", "-q"])
@@ -179,4 +178,215 @@ fn run_command_propagates_exit_code() {
         .output()
         .expect("run should execute child");
     assert_eq!(run.status.code(), Some(7));
+}
+
+// ── A7 expanded tests ──────────────────────────────────────────────────────────
+
+/// A7-1: `gitvault check` exits with code 3 (EXIT_PLAINTEXT_LEAK) when a
+/// plaintext secret file is staged in the git index.
+#[test]
+fn check_exits_3_on_plaintext_leak() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+
+    // Stage .env so that `git ls-files .env` reports it as tracked.
+    std::fs::write(repo.path().join(".env"), "SECRET=oops\n").unwrap();
+    let add_status = Command::new("git")
+        .args(["add", ".env"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git add should run");
+    assert!(add_status.success(), "git add .env should succeed");
+
+    let out = bin()
+        .arg("check")
+        .current_dir(repo.path())
+        .output()
+        .expect("check should run");
+
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "check should exit 3 (PlaintextLeak); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A7-2: `gitvault run --env prod` exits with code 5 (EXIT_BARRIER) when
+/// the `--prod` flag is absent (production barrier not satisfied).
+#[test]
+fn run_exits_barrier_without_prod_flag() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_identity_tmp, identity_path, _pubkey) = write_identity_file();
+
+    // Run with env=prod but without --prod; barrier should reject immediately.
+    let out = bin()
+        .args([
+            "run",
+            "--env",
+            "prod",
+            "--no-prompt",
+            "--",
+            "sh",
+            "-c",
+            "exit 0",
+        ])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("run should execute");
+
+    assert_eq!(
+        out.status.code(),
+        Some(5),
+        "run without --prod flag should exit 5 (EXIT_BARRIER); stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A7-3: `gitvault status --json` outputs valid JSON that contains a
+/// top-level `"status"` field.
+#[test]
+fn status_json_flag_outputs_valid_json_with_status_field() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+
+    let out = bin()
+        .args(["--json", "status"])
+        .current_dir(repo.path())
+        .output()
+        .expect("status should run");
+
+    assert!(
+        out.status.success(),
+        "status --json should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("status output should be valid JSON");
+    assert!(
+        v.get("status").is_some(),
+        "JSON output should contain a 'status' field; got: {stdout}"
+    );
+}
+
+/// A7-4: `gitvault --json merge-driver` outputs the success JSON object
+/// `{"status":"ok","message":"Merge completed successfully."}` on a
+/// clean (conflict-free) merge.
+#[test]
+fn merge_driver_success_outputs_json() {
+    let dir = TempDir::new().unwrap();
+
+    let base = dir.path().join("base.env");
+    let ours = dir.path().join("ours.env");
+    let theirs = dir.path().join("theirs.env");
+
+    // All three versions are identical → no conflict.
+    std::fs::write(&base, "A=1\n").unwrap();
+    std::fs::write(&ours, "A=1\n").unwrap();
+    std::fs::write(&theirs, "A=1\n").unwrap();
+
+    let out = bin()
+        .args([
+            "--json",
+            "merge-driver",
+            &base.to_string_lossy(),
+            &ours.to_string_lossy(),
+            &theirs.to_string_lossy(),
+        ])
+        .output()
+        .expect("merge-driver should run");
+
+    assert!(
+        out.status.success(),
+        "merge-driver with no conflict should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("merge-driver output should be valid JSON");
+    assert_eq!(
+        v.get("status").and_then(|s| s.as_str()),
+        Some("ok"),
+        "JSON status should be 'ok'; got: {stdout}"
+    );
+    assert_eq!(
+        v.get("message").and_then(|s| s.as_str()),
+        Some("Merge completed successfully."),
+        "JSON message mismatch; got: {stdout}"
+    );
+}
+
+/// A7-5: `gitvault --json recipient list` outputs valid JSON containing a
+/// `"recipients"` array field.
+#[test]
+fn recipient_list_json_outputs_valid_json() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let pubkey = x25519::Identity::generate().to_public().to_string();
+
+    // Add a recipient so the list is non-empty.
+    let add = bin()
+        .args(["recipient", "add", &pubkey])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient add should run");
+    assert!(add.status.success(), "recipient add should succeed");
+
+    let list = bin()
+        .args(["--json", "recipient", "list"])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient list should run");
+
+    assert!(
+        list.status.success(),
+        "recipient list --json should succeed; stderr: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("recipient list output should be valid JSON");
+    assert!(
+        v.get("recipients")
+            .and_then(|r| r.as_array())
+            .is_some(),
+        "JSON output should contain a 'recipients' array; got: {stdout}"
+    );
+}
+
+/// A7-6: `gitvault check` exits with code 0 when the repo is properly
+/// configured with a valid identity and at least one valid recipient.
+#[test]
+fn check_succeeds_with_valid_setup() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_identity_tmp, identity_path, pubkey) = write_identity_file();
+
+    // Register the public key as a recipient.
+    let add = bin()
+        .args(["recipient", "add", &pubkey])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient add should run");
+    assert!(add.status.success(), "recipient add should succeed");
+
+    let out = bin()
+        .arg("check")
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("check should run");
+
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "check should succeed (exit 0) with valid identity and recipient; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

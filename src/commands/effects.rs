@@ -147,8 +147,34 @@ pub(crate) fn execute_effects_with(
                     .ok_or_else(|| GitvaultError::Usage("secrets not decrypted".to_string()))?;
                 runner.materialize_secrets(repo_root, secrets)?;
             }
-            // DecryptFile effects are handled directly in cmd_decrypt.
-            fhsm::Effect::DecryptFile { .. } => {}
+            // Decrypt a single ciphertext file to an output path or stdout.
+            fhsm::Effect::DecryptFile { file, output } => {
+                let identity = identity_opt.as_deref().ok_or_else(|| {
+                    GitvaultError::Usage(
+                        "identity not resolved before DecryptFile".to_string(),
+                    )
+                })?;
+                let in_file = std::io::BufReader::new(
+                    std::fs::File::open(&file).map_err(GitvaultError::Io)?,
+                );
+                match output {
+                    Some(out_path) => {
+                        let tmp = tempfile::NamedTempFile::new_in(
+                            out_path.parent().unwrap_or(std::path::Path::new(".")),
+                        )?;
+                        {
+                            let mut out_file = std::io::BufWriter::new(tmp.as_file());
+                            crypto::decrypt_stream(identity, in_file, &mut out_file)?;
+                        }
+                        tmp.persist(&out_path)
+                            .map_err(|e| GitvaultError::Io(e.error))?;
+                    }
+                    None => {
+                        let mut stdout = std::io::BufWriter::new(std::io::stdout());
+                        crypto::decrypt_stream(identity, in_file, &mut stdout)?;
+                    }
+                }
+            }
         }
     }
     Ok(CommandOutcome::Success)
@@ -332,18 +358,58 @@ mod tests {
     }
 
     #[test]
-    fn execute_effects_with_decrypt_file_arm_is_noop() {
+    fn execute_effects_with_decrypt_file_decrypts_to_output_path() {
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner::succeeds_with(key_str.clone(), vec![], 0);
+        let tmp = TempDir::new().unwrap();
+
+        // Create a real encrypted file.
+        let plaintext = b"DECRYPT_FILE_TEST=1\n";
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(age_key.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crate::crypto::encrypt(recipients, plaintext).unwrap();
+        let enc_path = tmp.path().join("test.env.age");
+        std::fs::write(&enc_path, &ciphertext).unwrap();
+        let out_path = tmp.path().join("test.env");
+
+        // ResolveIdentity must come first so that identity_opt is populated.
+        let effects = vec![
+            fhsm::Effect::ResolveIdentity {
+                source: fhsm::IdentitySource::Inline(key_str),
+            },
+            fhsm::Effect::DecryptFile {
+                file: enc_path,
+                output: Some(out_path.clone()),
+            },
+        ];
+        let outcome = execute_effects_with(effects, tmp.path(), &runner)
+            .expect("DecryptFile arm should decrypt successfully");
+        assert_eq!(outcome, CommandOutcome::Success);
+
+        let decrypted = std::fs::read_to_string(&out_path).expect("output file should exist");
+        assert!(
+            decrypted.contains("DECRYPT_FILE_TEST=1"),
+            "decrypted output should contain plaintext"
+        );
+    }
+
+    #[test]
+    fn execute_effects_with_decrypt_file_without_identity_errors() {
+        let tmp = TempDir::new().unwrap();
         let age_key = age::x25519::Identity::generate();
         let key_str = age_key.to_string().expose_secret().to_string();
         let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
-        let tmp = TempDir::new().unwrap();
-        // A DecryptFile effect in execute_effects_with is a no-op (line 602).
+
+        // DecryptFile without a prior ResolveIdentity should fail.
         let effects = vec![fhsm::Effect::DecryptFile {
             file: tmp.path().join("dummy.age"),
             output: None,
         }];
-        let outcome = execute_effects_with(effects, tmp.path(), &runner)
-            .expect("DecryptFile arm should succeed as no-op");
-        assert_eq!(outcome, CommandOutcome::Success);
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(
+            result.is_err(),
+            "DecryptFile without identity should return an error"
+        );
     }
 }
