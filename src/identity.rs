@@ -16,7 +16,10 @@ pub(crate) fn extract_identity_key(content: &str) -> Option<String> {
         .map(|captures| captures[1].to_string())
 }
 
-pub(crate) fn load_identity_source(source: &str, source_name: &str) -> Result<String, GitvaultError> {
+pub(crate) fn load_identity_source(
+    source: &str,
+    source_name: &str,
+) -> Result<String, GitvaultError> {
     let value = source.trim();
 
     if value.starts_with("AGE-SECRET-KEY-") {

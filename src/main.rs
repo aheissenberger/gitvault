@@ -2388,8 +2388,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         // No recipients added → empty list message (lines 883-884).
-        cmd_recipient(RecipientAction::List, false)
-            .expect("list empty plain should succeed");
+        cmd_recipient(RecipientAction::List, false).expect("list empty plain should succeed");
     }
 
     // ─── cmd_check with valid recipients ─────────────────────────────────────
