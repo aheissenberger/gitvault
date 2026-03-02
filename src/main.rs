@@ -16,9 +16,13 @@ mod output;
 mod repo;
 mod run;
 mod structured;
+#[cfg(feature = "ssm")]
+mod ssm;
 
 use clap::Parser;
 use cli::{Cli, Commands};
+#[cfg(feature = "ssm")]
+use cli::SsmAction;
 use commands::CommandOutcome;
 use error::GitvaultError;
 use std::process;
@@ -126,6 +130,34 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::RevokeProd => {
             commands::admin::cmd_revoke_prod(cli.json)?;
             Ok(CommandOutcome::Success)
+        }
+        #[cfg(feature = "ssm")]
+        Commands::Ssm { action } => {
+            let aws = crate::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);
+            let repo_root = crate::repo::find_repo_root()?;
+            tokio::runtime::Runtime::new()
+                .map_err(|e| GitvaultError::Other(e.to_string()))?
+                .block_on(async {
+                    match action {
+                        SsmAction::Pull { env } => {
+                            let env = env.unwrap_or_else(|| "dev".to_string());
+                            crate::ssm::cmd_ssm_pull(&repo_root, &env, &aws).await
+                        }
+                        SsmAction::Diff { env, reveal } => {
+                            let env = env.unwrap_or_else(|| "dev".to_string());
+                            crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal).await
+                        }
+                        SsmAction::Set { key, value, env } => {
+                            let env = env.unwrap_or_else(|| "dev".to_string());
+                            crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json).await
+                        }
+                        SsmAction::Push { env } => {
+                            let env = env.unwrap_or_else(|| "dev".to_string());
+                            crate::ssm::cmd_ssm_push(&repo_root, &env, &aws, cli.json).await
+                        }
+                    }
+                })
+                .map(|()| CommandOutcome::Success)
         }
     }
 }
