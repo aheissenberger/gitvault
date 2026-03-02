@@ -1,7 +1,7 @@
 # Architecture Hotspots
 
 Curated from the 2026-03-01 multi-agent review so future agents can jump directly to high-value areas.
-Last updated: 2026-03-02 (sixth refactor pass — items_after_statements, dispatch split, bools).
+Last updated: 2026-03-02 (seventh refactor pass — all doc warnings fixed).
 
 ## Resolved Issues (no longer actionable)
 
@@ -34,6 +34,10 @@ All previously-open issues have been resolved in this session:
   `run()` reduced to ~72 lines.
 - `struct_excessive_bools` on `DecryptOptions` → **suppressed with rationale**: each bool is a
   direct CLI flag mapping; idiomatic for CLI option structs.
+- Doc warnings pass → **applied**: all `missing_errors_doc` (71 functions across 26 files),
+  `missing_panics_doc` (2 functions), and `doc_markdown` (13 backtick fixes) warnings resolved.
+  `cargo clippy -- -W clippy::missing_errors_doc -W clippy::missing_panics_doc -W clippy::doc_markdown`
+  now exits with 0 warnings.
 
 ## Remaining Low Priority Items
 
@@ -46,19 +50,9 @@ These items are known but reviewed and deemed low-value relative to refactor ris
   `execute_effects_with` are tightly coupled; extraction adds boilerplate without benefit.
 - Tests in `ssm/mod.rs` use `unsafe { std::env::set_var/remove_var }`. In Rust 1.93.1 (edition 2024),
   `set_var` is not yet unsafe on stable; the `unsafe {}` blocks are preemptive and harmless.
-- 71 `missing # Errors` doc sections + 7 `missing # Panics` + 38 missing backticks in docs
-  (pedantic clippy) — pure doc maintenance burden; not blocking CI and deferred.
 - 17 `#[must_use]` candidates (13 functions + 4 methods) — API annotation work; deferred.
-- 5 `needless_pass_by_value` — all public API `String` params; changing to `&str` would be
-  API-breaking and require updating all callers in `dispatch.rs`.
-- 38 doc backtick warnings — pedantic doc formatting; not blocking CI, deferred.
-- 5 `needless_pass_by_value` — all public API `String` params; changing to `&str` would be
-  API-breaking and require updating all callers in `dispatch.rs`.
 - 3 `map_or` test code style suggestions — current `match` is clearer.
 - 2 remaining `match` → `if let` suggestions — both arms are meaningful; pedantic style only.
-- 2 + 1 `unnecessary_wraps` in `keyring.rs` test helpers — must match `Result`-returning
-  function pointer signatures; cannot change.
-- 1 `similar_names` (`keyring_get_fn`/`keyring_set_fn`) — names are intentionally descriptive.
 
 ## Unfulfilled Acceptance Criteria
 
