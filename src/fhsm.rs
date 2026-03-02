@@ -287,6 +287,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
                     no_prompt: *no_prompt,
                 },
                 Effect::ResolveIdentity { source },
+                Effect::DecryptSecrets { env: resolved_env.clone() },
                 Effect::MaterializeSecrets { env: resolved_env },
             ])
         }
@@ -367,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn materialize_requested_includes_materialize_secrets() {
+    fn materialize_requested_includes_decrypt_then_materialize_secrets() {
         let event = Event::MaterializeRequested {
             env: Some("staging".to_string()),
             identity: None,
@@ -375,12 +376,19 @@ mod tests {
             no_prompt: false,
         };
         let effects = transition(&event).expect("should succeed");
-        let has_materialize = effects
+        // DecryptSecrets must precede MaterializeSecrets so execute_effects can
+        // populate secrets_opt before the materialize step consumes it.
+        let decrypt_pos = effects
             .iter()
-            .any(|e| matches!(e, Effect::MaterializeSecrets { env } if env == "staging"));
+            .position(|e| matches!(e, Effect::DecryptSecrets { env } if env == "staging"));
+        let materialize_pos = effects
+            .iter()
+            .position(|e| matches!(e, Effect::MaterializeSecrets { env } if env == "staging"));
+        assert!(decrypt_pos.is_some(), "expected DecryptSecrets(staging)");
+        assert!(materialize_pos.is_some(), "expected MaterializeSecrets(staging)");
         assert!(
-            has_materialize,
-            "expected MaterialializeSecrets(staging) in {effects:?}"
+            decrypt_pos < materialize_pos,
+            "DecryptSecrets must come before MaterializeSecrets"
         );
     }
 

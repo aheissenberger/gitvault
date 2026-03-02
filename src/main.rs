@@ -500,12 +500,11 @@ fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, Gitvaul
                 let exit_code = run::run_command(secrets, cmd, args, clear_env, &pass_var_names)?;
                 return Ok(CommandOutcome::Exit(exit_code));
             }
-            fhsm::Effect::MaterializeSecrets { env } => {
-                let identity = identity_opt
-                    .as_deref()
-                    .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
-                let secrets = decrypt_env_secrets(&repo_root, &env, identity)?;
-                materialize::materialize_env_file(&repo_root, &secrets)?;
+            fhsm::Effect::MaterializeSecrets { env: _ } => {
+                let secrets = secrets_opt
+                    .as_ref()
+                    .ok_or_else(|| GitvaultError::Usage("secrets not decrypted".to_string()))?;
+                materialize::materialize_env_file(&repo_root, secrets)?;
             }
             // DecryptFile effects are handled directly in cmd_decrypt.
             fhsm::Effect::DecryptFile { .. } => {}
