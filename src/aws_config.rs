@@ -9,12 +9,12 @@ pub struct AwsConfig {
 
 impl AwsConfig {
     /// Construct an [`AwsConfig`] from CLI-supplied flags.
-    pub fn from_cli(profile: Option<String>, role_arn: Option<String>) -> Self {
+    pub const fn from_cli(profile: Option<String>, role_arn: Option<String>) -> Self {
         Self { profile, role_arn }
     }
 
     /// Returns true if any AWS auth has been configured.
-    pub fn is_configured(&self) -> bool {
+    pub const fn is_configured(&self) -> bool {
         self.profile.is_some() || self.role_arn.is_some()
     }
 

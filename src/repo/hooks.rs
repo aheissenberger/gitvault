@@ -27,7 +27,7 @@ fi
 fn atomic_write(path: &Path, content: &[u8]) -> Result<(), GitvaultError> {
     let mut tmp = tempfile::Builder::new()
         .prefix(".gitvault-tmp-")
-        .tempfile_in(path.parent().unwrap_or(Path::new(".")))?;
+        .tempfile_in(path.parent().unwrap_or_else(|| Path::new(".")))?;
     tmp.write_all(content)?;
     tmp.persist(path).map_err(|e| GitvaultError::Io(e.error))?;
     Ok(())

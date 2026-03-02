@@ -63,12 +63,16 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         }
         let out_path = match &opts.output {
             Some(p) => std::path::PathBuf::from(p),
-            None => input_path.clone(),
+            None => input_path,
         };
         repo::validate_write_path(&repo_root, &out_path)?;
         let mut tmp = tempfile::Builder::new()
             .prefix(".gitvault-tmp-")
-            .tempfile_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+            .tempfile_in(
+                out_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new(".")),
+            )?;
         use std::io::Write;
         tmp.write_all(decrypted.as_bytes())?;
         tmp.persist(&out_path)
@@ -117,7 +121,7 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
         input_path
             .parent()
-            .unwrap_or(std::path::Path::new("."))
+            .unwrap_or_else(|| std::path::Path::new("."))
             .join(out_name)
     };
 
@@ -125,8 +129,11 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
     repo::validate_write_path(&repo_root, &out_path)?;
 
     // REQ-51: streaming decryption
-    let tmp =
-        tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp = tempfile::NamedTempFile::new_in(
+        out_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(".")),
+    )?;
     {
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut out_file = std::io::BufWriter::new(tmp.as_file());

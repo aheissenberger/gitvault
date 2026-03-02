@@ -165,7 +165,9 @@ pub fn execute_effects_with(
                 match output {
                     Some(out_path) => {
                         let tmp = tempfile::NamedTempFile::new_in(
-                            out_path.parent().unwrap_or(std::path::Path::new(".")),
+                            out_path
+                                .parent()
+                                .unwrap_or_else(|| std::path::Path::new(".")),
                         )?;
                         {
                             let mut out_file = std::io::BufWriter::new(tmp.as_file());
@@ -239,7 +241,7 @@ mod tests {
             self.identity_str
                 .clone()
                 .map(Zeroizing::new)
-                .map_err(|e| GitvaultError::Other(e.clone()))
+                .map_err(GitvaultError::Other)
         }
 
         fn decrypt_secrets(
@@ -248,9 +250,7 @@ mod tests {
             _env: &str,
             _identity: &dyn age::Identity,
         ) -> Result<Vec<(String, String)>, GitvaultError> {
-            self.decrypt_secrets
-                .clone()
-                .map_err(|e| GitvaultError::Other(e.clone()))
+            self.decrypt_secrets.clone().map_err(GitvaultError::Other)
         }
 
         fn run_command(

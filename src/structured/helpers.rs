@@ -16,7 +16,7 @@ pub(super) fn is_env_encrypted(value: &str) -> bool {
 
 /// Write bytes to file atomically using a temp file + rename.
 pub(super) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), GitvaultError> {
-    let dir = path.parent().unwrap_or(Path::new("."));
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     // Writing to a NamedTempFile (backed by a real writable file) is infallible
     // in all but extreme OS conditions (e.g. disk full), which are not unit-testable.

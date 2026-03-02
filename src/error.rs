@@ -47,24 +47,21 @@ impl GitvaultError {
     ///
     /// Callers use this to propagate structured exit codes to the shell so
     /// scripts can distinguish encryption failures from permission errors, etc.
-    pub fn exit_code(&self) -> i32 {
+    pub const fn exit_code(&self) -> i32 {
         match self {
-            GitvaultError::Decryption(_) => EXIT_DECRYPT_ERROR,
-            GitvaultError::PlaintextLeak(_) => EXIT_PLAINTEXT_LEAK,
-            GitvaultError::Usage(_) => EXIT_USAGE,
-            GitvaultError::BarrierNotSatisfied(_) => EXIT_BARRIER,
-            GitvaultError::Drift(_) => EXIT_DRIFT,
-            GitvaultError::Io(_)
-            | GitvaultError::Encryption(_)
-            | GitvaultError::Other(_)
-            | GitvaultError::Keyring(_) => EXIT_ERROR,
+            Self::Decryption(_) => EXIT_DECRYPT_ERROR,
+            Self::PlaintextLeak(_) => EXIT_PLAINTEXT_LEAK,
+            Self::Usage(_) => EXIT_USAGE,
+            Self::BarrierNotSatisfied(_) => EXIT_BARRIER,
+            Self::Drift(_) => EXIT_DRIFT,
+            Self::Io(_) | Self::Encryption(_) | Self::Other(_) | Self::Keyring(_) => EXIT_ERROR,
         }
     }
 }
 
 impl From<FhsmError> for GitvaultError {
     fn from(e: FhsmError) -> Self {
-        GitvaultError::Usage(e.to_string())
+        Self::Usage(e.to_string())
     }
 }
 

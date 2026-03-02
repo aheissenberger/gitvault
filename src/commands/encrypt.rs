@@ -68,7 +68,9 @@ pub fn cmd_encrypt(
         repo::validate_write_path(&repo_root, &input_path)?;
         // REQ-43: atomic write
         let tmp = tempfile::NamedTempFile::new_in(
-            input_path.parent().unwrap_or(std::path::Path::new(".")),
+            input_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
         )?;
         std::fs::write(tmp.path(), encrypted)?;
         tmp.persist(&input_path)
@@ -102,8 +104,11 @@ pub fn cmd_encrypt(
     repo::validate_write_path(&repo_root, &out_path)?;
 
     // REQ-51: streaming encryption — no full-file buffer
-    let tmp =
-        tempfile::NamedTempFile::new_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp = tempfile::NamedTempFile::new_in(
+        out_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(".")),
+    )?;
     {
         let mut in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut out_file = std::io::BufWriter::new(tmp.as_file());

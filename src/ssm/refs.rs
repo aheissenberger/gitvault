@@ -96,7 +96,7 @@ pub(super) async fn save_refs(
         serde_json::to_string_pretty(refs).map_err(|e| GitvaultError::Other(e.to_string()))?;
     let mut tmp = tempfile::Builder::new()
         .prefix(".gitvault-tmp-")
-        .tempfile_in(path.parent().unwrap_or(Path::new(".")))?;
+        .tempfile_in(path.parent().unwrap_or_else(|| Path::new(".")))?;
     tmp.write_all(text.as_bytes())?;
     tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
     Ok(())

@@ -91,8 +91,9 @@ pub fn cmd_rotate(
             .map(|r| Box::new(r.clone()) as Box<dyn age::Recipient + Send>)
             .collect();
         let new_ciphertext = crypto::encrypt(recipients, &plaintext)?;
-        let tmp =
-            tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
+        let tmp = tempfile::NamedTempFile::new_in(
+            path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+        )?;
         std::fs::write(tmp.path(), &new_ciphertext)?;
         tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
     }
@@ -224,13 +225,8 @@ mod tests {
 
         cmd_recipient(RecipientAction::List, false).expect("list recipient should succeed");
 
-        cmd_recipient(
-            RecipientAction::Remove {
-                pubkey: pubkey.clone(),
-            },
-            false,
-        )
-        .expect("remove recipient should succeed");
+        cmd_recipient(RecipientAction::Remove { pubkey }, false)
+            .expect("remove recipient should succeed");
 
         let recipients = repo::read_recipients(dir.path()).expect("recipients should be readable");
         assert!(recipients.is_empty());
@@ -276,13 +272,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         let pubkey = x25519::Identity::generate().to_public().to_string();
-        cmd_recipient(
-            RecipientAction::Add {
-                pubkey: pubkey.clone(),
-            },
-            false,
-        )
-        .expect("add should succeed");
+        cmd_recipient(RecipientAction::Add { pubkey }, false).expect("add should succeed");
 
         // json=true covers the JSON recipients output branch (line 881).
         cmd_recipient(RecipientAction::List, true).expect("list json should succeed");

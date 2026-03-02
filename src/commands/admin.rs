@@ -93,8 +93,11 @@ pub fn cmd_merge_driver(
         merge_env_content(&base_content, &ours_content, &theirs_content)?;
 
     let ours_path = PathBuf::from(&ours);
-    let tmp =
-        tempfile::NamedTempFile::new_in(ours_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    let tmp = tempfile::NamedTempFile::new_in(
+        ours_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(".")),
+    )?;
     std::fs::write(tmp.path(), &merged_content)?;
     tmp.persist(&ours_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
