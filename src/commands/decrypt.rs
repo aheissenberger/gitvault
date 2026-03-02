@@ -289,4 +289,84 @@ mod tests {
             "decrypted content should match original"
         );
     }
+
+    /// Covers lines 51-52: `reveal=true` with `value_only=true` prints decrypted values to stdout
+    /// and returns early without writing to disk.
+    #[test]
+    fn test_cmd_decrypt_value_only_reveal_prints_to_stdout() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Create a plain .env file with one encrypted value
+        let env_file = dir.path().join("reveal.env");
+        std::fs::write(&env_file, "TOKEN=supersecret\n").unwrap();
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                env_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                None,
+                true, // value_only
+                false,
+            )
+            .expect("value-only encrypt should succeed");
+        });
+
+        // --reveal + --value-only: must succeed without writing to disk
+        let outcome = cmd_decrypt(
+            env_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            None,
+            None,
+            true,  // reveal
+            true,  // value_only
+            false,
+            true,
+        )
+        .expect("reveal + value_only should succeed");
+        assert!(matches!(outcome, CommandOutcome::Success));
+    }
+
+    /// Covers line 55: `value_only=true` with an explicit `output` path.
+    #[test]
+    fn test_cmd_decrypt_value_only_with_explicit_output_path() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Create and value-only-encrypt the source file
+        let env_file = dir.path().join("source.env");
+        std::fs::write(&env_file, "DB_PASS=hunter2\n").unwrap();
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                env_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                None,
+                true, // value_only
+                false,
+            )
+            .expect("value-only encrypt should succeed");
+        });
+
+        // Decrypt into a separate output file (explicit output path)
+        let out_file = dir.path().join("dest.env");
+        cmd_decrypt(
+            env_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            Some(out_file.to_string_lossy().to_string()), // explicit output
+            None,
+            false, // reveal
+            true,  // value_only
+            false,
+            true,
+        )
+        .expect("value_only decrypt to explicit output should succeed");
+
+        let content = std::fs::read_to_string(&out_file).unwrap();
+        assert_eq!(content, "DB_PASS=hunter2\n", "decrypted output should match original");
+    }
 }
