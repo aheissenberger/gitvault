@@ -85,27 +85,33 @@ fn ensure_executable(hook_path: &Path) -> Result<(), GitvaultError> {
     Ok(())
 }
 
-fn resolve_hooks_dir(repo_root: &Path) -> Result<PathBuf, GitvaultError> {
+pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> Result<PathBuf, GitvaultError> {
+    fn to_real_or_absolute(path: PathBuf) -> PathBuf {
+        path.canonicalize().unwrap_or(path)
+    }
+
     let output = Command::new("git")
-        .args(["config", "--local", "--get", "core.hooksPath"])
+        .args(["rev-parse", "--git-path", "hooks"])
         .current_dir(repo_root)
         .output();
 
     if let Ok(out) = output
         && out.status.success()
     {
-        let configured = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !configured.is_empty() {
-            let path = PathBuf::from(&configured);
-            return Ok(if path.is_absolute() {
+        let resolved = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !resolved.is_empty() {
+            let path = PathBuf::from(&resolved);
+            let absolute = if path.is_absolute() {
                 path
             } else {
                 repo_root.join(path)
-            });
+            };
+
+            return Ok(to_real_or_absolute(absolute));
         }
     }
 
-    Ok(repo_root.join(".git").join("hooks"))
+    Ok(to_real_or_absolute(repo_root.join(".git").join("hooks")))
 }
 
 fn install_hook(hook_path: &Path, body: &str) -> Result<(), GitvaultError> {

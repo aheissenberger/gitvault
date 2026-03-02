@@ -2,6 +2,23 @@ use crate::error::GitvaultError;
 use crate::{crypto, merge};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+trait GitRunner {
+    fn show_toplevel(&self, start: &Path) -> std::io::Result<Output>;
+}
+
+struct SystemGitRunner;
+
+impl GitRunner for SystemGitRunner {
+    fn show_toplevel(&self, start: &Path) -> std::io::Result<Output> {
+        Command::new("git")
+            .args(["-C"])
+            .arg(start)
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+    }
+}
 
 /// Directory for encrypted artifacts (REQ-7)
 pub const SECRETS_DIR: &str = "secrets";
@@ -206,7 +223,48 @@ pub fn decrypt_env_secrets(
     Ok(secrets)
 }
 
-/// Walk up from `start` to find the directory containing `.git`.
+fn find_repo_root_from_with_runner(
+    start: &std::path::Path,
+    git_runner: &dyn GitRunner,
+) -> Result<std::path::PathBuf, crate::error::GitvaultError> {
+    let output = git_runner.show_toplevel(start);
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if root.is_empty() {
+                return Err(crate::error::GitvaultError::Usage(
+                    "not inside a git repository (no .git directory found)".to_string(),
+                ));
+            }
+            Ok(PathBuf::from(root))
+        }
+        Ok(_) => Err(crate::error::GitvaultError::Usage(
+            "not inside a git repository (no .git directory found)".to_string(),
+        )),
+        Err(_) => {
+            let mut dir = start.to_path_buf();
+            loop {
+                if dir.join(".git").exists() {
+                    return Ok(dir);
+                }
+                match dir.parent() {
+                    Some(parent) => dir = parent.to_path_buf(),
+                    None => {
+                        return Err(crate::error::GitvaultError::Usage(
+                            "not inside a git repository (no .git directory found)".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Resolve repository root from `start`.
+///
+/// Uses `git rev-parse --show-toplevel` first, and falls back to walking up the
+/// directory tree only when invoking `git` itself fails.
 ///
 /// Returns [`crate::error::GitvaultError::Usage`] if no `.git` is found — the caller is
 /// not inside a git repository.
@@ -217,20 +275,8 @@ pub fn decrypt_env_secrets(
 pub fn find_repo_root_from(
     start: &std::path::Path,
 ) -> Result<std::path::PathBuf, crate::error::GitvaultError> {
-    let mut dir = start.to_path_buf();
-    loop {
-        if dir.join(".git").exists() {
-            return Ok(dir);
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => {
-                return Err(crate::error::GitvaultError::Usage(
-                    "not inside a git repository (no .git directory found)".to_string(),
-                ));
-            }
-        }
-    }
+    let git_runner = SystemGitRunner;
+    find_repo_root_from_with_runner(start, &git_runner)
 }
 
 /// Find the repository root starting from `std::env::current_dir()`.
@@ -248,7 +294,25 @@ pub fn find_repo_root() -> Result<std::path::PathBuf, crate::error::GitvaultErro
 mod tests {
     use super::*;
     use age::x25519;
+    use std::io;
     use tempfile::TempDir;
+
+    struct FailingGitRunner;
+
+    impl GitRunner for FailingGitRunner {
+        fn show_toplevel(&self, _start: &Path) -> io::Result<Output> {
+            Err(io::Error::other("mock git execution failure"))
+        }
+    }
+
+    fn init_git_repo(path: &Path) {
+        let status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .expect("git init should run");
+        assert!(status.success());
+    }
 
     fn gen_identity() -> x25519::Identity {
         x25519::Identity::generate()
@@ -497,7 +561,7 @@ mod tests {
     #[test]
     fn find_repo_root_from_finds_git_dir() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        init_git_repo(tmp.path());
         let found = find_repo_root_from(tmp.path()).unwrap();
         assert_eq!(found, tmp.path());
     }
@@ -505,7 +569,7 @@ mod tests {
     #[test]
     fn find_repo_root_from_walks_up() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        init_git_repo(tmp.path());
         let sub = tmp.path().join("a/b/c");
         std::fs::create_dir_all(&sub).unwrap();
         let found = find_repo_root_from(&sub).unwrap();
@@ -526,5 +590,27 @@ mod tests {
             err_msg.contains("not inside a git repository"),
             "unexpected error message: {err_msg}"
         );
+    }
+
+    #[test]
+    fn find_repo_root_from_fallback_when_git_invocation_fails() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        let found = find_repo_root_from_with_runner(tmp.path(), &FailingGitRunner).unwrap();
+
+        assert_eq!(found, tmp.path());
+    }
+
+    #[test]
+    fn find_repo_root_from_fallback_walks_up_when_git_invocation_fails() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let sub = tmp.path().join("x/y/z");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let found = find_repo_root_from_with_runner(&sub, &FailingGitRunner).unwrap();
+
+        assert_eq!(found, tmp.path());
     }
 }
