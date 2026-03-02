@@ -15,6 +15,15 @@ pub(crate) fn parse_env_key_from_line(line: &str) -> Option<String> {
     }
 }
 
+pub(crate) fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
+    let input = format!("{line}\n");
+    let mut iter = dotenvy::from_read_iter(input.as_bytes());
+    match iter.next() {
+        Some(Ok((key, value))) => Some((key, value)),
+        _ => None,
+    }
+}
+
 pub(crate) fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
     let Some(eq_index) = original_line.find('=') else {
         return original_line.to_string();
