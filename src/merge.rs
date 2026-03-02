@@ -338,6 +338,9 @@ mod tests {
             !merged.contains("KEY="),
             "deleted key should not appear in merged output"
         );
-        assert!(merged.contains("OTHER=keep"), "unrelated key should be preserved");
+        assert!(
+            merged.contains("OTHER=keep"),
+            "unrelated key should be preserved"
+        );
     }
 }

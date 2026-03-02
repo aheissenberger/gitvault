@@ -320,8 +320,8 @@ mod tests {
             Some(identity_file.path().to_string_lossy().to_string()),
             None,
             None,
-            true,  // reveal
-            true,  // value_only
+            true, // reveal
+            true, // value_only
             false,
             true,
         )
@@ -367,6 +367,9 @@ mod tests {
         .expect("value_only decrypt to explicit output should succeed");
 
         let content = std::fs::read_to_string(&out_file).unwrap();
-        assert_eq!(content, "DB_PASS=hunter2\n", "decrypted output should match original");
+        assert_eq!(
+            content, "DB_PASS=hunter2\n",
+            "decrypted output should match original"
+        );
     }
 }
