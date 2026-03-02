@@ -425,7 +425,11 @@ fn rotate_re_encrypts_secrets() {
     let (_id_tmp, identity_path, pubkey) = write_identity_file();
 
     // Add a recipient and harden first.
-    bin().args(["harden"]).current_dir(repo.path()).status().unwrap();
+    bin()
+        .args(["harden"])
+        .current_dir(repo.path())
+        .status()
+        .unwrap();
     bin()
         .args(["recipient", "add", &pubkey])
         .current_dir(repo.path())
@@ -441,7 +445,11 @@ fn rotate_re_encrypts_secrets() {
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
-    assert!(enc.status.success(), "encrypt: {}", String::from_utf8_lossy(&enc.stderr));
+    assert!(
+        enc.status.success(),
+        "encrypt: {}",
+        String::from_utf8_lossy(&enc.stderr)
+    );
 
     // Rotate secrets.
     let rotate = bin()
@@ -503,11 +511,18 @@ fn decrypt_reveal_prints_plaintext() {
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
-    assert!(enc.status.success(), "encrypt: {}", String::from_utf8_lossy(&enc.stderr));
+    assert!(
+        enc.status.success(),
+        "encrypt: {}",
+        String::from_utf8_lossy(&enc.stderr)
+    );
 
     // The encrypted file goes to secrets/dev/secrets.env.age.
     let age_file = repo.path().join("secrets/dev/secrets.env.age");
-    assert!(age_file.exists(), "expected secrets/dev/secrets.env.age to exist after encrypt");
+    assert!(
+        age_file.exists(),
+        "expected secrets/dev/secrets.env.age to exist after encrypt"
+    );
 
     // Decrypt with --reveal (prints to stdout, no output file).
     let dec = bin()

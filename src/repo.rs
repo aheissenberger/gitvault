@@ -767,7 +767,10 @@ mod tests {
         std::fs::write(&file, b"content").unwrap();
         // canonicalize() will succeed for an existing file → exercises the `Ok(p) => p` arm.
         let result = validate_write_path(dir.path(), &file);
-        assert!(result.is_ok(), "existing file inside base should be allowed");
+        assert!(
+            result.is_ok(),
+            "existing file inside base should be allowed"
+        );
     }
 
     /// Covers line 296: `content.push('\n')` — existing hook without trailing newline.
@@ -783,8 +786,14 @@ mod tests {
         install_git_hooks(dir.path()).unwrap();
 
         let content = std::fs::read_to_string(&hook_path).unwrap();
-        assert!(content.contains("echo hello"), "original content must be preserved");
-        assert!(content.contains("gitvault"), "gitvault block must be appended");
+        assert!(
+            content.contains("echo hello"),
+            "original content must be preserved"
+        );
+        assert!(
+            content.contains("gitvault"),
+            "gitvault block must be appended"
+        );
     }
 
     /// Covers lines 550-551 in test_recipients_dedup_on_add by taking the
@@ -792,10 +801,8 @@ mod tests {
     #[test]
     fn test_recipients_add_when_not_present() {
         let dir = TempDir::new().unwrap();
-        let key1 =
-            "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string();
-        let key2 =
-            "age1z6j0we5lvscfzxqlqtpfwkf6p4amhjw6hv6h0x3n7lkdmkdwkjnq9x5x5v".to_string();
+        let key1 = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string();
+        let key2 = "age1z6j0we5lvscfzxqlqtpfwkf6p4amhjw6hv6h0x3n7lkdmkdwkjnq9x5x5v".to_string();
 
         // Start with only key1.
         write_recipients(dir.path(), std::slice::from_ref(&key1)).unwrap();
@@ -879,8 +886,7 @@ mod tests {
 
         let secrets_dir = dir.path().join("secrets/dev");
         std::fs::create_dir_all(&secrets_dir).unwrap();
-        let ciphertext =
-            crate::crypto::encrypt(vec![recipient], b"KEY=value\n").unwrap();
+        let ciphertext = crate::crypto::encrypt(vec![recipient], b"KEY=value\n").unwrap();
         std::fs::write(secrets_dir.join("app.env.age"), &ciphertext).unwrap();
 
         let result = decrypt_env_secrets(dir.path(), "dev", &wrong_identity);

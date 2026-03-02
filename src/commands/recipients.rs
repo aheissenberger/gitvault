@@ -52,7 +52,10 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
 }
 
 /// Re-encrypt all secrets with the current recipients list (REQ-38)
-pub fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_rotate(
+    identity_path: Option<String>,
+    json: bool,
+) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
@@ -300,8 +303,8 @@ mod tests {
         std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err = cmd_rotate(None, false)
-                .expect_err("rotate with invalid recipient should fail");
+            let err =
+                cmd_rotate(None, false).expect_err("rotate with invalid recipient should fail");
             assert!(
                 matches!(err, GitvaultError::Encryption(_)),
                 "expected Encryption error, got: {err:?}"

@@ -171,3 +171,8 @@ multi-agent development without environment cross-contamination.
 rustc --version   # stable channel version
 cargo --version
 ```
+
+## Quality Checks
+
+ /fleet As a senior developer for rust and as a software architect i do a deep review of best practice rust coding and structuring. read all specs and compare with implementation. suggest improvement to code quality and architecture. list all not fullfilled
+  acceptance criterias based on specs. use worktrees to isolate multiple parallel ai coding agents. 

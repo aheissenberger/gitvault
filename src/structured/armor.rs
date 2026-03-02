@@ -3,10 +3,7 @@ use base64::Engine;
 use std::io::{Read, Write};
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
-pub fn encrypt_armor(
-    plaintext: &[u8],
-    recipient_keys: &[String],
-) -> Result<String, GitvaultError> {
+pub fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<String, GitvaultError> {
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
@@ -281,7 +278,11 @@ mod tests {
     fn test_decrypt_armor_malformed_input_errors() {
         let identity = gen_identity();
         // Valid base structure but garbage body — Decryptor::new must fail
-        let err = decrypt_armor("-----BEGIN AGE ENCRYPTED FILE-----\ngarbage\n-----END AGE ENCRYPTED FILE-----\n", &identity).unwrap_err();
+        let err = decrypt_armor(
+            "-----BEGIN AGE ENCRYPTED FILE-----\ngarbage\n-----END AGE ENCRYPTED FILE-----\n",
+            &identity,
+        )
+        .unwrap_err();
         assert!(
             err.to_string().contains("Decryptor create") || err.to_string().contains("Decrypt"),
             "got: {err}"
@@ -292,7 +293,8 @@ mod tests {
     fn test_decrypt_binary_b64_malformed_ciphertext_errors() {
         let identity = gen_identity();
         // Valid base64 of non-age data — Decryptor::new must fail
-        let garbage_b64 = base64::engine::general_purpose::STANDARD.encode(b"this is not age ciphertext at all");
+        let garbage_b64 =
+            base64::engine::general_purpose::STANDARD.encode(b"this is not age ciphertext at all");
         let err = decrypt_binary_b64(&garbage_b64, &identity).unwrap_err();
         assert!(
             err.to_string().contains("Decryptor create") || err.to_string().contains("Decrypt"),

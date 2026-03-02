@@ -1,7 +1,7 @@
 //! `gitvault materialize` command implementation.
 
-use crate::commands::effects::execute_effects;
 use crate::commands::effects::CommandOutcome;
+use crate::commands::effects::execute_effects;
 use crate::error::GitvaultError;
 use crate::fhsm;
 

@@ -419,7 +419,10 @@ mod tests {
             result.is_err(),
             "empty command should produce a Usage error"
         );
-        assert!(matches!(result.unwrap_err(), crate::error::GitvaultError::Usage(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::GitvaultError::Usage(_)
+        ));
     }
 
     #[test]
@@ -490,7 +493,10 @@ mod tests {
             env: "dev".to_string(),
         }];
         let result = execute_effects_with(effects, tmp.path(), &runner);
-        assert!(result.is_err(), "DecryptSecrets without identity should fail");
+        assert!(
+            result.is_err(),
+            "DecryptSecrets without identity should fail"
+        );
         assert!(matches!(
             result.unwrap_err(),
             crate::error::GitvaultError::Usage(_)
@@ -510,7 +516,10 @@ mod tests {
             env: "dev".to_string(),
         }];
         let result = execute_effects_with(effects, tmp.path(), &runner);
-        assert!(result.is_err(), "MaterializeSecrets without secrets should fail");
+        assert!(
+            result.is_err(),
+            "MaterializeSecrets without secrets should fail"
+        );
         assert!(matches!(
             result.unwrap_err(),
             crate::error::GitvaultError::Usage(_)

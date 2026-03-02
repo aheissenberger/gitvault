@@ -40,7 +40,7 @@ pub fn materialize_env_file(
 
     // REQ-17: atomically rename to target (persist moves the temp file)
     tmp.persist(&env_path)
-        .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
+        .map_err(|e| GitvaultError::Io(e.error))?;
 
     // REQ-18: restrict permissions on final .env path
     enforce_restricted_env_permissions(&env_path)?;
@@ -98,7 +98,7 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
         tmp.write_all(content.as_bytes())
             .map_err(GitvaultError::Io)?;
         tmp.persist(&gitignore_path)
-            .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
+            .map_err(|e| GitvaultError::Io(e.error))?;
     }
 
     Ok(())

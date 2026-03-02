@@ -155,14 +155,13 @@ mod tests {
         assert!(matches!(err, GitvaultError::Keyring(_)));
 
         // Get error – get_err IS called; set_ok / delete_ok are not called.
-        let err = cmd_keyring_with_ops(KeyringAction::Get, true, set_ok, get_err, delete_ok)
-            .unwrap_err();
+        let err =
+            cmd_keyring_with_ops(KeyringAction::Get, true, set_ok, get_err, delete_ok).unwrap_err();
         assert!(matches!(err, GitvaultError::Keyring(_)));
 
         // Delete error – delete_err IS called; set_ok / gen_get are not called.
-        let err =
-            cmd_keyring_with_ops(KeyringAction::Delete, true, set_ok, gen_get, delete_err)
-                .unwrap_err();
+        let err = cmd_keyring_with_ops(KeyringAction::Delete, true, set_ok, gen_get, delete_err)
+            .unwrap_err();
         assert!(matches!(err, GitvaultError::Keyring(_)));
     }
 
@@ -211,16 +210,11 @@ mod tests {
         let called = std::sync::Arc::new(std::sync::Mutex::new(false));
         let called_clone = called.clone();
         // set_ok / gen_get bodies covered by other tests.
-        let result = cmd_keyring_with_ops(
-            KeyringAction::Delete,
-            false,
-            set_ok,
-            gen_get,
-            move || {
+        let result =
+            cmd_keyring_with_ops(KeyringAction::Delete, false, set_ok, gen_get, move || {
                 *called_clone.lock().unwrap() = true;
                 Ok(())
-            },
-        );
+            });
         assert!(result.is_ok());
         assert!(*called.lock().unwrap());
     }

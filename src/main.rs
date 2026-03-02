@@ -28,7 +28,9 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             recipients,
             fields,
             value_only,
-        } => gitvault::commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json),
+        } => {
+            gitvault::commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json)
+        }
         Commands::Decrypt {
             file,
             identity,
@@ -48,7 +50,13 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             env,
             identity,
             prod,
-        } => gitvault::commands::materialize::cmd_materialize(env, identity, prod, cli.json, cli.no_prompt),
+        } => gitvault::commands::materialize::cmd_materialize(
+            env,
+            identity,
+            prod,
+            cli.json,
+            cli.no_prompt,
+        ),
         Commands::Status { fail_if_dirty } => {
             gitvault::commands::admin::cmd_status(cli.json, fail_if_dirty)
         }
@@ -103,8 +111,10 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
                         }
                         SsmAction::Set { key, value, env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            gitvault::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json)
-                                .await
+                            gitvault::ssm::cmd_ssm_set(
+                                &repo_root, &env, &key, &value, &aws, cli.json,
+                            )
+                            .await
                         }
                         SsmAction::Push { env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
@@ -120,8 +130,8 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gitvault::commands::test_helpers::*;
     use gitvault::cli::{Commands, KeyringAction};
+    use gitvault::commands::test_helpers::*;
     use tempfile::TempDir;
 
     #[test]
@@ -464,7 +474,11 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             command: Commands::Decrypt {
-                file: dir.path().join("no_such_file.age").to_string_lossy().to_string(),
+                file: dir
+                    .path()
+                    .join("no_such_file.age")
+                    .to_string_lossy()
+                    .to_string(),
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
                 output: None,
                 fields: None,

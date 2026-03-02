@@ -174,18 +174,24 @@ pub fn resolve_identity_source(
     IdentitySource::Unresolved
 }
 
-/// Parse raw `KEY=VALUE` pairs from an optional string, returning only the variable names.
+/// Parse variable names from an optional comma-separated string.
 ///
-/// Silently ignores entries that contain no `=`.
+/// Accepts plain names (`PATH,HOME`) and optional `KEY=VALUE` pairs (only the
+/// key portion is retained in the latter case).  Empty entries are silently
+/// skipped.  The returned names are looked up in the caller's environment at
+/// execution time.
 fn parse_pass_vars(raw: Option<&str>) -> Vec<String> {
     raw.map(|s| {
         s.split(',')
-            .filter_map(|pair| {
-                let mut parts = pair.splitn(2, '=');
-                let key = parts.next()?.trim().to_owned();
-                // Require at least one '=' to be present; silently skip entries without one.
-                parts.next()?;
-                Some(key)
+            .filter_map(|entry| {
+                let trimmed = entry.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                // If the entry is in KEY=value form take only the key; otherwise
+                // the whole trimmed string is already the variable name.
+                let key = trimmed.splitn(2, '=').next().unwrap_or(trimmed).trim();
+                if key.is_empty() { None } else { Some(key.to_owned()) }
             })
             .collect()
     })
@@ -477,7 +483,32 @@ mod tests {
     }
 
     #[test]
-    fn run_with_pass_raw_skips_entries_without_equals() {
+    fn run_with_pass_raw_plain_names_accepted() {
+        // Plain variable names (no '=') must be collected as-is.
+        let event = Event::Run {
+            env: Some("dev".to_string()),
+            identity: None,
+            prod: false,
+            no_prompt: false,
+            clear_env: false,
+            pass_raw: Some("PATH,HOME".to_string()),
+            command: vec!["env".to_string()],
+        };
+        let effects = transition(&event).expect("should succeed");
+        let pass_vars = effects.iter().find_map(|e| {
+            if let Effect::RunCommand { pass_vars, .. } = e {
+                Some(pass_vars.clone())
+            } else {
+                None
+            }
+        });
+        assert_eq!(pass_vars, Some(vec!["PATH".to_string(), "HOME".to_string()]));
+    }
+
+    #[test]
+    fn run_with_pass_raw_plain_name_and_kv_pair_both_accepted() {
+        // Mix of plain names and KEY=value entries; only the key is retained for
+        // KEY=value entries so the caller can look the name up in the environment.
         let event = Event::Run {
             env: Some("dev".to_string()),
             identity: None,
@@ -495,8 +526,8 @@ mod tests {
                 None
             }
         });
-        // "NOEQUALS" has no '=' so it should be silently skipped.
-        assert_eq!(pass_vars, Some(vec!["KEY".to_string()]));
+        // Both entries should be present: "NOEQUALS" as a plain name, "KEY" extracted from "KEY=val".
+        assert_eq!(pass_vars, Some(vec!["NOEQUALS".to_string(), "KEY".to_string()]));
     }
 
     #[test]

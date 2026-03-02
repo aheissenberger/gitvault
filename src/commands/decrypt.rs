@@ -38,10 +38,13 @@ pub fn cmd_decrypt(
 
     let input_path = PathBuf::from(&file);
     let identity = crypto::parse_identity(&identity_str)?;
+    let repo_root = crate::repo::find_repo_root()?;
 
     // REQ-4: field-level decryption for JSON/YAML/TOML
     if let Some(fields_str) = &fields {
         let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
+        // REQ-42: prevent path traversal for in-place field writes
+        repo::validate_write_path(&repo_root, &input_path)?;
         structured::decrypt_fields(&input_path, &fields, &identity)
             .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
         crate::output::output_success(
@@ -65,7 +68,15 @@ pub fn cmd_decrypt(
     let out_path = if let Some(out) = output {
         PathBuf::from(out)
     } else {
-        let name = input_path.file_name().unwrap().to_string_lossy();
+        let name = input_path
+            .file_name()
+            .ok_or_else(|| {
+                GitvaultError::Usage(format!(
+                    "path has no file name: {}",
+                    input_path.display()
+                ))
+            })?
+            .to_string_lossy();
         let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
         input_path
             .parent()
@@ -74,7 +85,6 @@ pub fn cmd_decrypt(
     };
 
     // REQ-42: prevent path traversal
-    let repo_root = crate::repo::find_repo_root()?;
     repo::validate_write_path(&repo_root, &out_path)?;
 
     // REQ-51: streaming decryption

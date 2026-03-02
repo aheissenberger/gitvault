@@ -135,8 +135,10 @@ fn enforce_restricted_token_permissions(path: &Path) -> Result<(), GitvaultError
 /// Revoke the allow token by removing the token file.
 pub fn revoke_prod(repo_root: &Path) -> Result<(), GitvaultError> {
     let token_path = repo_root.join(TOKEN_PATH);
-    if token_path.exists() {
-        fs::remove_file(&token_path)?;
+    match fs::remove_file(&token_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(GitvaultError::Io(e)),
     }
     Ok(())
 }

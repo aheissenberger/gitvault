@@ -16,10 +16,7 @@ pub fn extract_identity_key(content: &str) -> Option<String> {
         .map(|captures| captures[1].to_string())
 }
 
-pub fn load_identity_source(
-    source: &str,
-    source_name: &str,
-) -> Result<String, GitvaultError> {
+pub fn load_identity_source(source: &str, source_name: &str) -> Result<String, GitvaultError> {
     let value = source.trim();
 
     if value.starts_with("AGE-SECRET-KEY-") {
@@ -70,9 +67,7 @@ where
 ///
 /// The `Unresolved` variant (emitted by the FHSM when no path was supplied)
 /// triggers the standard env-var / keyring fallback via [`load_identity`].
-pub fn load_identity_from_source(
-    source: &fhsm::IdentitySource,
-) -> Result<String, GitvaultError> {
+pub fn load_identity_from_source(source: &fhsm::IdentitySource) -> Result<String, GitvaultError> {
     match source {
         fhsm::IdentitySource::FilePath(p) => load_identity_source(p, "--identity"),
         fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),

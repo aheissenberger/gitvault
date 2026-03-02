@@ -32,6 +32,8 @@ pub fn cmd_encrypt(
         let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
         let identity_str = load_identity(None)?;
         let identity = crypto::parse_identity(&identity_str)?;
+        // REQ-42: prevent path traversal for in-place field writes
+        repo::validate_write_path(&repo_root, &input_path)?;
         structured::encrypt_fields(&input_path, &fields, &identity, &recipient_keys)
             .map_err(|e| GitvaultError::Encryption(e.to_string()))?;
         crate::output::output_success(
@@ -62,6 +64,8 @@ pub fn cmd_encrypt(
         let content = std::fs::read_to_string(&input_path)?;
         let encrypted = structured::encrypt_env_values(&content, &identity, &recipient_keys)
             .map_err(|e| GitvaultError::Encryption(e.to_string()))?;
+        // REQ-42: prevent path traversal for in-place value-only writes
+        repo::validate_write_path(&repo_root, &input_path)?;
         // REQ-43: atomic write
         let tmp = tempfile::NamedTempFile::new_in(
             input_path.parent().unwrap_or(std::path::Path::new(".")),

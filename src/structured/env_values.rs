@@ -28,8 +28,9 @@ pub fn encrypt_env_values(
                     let _ = existing_plain;
                     value.to_string()
                 } else {
-                    let enc = encrypt_binary_b64(value.as_bytes(), recipient_keys)?;
-                    format!("{ENV_ENC_PREFIX}{enc}")
+                    return Err(GitvaultError::Decryption(
+                        "existing ciphertext cannot be decrypted by current identity - re-encrypt from plaintext source after key rotation".to_string(),
+                    ));
                 }
             } else {
                 let enc = encrypt_binary_b64(value.as_bytes(), recipient_keys)?;
@@ -178,11 +179,19 @@ mod tests {
         let keys = identity_to_recipient_keys(&identity);
         let content = "KEY=age:not-base64\n";
 
-        let encrypted = encrypt_env_values(content, &identity, &keys).unwrap();
+        let result = encrypt_env_values(content, &identity, &keys);
 
-        assert_ne!(encrypted, content);
-        assert!(encrypted.starts_with("KEY=age:"));
-        assert!(!encrypted.contains("not-base64"));
+        assert!(
+            result.is_err(),
+            "should return an error when existing ciphertext cannot be decrypted"
+        );
+        match result.unwrap_err() {
+            GitvaultError::Decryption(msg) => assert!(
+                msg.contains("existing ciphertext cannot be decrypted by current identity"),
+                "unexpected error message: {msg}"
+            ),
+            e => panic!("expected Decryption error, got {e:?}"),
+        }
     }
 
     #[test]
