@@ -137,17 +137,35 @@ jobs:
         with:
           path: artifacts
 
+      - name: Collect release asset files
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          expected=(
+            gitvault-linux-x86_64
+            gitvault-windows-x86_64.exe
+            gitvault-macos-aarch64
+            gitvault-macos-x86_64
+          )
+
+          for name in "${expected[@]}"; do
+            src="$(find artifacts -type f -name "$name" -print -quit)"
+            [[ -n "$src" ]] || { echo "Missing artifact file: $name" >&2; exit 1; }
+            cp "$src" "dist/$name"
+          done
+
       - name: Generate SHA256SUMS
         run: |
           set -euo pipefail
           {
-            find artifacts -type f -name 'gitvault-*' -print0 \
+            find dist -type f -name 'gitvault-*' -print0 \
               | while IFS= read -r -d '' file; do
                   name="$(basename "$file")"
                   sum="$(sha256sum "$file" | awk '{print $1}')"
                   printf '%s  %s\n' "$sum" "$name"
                 done
-          } | sort > SHA256SUMS
+          } | sort > dist/SHA256SUMS
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
@@ -155,14 +173,14 @@ jobs:
       - name: Sign and verify release assets
         run: |
           set -euo pipefail
-          shopt -s nullglob globstar
+          shopt -s nullglob
 
           assets=(
-            artifacts/**/gitvault-linux-x86_64
-            artifacts/**/gitvault-windows-x86_64.exe
-            artifacts/**/gitvault-macos-aarch64
-            artifacts/**/gitvault-macos-x86_64
-            SHA256SUMS
+            dist/gitvault-linux-x86_64
+            dist/gitvault-windows-x86_64.exe
+            dist/gitvault-macos-aarch64
+            dist/gitvault-macos-x86_64
+            dist/SHA256SUMS
           )
 
           identity_regex="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build.yml@.*"
@@ -184,31 +202,31 @@ jobs:
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
-            artifacts/**/gitvault-linux-x86_64
-            artifacts/**/gitvault-windows-x86_64.exe
-            artifacts/**/gitvault-macos-aarch64
-            artifacts/**/gitvault-macos-x86_64
-            SHA256SUMS
+            dist/gitvault-linux-x86_64
+            dist/gitvault-windows-x86_64.exe
+            dist/gitvault-macos-aarch64
+            dist/gitvault-macos-x86_64
+            dist/SHA256SUMS
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           files: |
-            artifacts/**/gitvault-linux-x86_64
-            artifacts/**/gitvault-linux-x86_64.sig
-            artifacts/**/gitvault-linux-x86_64.pem
-            artifacts/**/gitvault-windows-x86_64.exe
-            artifacts/**/gitvault-windows-x86_64.exe.sig
-            artifacts/**/gitvault-windows-x86_64.exe.pem
-            artifacts/**/gitvault-macos-aarch64
-            artifacts/**/gitvault-macos-aarch64.sig
-            artifacts/**/gitvault-macos-aarch64.pem
-            artifacts/**/gitvault-macos-x86_64
-            artifacts/**/gitvault-macos-x86_64.sig
-            artifacts/**/gitvault-macos-x86_64.pem
-            SHA256SUMS
-            SHA256SUMS.sig
-            SHA256SUMS.pem
+            dist/gitvault-linux-x86_64
+            dist/gitvault-linux-x86_64.sig
+            dist/gitvault-linux-x86_64.pem
+            dist/gitvault-windows-x86_64.exe
+            dist/gitvault-windows-x86_64.exe.sig
+            dist/gitvault-windows-x86_64.exe.pem
+            dist/gitvault-macos-aarch64
+            dist/gitvault-macos-aarch64.sig
+            dist/gitvault-macos-aarch64.pem
+            dist/gitvault-macos-x86_64
+            dist/gitvault-macos-x86_64.sig
+            dist/gitvault-macos-x86_64.pem
+            dist/SHA256SUMS
+            dist/SHA256SUMS.sig
+            dist/SHA256SUMS.pem
 
   homebrew:
     name: Update Homebrew tap
