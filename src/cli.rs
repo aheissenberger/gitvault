@@ -86,7 +86,7 @@ pub enum Commands {
     },
     /// Check repository safety status
     Status {
-        /// Fail with exit code 3 if secrets/ has uncommitted changes (REQ-32)
+        /// Fail with exit code 6 if secrets/ has uncommitted changes (REQ-32)
         #[arg(long)]
         fail_if_dirty: bool,
     },

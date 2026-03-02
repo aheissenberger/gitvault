@@ -330,12 +330,7 @@ mod tests {
 
         let custom_value = "custom-merge-command %O %A %B";
         let status = Command::new("git")
-            .args([
-                "config",
-                "--local",
-                MERGE_DRIVER_CONFIG_KEY,
-                custom_value,
-            ])
+            .args(["config", "--local", MERGE_DRIVER_CONFIG_KEY, custom_value])
             .current_dir(dir.path())
             .status()
             .expect("git config should run");

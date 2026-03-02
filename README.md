@@ -222,7 +222,7 @@ gitvault status [--fail-if-dirty]
 ```
 
 Reports the resolved environment and checks for tracked plaintext (exit `3` if found).
-`--fail-if-dirty` also exits `3` if `secrets/` has uncommitted changes (REQ-32).
+`--fail-if-dirty` also exits `6` if `secrets/` has uncommitted changes (REQ-32).
 
 ### `harden`
 
@@ -234,6 +234,7 @@ Ensures `.env` and `.secrets/plain/` are in `.gitignore` and installs idempotent
 pre-push hooks. `pre-push` runs `gitvault status --no-prompt --fail-if-dirty` to block drift.
 Also ensures `.gitattributes` contains `*.env merge=gitvault-env` and sets local git config
 `merge.gitvault-env.driver="gitvault merge-driver %O %A %B"`.
+If `core.hooksPath` is configured, hooks are installed in that active hooks directory.
 
 ### `run`
 

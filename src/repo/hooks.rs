@@ -1,26 +1,28 @@
 use crate::error::GitvaultError;
 use std::fs;
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-const PRE_COMMIT_HOOK: &str = r#"#!/usr/bin/env sh
-# gitvault: block commits if plaintext secrets are staged
+const MANAGED_BLOCK_BEGIN: &str = "# --- gitvault managed begin ---";
+const MANAGED_BLOCK_END: &str = "# --- gitvault managed end ---";
+
+const PRE_COMMIT_HOOK_BODY: &str = r#"# gitvault: block commits if plaintext secrets are staged
 set -e
 staged=$(git diff --cached --name-only 2>/dev/null | grep -E '(^|/)\.secrets/plain/|^\.env$' || true)
 if [ -n "$staged" ]; then
-    echo "gitvault: refusing commit – plaintext secrets staged for commit: $staged" >&2
-    exit 1
+        echo "gitvault: refusing commit – plaintext secrets staged for commit: $staged" >&2
+        exit 1
 fi
 if command -v gitvault >/dev/null 2>&1; then
-  gitvault status --no-prompt
+    gitvault status --no-prompt
 fi
 "#;
 
-const PRE_PUSH_HOOK: &str = r"#!/usr/bin/env sh
-# gitvault: run safety check before push
+const PRE_PUSH_HOOK_BODY: &str = r"# gitvault: run safety check before push
 set -e
 if command -v gitvault >/dev/null 2>&1; then
-    gitvault status --no-prompt --fail-if-dirty
+        gitvault status --no-prompt --fail-if-dirty
 fi
 ";
 
@@ -33,33 +35,46 @@ fn atomic_write(path: &Path, content: &[u8]) -> Result<(), GitvaultError> {
     Ok(())
 }
 
-fn install_hook(hook_path: &Path, script: &str) -> Result<(), GitvaultError> {
-    // If hook already exists and already contains a gitvault block, skip
-    if hook_path.exists() {
-        let existing = fs::read_to_string(hook_path)?;
-        if existing.contains("gitvault") {
-            return Ok(());
+fn managed_block(body: &str) -> String {
+    format!(
+        "{MANAGED_BLOCK_BEGIN}\n{}\n{MANAGED_BLOCK_END}\n",
+        body.trim_end()
+    )
+}
+
+fn managed_script(body: &str) -> String {
+    format!("#!/usr/bin/env sh\n{}", managed_block(body))
+}
+
+fn upsert_managed_block(existing: &str, body: &str) -> String {
+    let new_block = managed_block(body);
+
+    if let Some(start) = existing.find(MANAGED_BLOCK_BEGIN)
+        && let Some(end_rel) = existing[start..].find(MANAGED_BLOCK_END)
+    {
+        let end = start + end_rel + MANAGED_BLOCK_END.len();
+        let mut out = String::new();
+        out.push_str(&existing[..start]);
+        out.push_str(&new_block);
+        let tail = existing[end..].trim_start_matches('\n');
+        if !tail.is_empty() {
+            out.push_str(tail);
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
         }
-        // Append gitvault block after existing content
-        let mut content = existing;
-        if !content.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push_str("\n# --- gitvault ---\n");
-        // Append just the gitvault invocation lines (skip shebang)
-        let body: String = script
-            .lines()
-            .skip(1) // skip #!/usr/bin/env sh
-            .collect::<Vec<_>>()
-            .join("\n");
-        content.push_str(&body);
-        content.push('\n');
-        atomic_write(hook_path, content.as_bytes())?;
-    } else {
-        atomic_write(hook_path, script.as_bytes())?;
+        return out;
     }
 
-    // Make executable (Unix)
+    let mut out = existing.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&new_block);
+    out
+}
+
+fn ensure_executable(hook_path: &Path) -> Result<(), GitvaultError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -67,11 +82,53 @@ fn install_hook(hook_path: &Path, script: &str) -> Result<(), GitvaultError> {
         perms.set_mode(0o755);
         fs::set_permissions(hook_path, perms)?;
     }
+    Ok(())
+}
+
+fn resolve_hooks_dir(repo_root: &Path) -> Result<PathBuf, GitvaultError> {
+    let output = Command::new("git")
+        .args(["config", "--local", "--get", "core.hooksPath"])
+        .current_dir(repo_root)
+        .output();
+
+    if let Ok(out) = output
+        && out.status.success()
+    {
+        let configured = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !configured.is_empty() {
+            let path = PathBuf::from(&configured);
+            return Ok(if path.is_absolute() {
+                path
+            } else {
+                repo_root.join(path)
+            });
+        }
+    }
+
+    Ok(repo_root.join(".git").join("hooks"))
+}
+
+fn install_hook(hook_path: &Path, body: &str) -> Result<(), GitvaultError> {
+    if hook_path.exists() {
+        let existing = fs::read_to_string(hook_path)?;
+        if existing.contains("gitvault") && !existing.contains(MANAGED_BLOCK_BEGIN) {
+            ensure_executable(hook_path)?;
+            return Ok(());
+        }
+
+        let content = upsert_managed_block(&existing, body);
+        atomic_write(hook_path, content.as_bytes())?;
+    } else {
+        let content = managed_script(body);
+        atomic_write(hook_path, content.as_bytes())?;
+    }
+
+    ensure_executable(hook_path)?;
 
     Ok(())
 }
 
-/// Install gitvault git hooks into `.git/hooks/`. REQ-31.
+/// Install gitvault git hooks into the active hooks directory. REQ-31.
 ///
 /// Installs:
 /// - `pre-commit`: blocks commits if plaintext secrets are staged.
@@ -84,14 +141,18 @@ fn install_hook(hook_path: &Path, script: &str) -> Result<(), GitvaultError> {
 ///
 /// Returns [`GitvaultError::Io`] if a hook file cannot be read, written, or made executable.
 pub fn install_git_hooks(repo_root: &Path) -> Result<(), GitvaultError> {
-    let hooks_dir = repo_root.join(".git").join("hooks");
+    let hooks_dir = resolve_hooks_dir(repo_root)?;
     if !hooks_dir.exists() {
-        // Not a git repo (or bare repo) — skip silently
-        return Ok(());
+        let default_hooks_dir = repo_root.join(".git").join("hooks");
+        if hooks_dir == default_hooks_dir {
+            // Not a git repo (or bare repo) — skip silently
+            return Ok(());
+        }
+        fs::create_dir_all(&hooks_dir)?;
     }
 
-    install_hook(&hooks_dir.join("pre-commit"), PRE_COMMIT_HOOK)?;
-    install_hook(&hooks_dir.join("pre-push"), PRE_PUSH_HOOK)?;
+    install_hook(&hooks_dir.join("pre-commit"), PRE_COMMIT_HOOK_BODY)?;
+    install_hook(&hooks_dir.join("pre-push"), PRE_PUSH_HOOK_BODY)?;
 
     Ok(())
 }
@@ -99,7 +160,17 @@ pub fn install_git_hooks(repo_root: &Path) -> Result<(), GitvaultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use tempfile::TempDir;
+
+    fn init_git_repo(path: &Path) {
+        let status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .expect("git init should run");
+        assert!(status.success());
+    }
 
     #[test]
     fn test_install_git_hooks_in_non_git_dir() {
@@ -146,8 +217,7 @@ mod tests {
         install_git_hooks(dir.path()).unwrap();
 
         let content = std::fs::read_to_string(dir.path().join(".git/hooks/pre-commit")).unwrap();
-        // Should only contain one gitvault block (not duplicated)
-        assert_eq!(content.matches("# gitvault:").count(), 1);
+        assert_eq!(content.matches(MANAGED_BLOCK_BEGIN).count(), 1);
     }
 
     #[test]
@@ -167,6 +237,7 @@ mod tests {
             "original content preserved"
         );
         assert!(content.contains("gitvault"), "gitvault block appended");
+        assert!(content.contains(MANAGED_BLOCK_BEGIN));
     }
 
     /// Covers lines 550-551 in test_recipients_dedup_on_add by taking the
@@ -191,5 +262,48 @@ mod tests {
             content.contains("gitvault"),
             "gitvault block must be appended"
         );
+    }
+
+    #[test]
+    fn test_install_git_hooks_honors_core_hooks_path() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        let status = Command::new("git")
+            .args(["config", "--local", "core.hooksPath", ".githooks"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config core.hooksPath should run");
+        assert!(status.success());
+
+        install_git_hooks(dir.path()).unwrap();
+
+        assert!(dir.path().join(".githooks/pre-commit").exists());
+        assert!(dir.path().join(".githooks/pre-push").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_install_hook_repairs_executable_bit_for_existing_gitvault_hook() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git/hooks")).unwrap();
+        let hook_path = dir.path().join(".git/hooks/pre-commit");
+
+        std::fs::write(
+            &hook_path,
+            "#!/usr/bin/env sh\n# gitvault: existing\nset -e\n",
+        )
+        .unwrap();
+
+        let mut perms = std::fs::metadata(&hook_path).unwrap().permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&hook_path, perms).unwrap();
+
+        install_git_hooks(dir.path()).unwrap();
+
+        let mode = std::fs::metadata(&hook_path).unwrap().permissions().mode();
+        assert_ne!(mode & 0o111, 0, "hook should be executable");
     }
 }
