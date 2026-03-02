@@ -72,7 +72,7 @@ pub enum SecretSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The user requested `gitvault run`.
-    RunRequested {
+    Run {
         /// Target environment (defaults to `"dev"` when absent).
         env: Option<String>,
         /// Explicit identity file path.
@@ -90,7 +90,7 @@ pub enum Event {
     },
 
     /// The user requested `gitvault decrypt`.
-    DecryptRequested {
+    Decrypt {
         /// Path of the file to decrypt.
         file: String,
         /// Explicit identity file path.
@@ -102,7 +102,7 @@ pub enum Event {
     },
 
     /// The user requested `gitvault materialize`.
-    MaterializeRequested {
+    Materialize {
         /// Target environment.
         env: Option<String>,
         /// Explicit identity file path.
@@ -232,7 +232,7 @@ fn parse_pass_vars(raw: Option<&str>) -> Vec<(String, String)> {
 /// that make execution impossible.
 pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
     match event {
-        Event::RunRequested {
+        Event::Run {
             env,
             identity,
             prod,
@@ -271,7 +271,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
             ])
         }
 
-        Event::MaterializeRequested {
+        Event::Materialize {
             env,
             identity,
             prod,
@@ -287,12 +287,14 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
                     no_prompt: *no_prompt,
                 },
                 Effect::ResolveIdentity { source },
-                Effect::DecryptSecrets { env: resolved_env.clone() },
+                Effect::DecryptSecrets {
+                    env: resolved_env.clone(),
+                },
                 Effect::MaterializeSecrets { env: resolved_env },
             ])
         }
 
-        Event::DecryptRequested {
+        Event::Decrypt {
             file,
             identity,
             no_prompt: _,
@@ -319,7 +321,7 @@ mod tests {
 
     // Helper: build a minimal RunRequested event
     fn run_event(command: Vec<&str>) -> Event {
-        Event::RunRequested {
+        Event::Run {
             env: Some("dev".to_string()),
             identity: None,
             prod: false,
@@ -369,7 +371,7 @@ mod tests {
 
     #[test]
     fn materialize_requested_includes_decrypt_then_materialize_secrets() {
-        let event = Event::MaterializeRequested {
+        let event = Event::Materialize {
             env: Some("staging".to_string()),
             identity: None,
             prod: false,
@@ -385,7 +387,10 @@ mod tests {
             .iter()
             .position(|e| matches!(e, Effect::MaterializeSecrets { env } if env == "staging"));
         assert!(decrypt_pos.is_some(), "expected DecryptSecrets(staging)");
-        assert!(materialize_pos.is_some(), "expected MaterializeSecrets(staging)");
+        assert!(
+            materialize_pos.is_some(),
+            "expected MaterializeSecrets(staging)"
+        );
         assert!(
             decrypt_pos < materialize_pos,
             "DecryptSecrets must come before MaterializeSecrets"
@@ -394,7 +399,7 @@ mod tests {
 
     #[test]
     fn decrypt_requested_no_check_prod_barrier() {
-        let event = Event::DecryptRequested {
+        let event = Event::Decrypt {
             file: "secrets.age".to_string(),
             identity: None,
             no_prompt: false,
@@ -412,7 +417,7 @@ mod tests {
 
     #[test]
     fn decrypt_requested_includes_resolve_identity_and_decrypt_file() {
-        let event = Event::DecryptRequested {
+        let event = Event::Decrypt {
             file: "foo.age".to_string(),
             identity: Some("/home/user/.age".to_string()),
             no_prompt: false,

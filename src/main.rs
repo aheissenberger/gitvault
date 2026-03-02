@@ -341,7 +341,7 @@ fn cmd_decrypt(
     no_prompt: bool,
 ) -> Result<(), GitvaultError> {
     // Use FHSM to resolve the identity source; file I/O remains here.
-    let event = fhsm::Event::DecryptRequested {
+    let event = fhsm::Event::Decrypt {
         file: file.clone(),
         identity: identity_path,
         no_prompt,
@@ -521,7 +521,7 @@ fn cmd_materialize(
     json: bool,
     no_prompt: bool,
 ) -> Result<(), GitvaultError> {
-    let event = fhsm::Event::MaterializeRequested {
+    let event = fhsm::Event::Materialize {
         env: env_override,
         identity: identity_path,
         prod,
@@ -589,7 +589,7 @@ fn cmd_run(
     _json: bool,
     no_prompt: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
-    let event = fhsm::Event::RunRequested {
+    let event = fhsm::Event::Run {
         env: env_override,
         identity: identity_path,
         prod,
