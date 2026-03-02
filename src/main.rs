@@ -551,27 +551,26 @@ fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
     Ok(())
 }
 
-/// Run as git merge driver for .env files (REQ-34)
-fn cmd_merge_driver(
-    base: String,
-    ours: String,
-    theirs: String,
-) -> Result<CommandOutcome, GitvaultError> {
-    fn parse_env(
-        content: &str,
-    ) -> Result<std::collections::HashMap<String, String>, GitvaultError> {
-        Ok(parse_env_pairs(content)?.into_iter().collect())
+/// Pure three-way merge of .env file content. Returns `(merged_content, has_conflict)`.
+/// No filesystem access — all inputs are string slices.
+///
+/// Uses a standard three-way merge algorithm: for each key, if only one side changed
+/// relative to base, take that change; if both changed identically, accept it; if both
+/// changed differently, emit a conflict marker block.
+fn merge_env_content(base: &str, ours: &str, theirs: &str) -> (String, bool) {
+    // Parse errors are treated as empty maps; callers should validate content first.
+    fn to_map(content: &str) -> std::collections::HashMap<String, String> {
+        parse_env_pairs(content)
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
     }
 
-    let base_content = std::fs::read_to_string(&base)?;
-    let ours_content = std::fs::read_to_string(&ours)?;
-    let theirs_content = std::fs::read_to_string(&theirs)?;
+    let base_map = to_map(base);
+    let ours_map = to_map(ours);
+    let theirs_map = to_map(theirs);
 
-    let base_map = parse_env(&base_content)?;
-    let ours_map = parse_env(&ours_content)?;
-    let theirs_map = parse_env(&theirs_content)?;
-
-    // Collect all keys
+    // Collect all keys across all three versions
     let mut all_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     all_keys.extend(base_map.keys().cloned());
     all_keys.extend(ours_map.keys().cloned());
@@ -601,10 +600,10 @@ fn cmd_merge_driver(
             // Ours changed, theirs unchanged → keep ours
             ours_val.map(|s| s.to_string())
         } else if ours_eq_theirs {
-            // Both changed to same → keep ours
+            // Both changed to same value → keep ours
             ours_val.map(|s| s.to_string())
         } else {
-            // All three differ → conflict
+            // All three differ → conflict marker
             has_conflict = true;
             let ours_line = ours_val
                 .map(|v| format!("{key}={v}"))
@@ -623,7 +622,7 @@ fn cmd_merge_driver(
     let mut output_lines: Vec<String> = Vec::new();
     let mut processed_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for line in ours_content.lines() {
+    for line in ours.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             output_lines.push(line.to_string());
@@ -636,7 +635,7 @@ fn cmd_merge_driver(
                 } else {
                     output_lines.push(rewrite_env_assignment_line(line, val));
                 }
-                // If None → key was deleted, skip it
+                // If merged is None → key was deleted, skip it
             }
             processed_keys.insert(k);
         } else {
@@ -657,7 +656,22 @@ fn cmd_merge_driver(
         }
     }
 
-    let merged_content = output_lines.join("\n") + "\n";
+    (output_lines.join("\n") + "\n", has_conflict)
+}
+
+/// Run as git merge driver for .env files (REQ-34)
+fn cmd_merge_driver(
+    base: String,
+    ours: String,
+    theirs: String,
+) -> Result<CommandOutcome, GitvaultError> {
+    let base_content = std::fs::read_to_string(&base)?;
+    let ours_content = std::fs::read_to_string(&ours)?;
+    let theirs_content = std::fs::read_to_string(&theirs)?;
+
+    let (merged_content, has_conflict) =
+        merge_env_content(&base_content, &ours_content, &theirs_content);
+
     let ours_path = std::path::PathBuf::from(&ours);
     let tmp =
         tempfile::NamedTempFile::new_in(ours_path.parent().unwrap_or(std::path::Path::new(".")))?;
@@ -2074,5 +2088,65 @@ mod tests {
 
         let err = run(cli).expect_err("invalid identity source should fail keyring set");
         assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn merge_env_no_changes() {
+        let base = "FOO=1\nBAR=2\n";
+        let (merged, conflict) = merge_env_content(base, base, base);
+        assert!(!conflict);
+        assert!(merged.contains("FOO=1"));
+        assert!(merged.contains("BAR=2"));
+    }
+
+    #[test]
+    fn merge_env_ours_only_change() {
+        let base = "FOO=1\n";
+        let ours = "FOO=2\n";
+        let theirs = "FOO=1\n";
+        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        assert!(!conflict);
+        assert!(merged.contains("FOO=2"));
+    }
+
+    #[test]
+    fn merge_env_theirs_only_change() {
+        let base = "FOO=1\n";
+        let ours = "FOO=1\n";
+        let theirs = "FOO=3\n";
+        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        assert!(!conflict);
+        assert!(merged.contains("FOO=3"));
+    }
+
+    #[test]
+    fn merge_env_both_same_change() {
+        let base = "FOO=1\n";
+        let ours = "FOO=9\n";
+        let theirs = "FOO=9\n";
+        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        assert!(!conflict);
+        assert!(merged.contains("FOO=9"));
+    }
+
+    #[test]
+    fn merge_env_conflict() {
+        let base = "FOO=1\n";
+        let ours = "FOO=2\n";
+        let theirs = "FOO=3\n";
+        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        assert!(conflict);
+        assert!(merged.contains("<<<<<<<"));
+    }
+
+    #[test]
+    fn merge_env_key_deleted_in_ours() {
+        let base = "FOO=1\nBAR=2\n";
+        let ours = "FOO=1\n"; // BAR deleted
+        let theirs = "FOO=1\nBAR=2\n";
+        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        assert!(!conflict);
+        // BAR deleted in ours, unchanged in theirs → keep deletion
+        assert!(!merged.contains("BAR=2"));
     }
 }
