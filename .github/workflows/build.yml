@@ -549,3 +549,34 @@ jobs:
           git add "${FORMULA_PATH}"
           git commit -m "chore: update formula for ${VERSION}"
           git push origin "HEAD:${TAP_BRANCH}"
+  test-windows:
+    name: Test on Windows (ACL validation)
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust 1.93.1
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: 1.93.1
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: rust-test-x86_64-pc-windows-msvc-1.93.1
+
+      - name: Prefetch workspace dependencies
+        run: cargo fetch --locked
+
+      - name: Run tests (Windows)
+        # Runs all tests including permissions tests that invoke real icacls on Windows.
+        # This validates AC5 (spec-15) and AC4 (spec-11): Windows ACL enforcement.
+        run: cargo test --locked --all-targets
