@@ -496,4 +496,119 @@ mod tests {
         let out_toml = decrypt_fields_toml(toml, &["secret"], &identity).unwrap();
         assert!(out_toml.contains("secret = \"plain\""));
     }
+
+    // ── parse-error paths ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_encrypt_fields_json_parse_error() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
+        write!(tmp, "not valid json {{{{").unwrap();
+
+        let err = encrypt_fields(tmp.path(), &["key"], &identity, &keys).unwrap_err();
+        assert!(err.to_string().contains("JSON parse error"));
+    }
+
+    #[test]
+    fn test_encrypt_fields_yaml_parse_error() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        // YAML that is structurally invalid for mapping (tab indentation is banned)
+        let mut tmp = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(tmp, "key:\n\t- bad_indent").unwrap();
+
+        let err = encrypt_fields(tmp.path(), &["key"], &identity, &keys).unwrap_err();
+        assert!(err.to_string().contains("YAML parse error"));
+    }
+
+    #[test]
+    fn test_encrypt_fields_toml_parse_error() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        let mut tmp = NamedTempFile::with_suffix(".toml").unwrap();
+        write!(tmp, "key = {{not valid toml").unwrap();
+
+        let err = encrypt_fields(tmp.path(), &["key"], &identity, &keys).unwrap_err();
+        assert!(err.to_string().contains("TOML parse error"));
+    }
+
+    #[test]
+    fn test_decrypt_fields_json_parse_error() {
+        let identity = gen_identity();
+
+        let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
+        write!(tmp, "not valid json").unwrap();
+
+        let err = decrypt_fields(tmp.path(), &["key"], &identity).unwrap_err();
+        assert!(err.to_string().contains("JSON parse error"));
+    }
+
+    #[test]
+    fn test_decrypt_fields_yaml_parse_error() {
+        let identity = gen_identity();
+
+        let mut tmp = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(tmp, "key:\n\t- bad_indent").unwrap();
+
+        let err = decrypt_fields(tmp.path(), &["key"], &identity).unwrap_err();
+        assert!(err.to_string().contains("YAML parse error"));
+    }
+
+    #[test]
+    fn test_decrypt_fields_toml_parse_error() {
+        let identity = gen_identity();
+
+        let mut tmp = NamedTempFile::with_suffix(".toml").unwrap();
+        write!(tmp, "key = {{not valid toml").unwrap();
+
+        let err = decrypt_fields(tmp.path(), &["key"], &identity).unwrap_err();
+        assert!(err.to_string().contains("TOML parse error"));
+    }
+
+    // ── file-not-found paths ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_encrypt_fields_file_not_found() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let nonexistent = std::path::Path::new("/nonexistent/dir/secret.json");
+
+        let err = encrypt_fields(nonexistent, &["key"], &identity, &keys).unwrap_err();
+        assert!(err.to_string().contains("Reading"));
+    }
+
+    #[test]
+    fn test_decrypt_fields_file_not_found() {
+        let identity = gen_identity();
+        let nonexistent = std::path::Path::new("/nonexistent/dir/secret.yaml");
+
+        let err = decrypt_fields(nonexistent, &["key"], &identity).unwrap_err();
+        assert!(err.to_string().contains("Reading"));
+    }
+
+    // ── yml extension alias ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_yml_extension_encrypt_decrypt_roundtrip() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        let mut tmp = NamedTempFile::with_suffix(".yml").unwrap();
+        write!(tmp, "token: secret_token\nenv: prod\n").unwrap();
+        let path = tmp.path().to_path_buf();
+
+        encrypt_fields(&path, &["token"], &identity, &keys).unwrap();
+        let v: serde_yml::Value =
+            serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(is_age_armor(v["token"].as_str().unwrap()));
+
+        decrypt_fields(&path, &["token"], &identity).unwrap();
+        let v2: serde_yml::Value =
+            serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v2["token"].as_str().unwrap(), "secret_token");
+    }
 }
