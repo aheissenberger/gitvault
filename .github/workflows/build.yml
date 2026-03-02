@@ -122,6 +122,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: bash
     env:
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
