@@ -2430,7 +2430,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let pubkey = x25519::Identity::generate().to_public().to_string();
         // Write a non-empty recipients file so that line 330 (early return) executes.
-        repo::write_recipients(dir.path(), &[pubkey.clone()])
+        repo::write_recipients(dir.path(), std::slice::from_ref(&pubkey))
             .expect("write_recipients should succeed");
 
         let result =
