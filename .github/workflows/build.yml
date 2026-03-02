@@ -50,7 +50,7 @@ jobs:
         id: cache_verify
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          shared-key: rust-${{ runner.os }}-1.93.1
+          shared-key: rust-verify-Linux-1.93.1
 
       - name: Cache diagnostics (verify)
         run: |
@@ -66,17 +66,16 @@ jobs:
             echo "### Cache status (verify)"
             echo "- OS: $RUNNER_OS"
             echo "- rust-cache hit: ${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}"
-            echo "- shared-key: rust-${{ runner.os }}-1.93.1"
+            echo "- shared-key: rust-verify-Linux-1.93.1"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Persist cache status (verify)
         run: |
           set -euo pipefail
           mkdir -p cache-status
-          printf 'verify\t%s\t-\t%s\trust-%s-1.93.1\n' \
+          printf 'verify\t%s\t-\t%s\trust-verify-Linux-1.93.1\n' \
             "${{ runner.os }}" \
             "${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}" \
-            "${{ runner.os }}" \
             > cache-status/verify-${{ runner.os }}.tsv
 
       - name: Upload cache status (verify)
@@ -158,7 +157,7 @@ jobs:
         id: cache_build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          shared-key: rust-${{ runner.os }}-1.93.1
+          shared-key: rust-build-${{ matrix.target }}-1.93.1
 
       - name: Cache diagnostics (build)
         run: |
@@ -175,18 +174,18 @@ jobs:
             echo "- OS: $RUNNER_OS"
             echo "- target: ${{ matrix.target }}"
             echo "- rust-cache hit: ${{ steps.cache_build.outputs.cache-hit || 'n/a' }}"
-            echo "- shared-key: rust-${{ runner.os }}-1.93.1"
+            echo "- shared-key: rust-build-${{ matrix.target }}-1.93.1"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Persist cache status (build)
         run: |
           set -euo pipefail
           mkdir -p cache-status
-          printf 'build\t%s\t%s\t%s\trust-%s-1.93.1\n' \
+          printf 'build\t%s\t%s\t%s\trust-build-%s-1.93.1\n' \
             "${{ runner.os }}" \
             "${{ matrix.target }}" \
             "${{ steps.cache_build.outputs.cache-hit || 'n/a' }}" \
-            "${{ runner.os }}" \
+            "${{ matrix.target }}" \
             > cache-status/build-${{ matrix.target }}-${{ runner.os }}.tsv
 
       - name: Upload cache status (build)
@@ -203,15 +202,37 @@ jobs:
         run: cargo fetch --manifest-path xtask/Cargo.toml
 
       - name: Build release binary
-        run: cargo build --locked --release --target ${{ matrix.target }}
+        run: cargo build --locked --profile release-min --target ${{ matrix.target }}
+
+      - name: Additional strip on macOS
+        if: startsWith(matrix.target, 'aarch64-apple-darwin') || startsWith(matrix.target, 'x86_64-apple-darwin')
+        run: strip -x target/${{ matrix.target }}/release-min/gitvault
+
+      - name: Binary size summary (build)
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            size_bytes="$(wc -c < "target/${{ matrix.target }}/release-min/gitvault.exe")"
+            size_human="$(du -h "target/${{ matrix.target }}/release-min/gitvault.exe" | awk '{print $1}')"
+          else
+            size_bytes="$(wc -c < "target/${{ matrix.target }}/release-min/gitvault")"
+            size_human="$(du -h "target/${{ matrix.target }}/release-min/gitvault" | awk '{print $1}')"
+          fi
+
+          {
+            echo "### Binary size (build)"
+            echo "- target: ${{ matrix.target }}"
+            echo "- size: ${size_human} (${size_bytes} bytes)"
+            echo "- profile: release-min"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Rename artifact (Unix)
         if: matrix.os != 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/gitvault ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release-min/gitvault ${{ matrix.artifact }}
 
       - name: Rename artifact (Windows)
         if: matrix.os == 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/gitvault.exe ${{ matrix.artifact }}
+        run: cp target/${{ matrix.target }}/release-min/gitvault.exe ${{ matrix.artifact }}
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -255,6 +276,12 @@ jobs:
       - name: Generate SHA256SUMS
         run: |
           set -euo pipefail
+
+          tar -C dist -czf dist/gitvault-linux-x86_64.tar.gz gitvault-linux-x86_64
+          zip -j dist/gitvault-windows-x86_64.zip dist/gitvault-windows-x86_64.exe
+          tar -C dist -czf dist/gitvault-macos-aarch64.tar.gz gitvault-macos-aarch64
+          tar -C dist -czf dist/gitvault-macos-x86_64.tar.gz gitvault-macos-x86_64
+
           {
             find dist -type f -name 'gitvault-*' -print0 \
               | while IFS= read -r -d '' file; do
@@ -274,9 +301,13 @@ jobs:
 
           assets=(
             dist/gitvault-linux-x86_64
+            dist/gitvault-linux-x86_64.tar.gz
             dist/gitvault-windows-x86_64.exe
+            dist/gitvault-windows-x86_64.zip
             dist/gitvault-macos-aarch64
+            dist/gitvault-macos-aarch64.tar.gz
             dist/gitvault-macos-x86_64
+            dist/gitvault-macos-x86_64.tar.gz
             dist/SHA256SUMS
           )
 
@@ -300,9 +331,13 @@ jobs:
         with:
           subject-path: |
             dist/gitvault-linux-x86_64
+            dist/gitvault-linux-x86_64.tar.gz
             dist/gitvault-windows-x86_64.exe
+            dist/gitvault-windows-x86_64.zip
             dist/gitvault-macos-aarch64
+            dist/gitvault-macos-aarch64.tar.gz
             dist/gitvault-macos-x86_64
+            dist/gitvault-macos-x86_64.tar.gz
             dist/SHA256SUMS
 
       - name: Publish GitHub release assets
@@ -310,15 +345,27 @@ jobs:
         with:
           files: |
             dist/gitvault-linux-x86_64
+            dist/gitvault-linux-x86_64.tar.gz
+            dist/gitvault-linux-x86_64.tar.gz.sig
+            dist/gitvault-linux-x86_64.tar.gz.pem
             dist/gitvault-linux-x86_64.sig
             dist/gitvault-linux-x86_64.pem
             dist/gitvault-windows-x86_64.exe
+            dist/gitvault-windows-x86_64.zip
+            dist/gitvault-windows-x86_64.zip.sig
+            dist/gitvault-windows-x86_64.zip.pem
             dist/gitvault-windows-x86_64.exe.sig
             dist/gitvault-windows-x86_64.exe.pem
             dist/gitvault-macos-aarch64
+            dist/gitvault-macos-aarch64.tar.gz
+            dist/gitvault-macos-aarch64.tar.gz.sig
+            dist/gitvault-macos-aarch64.tar.gz.pem
             dist/gitvault-macos-aarch64.sig
             dist/gitvault-macos-aarch64.pem
             dist/gitvault-macos-x86_64
+            dist/gitvault-macos-x86_64.tar.gz
+            dist/gitvault-macos-x86_64.tar.gz.sig
+            dist/gitvault-macos-x86_64.tar.gz.pem
             dist/gitvault-macos-x86_64.sig
             dist/gitvault-macos-x86_64.pem
             dist/SHA256SUMS
@@ -414,8 +461,8 @@ jobs:
           echo "formula_path=${formula_path}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "url_aarch64=${release_base}/gitvault-macos-aarch64" >> "$GITHUB_OUTPUT"
-          echo "url_x86_64=${release_base}/gitvault-macos-x86_64" >> "$GITHUB_OUTPUT"
+          echo "url_aarch64=${release_base}/gitvault-macos-aarch64.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "url_x86_64=${release_base}/gitvault-macos-x86_64.tar.gz" >> "$GITHUB_OUTPUT"
           echo "url_sums=${release_base}/SHA256SUMS" >> "$GITHUB_OUTPUT"
 
       - name: Compute asset checksums
@@ -426,8 +473,8 @@ jobs:
           set -euo pipefail
           curl -fsSL "$URL_SUMS" -o SHA256SUMS
 
-          sha_aarch64="$(awk '$2 == "gitvault-macos-aarch64" {print $1}' SHA256SUMS)"
-          sha_x86_64="$(awk '$2 == "gitvault-macos-x86_64" {print $1}' SHA256SUMS)"
+          sha_aarch64="$(awk '$2 == "gitvault-macos-aarch64.tar.gz" {print $1}' SHA256SUMS)"
+          sha_x86_64="$(awk '$2 == "gitvault-macos-x86_64.tar.gz" {print $1}' SHA256SUMS)"
           [[ -n "$sha_aarch64" ]] || { echo "Missing SHA for gitvault-macos-aarch64" >&2; exit 1; }
           [[ -n "$sha_x86_64" ]] || { echo "Missing SHA for gitvault-macos-x86_64" >&2; exit 1; }
 
