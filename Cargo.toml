@@ -27,13 +27,16 @@ serde_yml = "0.0.12"
 toml = { version = "0.8", features = ["preserve_order"] }
 thiserror = "1"
 tempfile = "3"
-keyring = "3"
 dotenvy = "0.15"
 regex = "1"
 base64 = "0.22"
 aws-config  = { version = "1.1.7",   features = ["behavior-version-latest"], optional = true }
 aws-sdk-ssm = { version = "1.106.0", optional = true }
 tokio       = { version = "1",        features = ["rt-multi-thread", "macros"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# REQ-39: OS keyring (macOS Keychain) — gated with #[cfg(target_os = "macos")] in keyring_store.rs
+keyring = "3"
 
 [features]
 ssm = ["dep:aws-config", "dep:aws-sdk-ssm", "dep:tokio"]

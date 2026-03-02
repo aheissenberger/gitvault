@@ -1,11 +1,18 @@
 //! OS keyring integration (REQ-39).
 //! Stores the age identity key in the system keyring under service "gitvault".
+//!
+//! The OS keyring backend (`keyring::Entry`) is only compiled on macOS.
+//! On all other platforms the public functions return a clear "not supported"
+//! error so callers can fall back gracefully.
 
 use crate::error::GitvaultError;
 
 const SERVICE: &str = "gitvault";
 const USERNAME: &str = "age-identity";
 
+// ── macOS implementation (uses the OS keyring crate) ─────────────────────────
+
+#[cfg(target_os = "macos")]
 pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
     keyring_set_with(key, |service, username, key| {
         let entry = keyring::Entry::new(service, username)
@@ -16,6 +23,7 @@ pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
     })
 }
 
+#[cfg(target_os = "macos")]
 pub fn keyring_get() -> Result<String, GitvaultError> {
     keyring_get_with(|service, username| {
         let entry = keyring::Entry::new(service, username)
@@ -26,6 +34,7 @@ pub fn keyring_get() -> Result<String, GitvaultError> {
     })
 }
 
+#[cfg(target_os = "macos")]
 pub fn keyring_delete() -> Result<(), GitvaultError> {
     keyring_delete_with(|service, username| {
         let entry = keyring::Entry::new(service, username)
@@ -36,21 +45,55 @@ pub fn keyring_delete() -> Result<(), GitvaultError> {
     })
 }
 
-fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
+// ── Stub for non-macOS platforms ──────────────────────────────────────────────
+
+/// On non-macOS platforms the OS keyring is not supported.
+#[cfg(not(target_os = "macos"))]
+pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
+    keyring_set_with(key, |_service, _username, _key| {
+        Err(GitvaultError::Keyring(
+            "OS keyring is only supported on macOS".to_string(),
+        ))
+    })
+}
+
+/// On non-macOS platforms the OS keyring is not supported.
+#[cfg(not(target_os = "macos"))]
+pub fn keyring_get() -> Result<String, GitvaultError> {
+    keyring_get_with(|_service, _username| {
+        Err(GitvaultError::Keyring(
+            "OS keyring is only supported on macOS".to_string(),
+        ))
+    })
+}
+
+/// On non-macOS platforms the OS keyring is not supported.
+#[cfg(not(target_os = "macos"))]
+pub fn keyring_delete() -> Result<(), GitvaultError> {
+    keyring_delete_with(|_service, _username| {
+        Err(GitvaultError::Keyring(
+            "OS keyring is only supported on macOS".to_string(),
+        ))
+    })
+}
+
+// ── Platform-independent injectable helpers (testable on all platforms) ───────
+
+pub(crate) fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str, &str) -> Result<(), GitvaultError>,
 {
     set_password(SERVICE, USERNAME, key)
 }
 
-fn keyring_get_with<F>(get_password: F) -> Result<String, GitvaultError>
+pub(crate) fn keyring_get_with<F>(get_password: F) -> Result<String, GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<String, GitvaultError>,
 {
     get_password(SERVICE, USERNAME)
 }
 
-fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
+pub(crate) fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<(), GitvaultError>,
 {
@@ -61,14 +104,37 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn keyring_set_get_delete_are_callable() {
-        let key = "AGE-SECRET-KEY-TESTVALUE";
+    // ── Non-macOS stub tests (always run) ─────────────────────────────────────
 
-        let _ = keyring_set(key);
-        let _ = keyring_get();
-        let _ = keyring_delete();
+    /// On Linux/Windows the public functions must return a Keyring error.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn keyring_set_unsupported_on_non_macos() {
+        assert!(matches!(
+            keyring_set("AGE-SECRET-KEY-1"),
+            Err(GitvaultError::Keyring(_))
+        ));
     }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn keyring_get_unsupported_on_non_macos() {
+        assert!(matches!(
+            keyring_get(),
+            Err(GitvaultError::Keyring(_))
+        ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn keyring_delete_unsupported_on_non_macos() {
+        assert!(matches!(
+            keyring_delete(),
+            Err(GitvaultError::Keyring(_))
+        ));
+    }
+
+    // ── Injectable helper tests (always run, platform-independent) ────────────
 
     #[test]
     fn keyring_set_with_passes_expected_metadata() {
@@ -78,7 +144,6 @@ mod tests {
             Ok(())
         })
         .unwrap();
-
         assert_eq!(
             captured,
             Some((SERVICE.to_string(), USERNAME.to_string(), "k".to_string()))
@@ -93,7 +158,6 @@ mod tests {
             Ok("secret".to_string())
         })
         .unwrap();
-
         assert_eq!(value, "secret");
         assert_eq!(captured, Some((SERVICE.to_string(), USERNAME.to_string())));
     }
@@ -106,25 +170,23 @@ mod tests {
             Ok(())
         })
         .unwrap();
-
         assert_eq!(captured, Some((SERVICE.to_string(), USERNAME.to_string())));
     }
 
     #[test]
     fn keyring_helpers_propagate_errors() {
-        assert!(
-            keyring_set_with("k", |_s, _u, _k| Err(GitvaultError::Keyring(
-                "set failed".to_string()
-            )))
-            .is_err()
-        );
+        assert!(keyring_set_with("k", |_s, _u, _k| Err(GitvaultError::Keyring(
+            "set failed".to_string()
+        )))
+        .is_err());
         assert!(
             keyring_get_with(|_s, _u| Err(GitvaultError::Keyring("get failed".to_string())))
                 .is_err()
         );
-        assert!(
-            keyring_delete_with(|_s, _u| Err(GitvaultError::Keyring("delete failed".to_string())))
-                .is_err()
-        );
+        assert!(keyring_delete_with(|_s, _u| Err(GitvaultError::Keyring(
+            "delete failed".to_string()
+        )))
+        .is_err());
     }
 }
+

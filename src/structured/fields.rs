@@ -4,7 +4,7 @@ use std::path::Path;
 use super::armor::{decrypt_armor, encrypt_armor};
 use super::helpers::{atomic_write, is_age_armor};
 
-/// Determine the new encrypted value for a field, applying REQ-5 determinism:
+/// Determine the new encrypted value for a field, applying REQ-5 idempotency:
 /// if the current value is already age armor, keep it unchanged.
 /// Otherwise, encrypt the current plaintext value.
 fn determine_encrypted_value(
@@ -65,7 +65,7 @@ fn toml_field_mut<'a>(value: &'a mut toml::Value, path: &[&str]) -> Option<&'a m
 }
 
 /// REQ-4: Encrypt specified fields in a JSON, YAML, or TOML file.
-/// REQ-5: Existing ciphertext is kept if it decrypts to the same plaintext.
+/// REQ-5: Idempotent — existing ciphertext is preserved when the field is already encrypted.
 pub fn encrypt_fields(
     file_path: &Path,
     fields: &[&str],
@@ -299,9 +299,9 @@ mod tests {
         assert_eq!(v2["password"].as_str().unwrap(), "hunter2");
     }
 
-    /// REQ-5: Determinism — encrypting the same field twice yields identical ciphertext.
+    /// REQ-5: Idempotency — re-encrypting an already-encrypted field preserves the existing ciphertext.
     #[test]
-    fn test_json_field_encrypt_determinism() {
+    fn test_json_field_encrypt_idempotent() {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
@@ -317,7 +317,7 @@ mod tests {
 
         assert_eq!(
             first_enc, second_enc,
-            "Encrypting same input twice must produce identical output (REQ-5)"
+            "Re-encrypting an already-encrypted field must preserve existing ciphertext (REQ-5)"
         );
     }
 

@@ -208,4 +208,83 @@ mod tests {
         );
         assert!(matches!(result, Err(GitvaultError::Keyring(_))));
     }
+
+    /// Cover the `crypto::parse_identity` Err-branch in the Get arm by returning
+    /// an invalid key string from the injected getter.
+    #[test]
+    fn test_cmd_keyring_get_invalid_key_errors() {
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Get,
+            false,
+            |_| Err(GitvaultError::Keyring("not used".to_string())),
+            || Ok("not-a-valid-age-secret-key".to_string()),
+            || Err(GitvaultError::Keyring("not used".to_string())),
+        );
+        assert!(result.is_err());
+    }
+
+    /// Cover the `load_identity` Err-branch in the Set arm by pointing to a
+    /// path that does not exist.
+    #[test]
+    fn test_cmd_keyring_set_identity_load_failure() {
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Set {
+                identity: Some("/nonexistent/path/identity.txt".to_string()),
+            },
+            false,
+            |_| Ok(()),
+            || Err(GitvaultError::Keyring("not used".to_string())),
+            || Err(GitvaultError::Keyring("not used".to_string())),
+        );
+        assert!(result.is_err());
+    }
+
+    /// json=true path for Get via cmd_keyring_with_ops (already covered, kept for clarity).
+    #[test]
+    fn test_cmd_keyring_get_json_output() {
+        let (_, identity) = setup_identity_file();
+        use age::secrecy::ExposeSecret;
+        let key_str = identity.to_string().expose_secret().to_string();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Get,
+            true, // json = true
+            |_| Err(GitvaultError::Keyring("not used".to_string())),
+            move || Ok(key_str.clone()),
+            || Err(GitvaultError::Keyring("not used".to_string())),
+        );
+        assert!(result.is_ok());
+    }
+
+    /// Smoke-test the real `cmd_keyring` wrapper (not injectable).
+    /// On macOS this hits the OS keychain; on other platforms it returns a "not
+    /// supported" error from the platform stub.  Either way the wrapper code
+    /// (lines 9-17) is exercised.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn test_cmd_keyring_real_wrapper_non_macos() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _) = setup_identity_file();
+
+        // Set: load_identity succeeds but keyring_store::keyring_set returns
+        // "not supported" → the error propagates through cmd_keyring.
+        let err = cmd_keyring(
+            KeyringAction::Set {
+                identity: Some(identity_file.path().to_string_lossy().to_string()),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(err, GitvaultError::Keyring(_)));
+
+        // Get: keyring_store::keyring_get returns "not supported" immediately.
+        let err = cmd_keyring(KeyringAction::Get, false).unwrap_err();
+        assert!(matches!(err, GitvaultError::Keyring(_)));
+
+        // Delete: keyring_store::keyring_delete returns "not supported".
+        let err = cmd_keyring(KeyringAction::Delete, false).unwrap_err();
+        assert!(matches!(err, GitvaultError::Keyring(_)));
+    }
 }

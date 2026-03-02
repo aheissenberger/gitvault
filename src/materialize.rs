@@ -13,7 +13,7 @@ pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[".env", ".secrets/plain/"];
 ///
 /// REQ-16: generates root-level .env
 /// REQ-17: atomic write (temp file + rename)
-/// REQ-18: 0600 permissions on POSIX
+/// REQ-18: restricted .env permissions (0600 on Unix; restricted ACL via icacls on Windows)
 /// REQ-19: deterministic output (sorted keys, canonical quoting)
 /// REQ-20: ensures .env is in .gitignore first
 pub fn materialize_env_file(
