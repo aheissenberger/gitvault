@@ -1,11 +1,15 @@
 use thiserror::Error;
 
+use crate::fhsm::FhsmError;
+
 pub const EXIT_SUCCESS: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_PLAINTEXT_LEAK: i32 = 3;
 pub const EXIT_DECRYPT_ERROR: i32 = 4;
 pub const EXIT_BARRIER: i32 = 5;
+/// Exit code for drift: files have changed since encryption (distinct from plaintext leak).
+pub const EXIT_DRIFT: i32 = 6;
 
 #[derive(Error, Debug)]
 pub enum GitvaultError {
@@ -49,8 +53,14 @@ impl GitvaultError {
             GitvaultError::Other(_) => EXIT_ERROR,
             GitvaultError::BarrierNotSatisfied(_) => EXIT_BARRIER,
             GitvaultError::Keyring(_) => EXIT_ERROR,
-            GitvaultError::Drift(_) => EXIT_PLAINTEXT_LEAK,
+            GitvaultError::Drift(_) => EXIT_DRIFT,
         }
+    }
+}
+
+impl From<FhsmError> for GitvaultError {
+    fn from(e: FhsmError) -> Self {
+        GitvaultError::Usage(e.to_string())
     }
 }
 
@@ -78,7 +88,7 @@ mod tests {
         assert_eq!(other_err.exit_code(), EXIT_ERROR);
         assert_eq!(barrier_err.exit_code(), EXIT_BARRIER);
         assert_eq!(keyring_err.exit_code(), EXIT_ERROR);
-        assert_eq!(drift_err.exit_code(), EXIT_PLAINTEXT_LEAK);
+        assert_eq!(drift_err.exit_code(), EXIT_DRIFT);
     }
 
     #[test]

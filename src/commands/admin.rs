@@ -86,7 +86,7 @@ pub fn cmd_merge_driver(
     let theirs_content = std::fs::read_to_string(&theirs)?;
 
     let (merged_content, has_conflict) =
-        merge_env_content(&base_content, &ours_content, &theirs_content);
+        merge_env_content(&base_content, &ours_content, &theirs_content)?;
 
     let ours_path = PathBuf::from(&ours);
     let tmp =

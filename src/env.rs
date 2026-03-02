@@ -1,5 +1,8 @@
+use crate::error::GitvaultError;
+use regex::Regex;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 /// Resolve the active environment for a given worktree root.
 ///
@@ -30,6 +33,25 @@ pub fn resolve_env(worktree_root: &Path) -> String {
 
     // Priority 3: default
     "dev".to_string()
+}
+
+/// Validate that an environment name is safe to use as a path component.
+///
+/// Only allows `[A-Za-z0-9_-]+` so that values like `../../etc` cannot
+/// escape the repository root when used in `repo_root.join(env)` calls.
+/// Returns [`GitvaultError::Usage`] if the name is invalid.
+pub fn validate_env_name(env: &str) -> Result<(), GitvaultError> {
+    static ENV_RE: OnceLock<Regex> = OnceLock::new();
+    let re = ENV_RE.get_or_init(|| {
+        Regex::new(r"^[A-Za-z0-9_-]+$").expect("env name regex must compile")
+    });
+    if re.is_match(env) {
+        Ok(())
+    } else {
+        Err(GitvaultError::Usage(format!(
+            "invalid environment name {env:?}: must match ^[A-Za-z0-9_-]+$"
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -138,5 +160,34 @@ mod tests {
 
         let env = resolve_env(dir.path());
         assert_eq!(env, "dev");
+    }
+
+    #[test]
+    fn test_validate_env_name_accepts_valid() {
+        assert!(validate_env_name("dev").is_ok());
+        assert!(validate_env_name("prod").is_ok());
+        assert!(validate_env_name("staging-1").is_ok());
+        assert!(validate_env_name("my_env").is_ok());
+        assert!(validate_env_name("Env-2024").is_ok());
+    }
+
+    #[test]
+    fn test_validate_env_name_rejects_path_traversal() {
+        assert!(validate_env_name("../../etc").is_err());
+        assert!(validate_env_name("../prod").is_err());
+        assert!(validate_env_name("prod/subdir").is_err());
+        assert!(validate_env_name(".hidden").is_err());
+    }
+
+    #[test]
+    fn test_validate_env_name_rejects_empty() {
+        assert!(validate_env_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_env_name_rejects_spaces_and_specials() {
+        assert!(validate_env_name("my env").is_err());
+        assert!(validate_env_name("prod;rm -rf /").is_err());
+        assert!(validate_env_name("prod\n").is_err());
     }
 }

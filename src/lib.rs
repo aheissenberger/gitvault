@@ -8,6 +8,7 @@ pub mod aws_config;
 pub mod barrier;
 pub mod cli;
 pub mod commands;
+pub mod dispatch;
 pub mod crypto;
 pub mod env;
 pub mod error;

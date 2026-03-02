@@ -11,6 +11,7 @@ pub mod materialize;
 pub mod recipients;
 pub mod run_cmd;
 
+#[cfg(test)]
 pub mod test_helpers;
 
 pub use effects::CommandOutcome;

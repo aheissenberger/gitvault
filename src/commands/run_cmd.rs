@@ -25,7 +25,7 @@ pub fn cmd_run(
         pass_raw,
         command,
     };
-    let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
+    let effects = fhsm::transition(&event)?;
     execute_effects(effects)
 }
 

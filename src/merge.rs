@@ -54,18 +54,20 @@ pub fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> Stri
 /// Uses a standard three-way merge algorithm: for each key, if only one side changed
 /// relative to base, take that change; if both changed identically, accept it; if both
 /// changed differently, emit a conflict marker block.
-pub fn merge_env_content(base: &str, ours: &str, theirs: &str) -> (String, bool) {
-    // Parse errors are treated as empty maps; callers should validate content first.
-    fn to_map(content: &str) -> std::collections::HashMap<String, String> {
-        parse_env_pairs(content)
-            .unwrap_or_default()
-            .into_iter()
-            .collect()
+pub fn merge_env_content(
+    base: &str,
+    ours: &str,
+    theirs: &str,
+) -> Result<(String, bool), GitvaultError> {
+    fn to_map(
+        content: &str,
+    ) -> Result<std::collections::HashMap<String, String>, GitvaultError> {
+        Ok(parse_env_pairs(content)?.into_iter().collect())
     }
 
-    let base_map = to_map(base);
-    let ours_map = to_map(ours);
-    let theirs_map = to_map(theirs);
+    let base_map = to_map(base)?;
+    let ours_map = to_map(ours)?;
+    let theirs_map = to_map(theirs)?;
 
     // Collect all keys across all three versions
     let mut all_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -153,7 +155,7 @@ pub fn merge_env_content(base: &str, ours: &str, theirs: &str) -> (String, bool)
         }
     }
 
-    (output_lines.join("\n") + "\n", has_conflict)
+    Ok((output_lines.join("\n") + "\n", has_conflict))
 }
 
 #[cfg(test)]
@@ -164,7 +166,7 @@ mod tests {
     #[test]
     fn merge_env_no_changes() {
         let base = "FOO=1\nBAR=2\n";
-        let (merged, conflict) = merge_env_content(base, base, base);
+        let (merged, conflict) = merge_env_content(base, base, base).unwrap();
         assert!(!conflict);
         assert!(merged.contains("FOO=1"));
         assert!(merged.contains("BAR=2"));
@@ -175,7 +177,7 @@ mod tests {
         let base = "FOO=1\n";
         let ours = "FOO=2\n";
         let theirs = "FOO=1\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        let (merged, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(!conflict);
         assert!(merged.contains("FOO=2"));
     }
@@ -185,7 +187,7 @@ mod tests {
         let base = "FOO=1\n";
         let ours = "FOO=1\n";
         let theirs = "FOO=3\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        let (merged, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(!conflict);
         assert!(merged.contains("FOO=3"));
     }
@@ -195,7 +197,7 @@ mod tests {
         let base = "FOO=1\n";
         let ours = "FOO=9\n";
         let theirs = "FOO=9\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        let (merged, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(!conflict);
         assert!(merged.contains("FOO=9"));
     }
@@ -205,7 +207,7 @@ mod tests {
         let base = "FOO=1\n";
         let ours = "FOO=2\n";
         let theirs = "FOO=3\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        let (merged, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(conflict);
         assert!(merged.contains("<<<<<<<"));
     }
@@ -215,7 +217,7 @@ mod tests {
         let base = "FOO=1\nBAR=2\n";
         let ours = "FOO=1\n"; // BAR deleted
         let theirs = "FOO=1\nBAR=2\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
+        let (merged, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(!conflict);
         // BAR deleted in ours, unchanged in theirs → keep deletion
         assert!(!merged.contains("BAR=2"));
@@ -291,7 +293,7 @@ mod tests {
         let base = "# header\nA=1\n\nB=2\n";
         let ours = "# header\nA=1\n\nB=2\n";
         let theirs = "# header\nA=1\n\nB=2\n";
-        let (out, conflict) = merge_env_content(base, ours, theirs);
+        let (out, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(!conflict);
         assert!(out.contains("# header"));
         assert!(out.contains("\n\n") || out.contains("\nB=2"));
@@ -302,7 +304,7 @@ mod tests {
         let base = "A=1\n";
         let ours = "A=1\n";
         let theirs = "A=1\nNEW_KEY=added_by_theirs\n";
-        let (out, conflict) = merge_env_content(base, ours, theirs);
+        let (out, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(!conflict);
         assert!(out.contains("NEW_KEY=added_by_theirs"));
     }
@@ -312,7 +314,7 @@ mod tests {
         let base = "A=1\nB=old\n";
         let ours = "A=1\n"; // B deleted
         let theirs = "A=1\nB=new\n"; // B changed
-        let (out, conflict) = merge_env_content(base, ours, theirs);
+        let (out, conflict) = merge_env_content(base, ours, theirs).unwrap();
         assert!(conflict);
         assert!(out.contains("<<<<<<<"));
     }

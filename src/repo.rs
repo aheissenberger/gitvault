@@ -210,6 +210,7 @@ pub fn get_plain_path(repo_root: &Path, env: &str, name: &str) -> PathBuf {
 
 /// Ensure all required directories exist.
 pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
+    crate::env::validate_env_name(env)?;
     fs::create_dir_all(repo_root.join(SECRETS_DIR))?;
     fs::create_dir_all(get_env_encrypted_dir(repo_root, env))?;
     fs::create_dir_all(repo_root.join(PLAIN_BASE_DIR).join(env))?;
@@ -347,7 +348,7 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
 
     match output {
         Ok(out) => Ok(!out.status.success()),
-        Err(_) => Ok(false), // not a git repo or git unavailable — treat as clean
+        Err(e) => Err(GitvaultError::Other(format!("failed to run git: {e}"))),
     }
 }
 
@@ -708,11 +709,15 @@ mod tests {
     }
 
     #[test]
-    fn test_has_secrets_drift_nonexistent_repo_root_returns_clean() {
+    fn test_has_secrets_drift_nonexistent_repo_root_returns_err() {
         let dir = TempDir::new().unwrap();
         let missing_root = dir.path().join("missing");
-        let drift = has_secrets_drift(&missing_root).unwrap();
-        assert!(!drift);
+        // git cannot run against a missing directory; error must propagate (M10 fix)
+        let result = has_secrets_drift(&missing_root);
+        assert!(
+            result.is_err(),
+            "expected Err when git cannot run, got {result:?}"
+        );
     }
 
     #[test]

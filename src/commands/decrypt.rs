@@ -24,7 +24,7 @@ pub fn cmd_decrypt(
         no_prompt,
         output: output.clone(),
     };
-    let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
+    let effects = fhsm::transition(&event)?;
     let identity_str = effects
         .iter()
         .find_map(|e| {

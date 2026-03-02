@@ -104,7 +104,12 @@ fn encrypt_fields_json(
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = json_field_mut(&mut value, &path) {
-            let current = v.as_str().unwrap_or("").to_string();
+            let current = v
+                .as_str()
+                .ok_or_else(|| {
+                    GitvaultError::Usage(format!("field '{field}' is not a string"))
+                })?
+                .to_string();
             let encrypted = determine_encrypted_value(&current, recipient_keys)?;
             *v = serde_json::Value::String(encrypted);
         }
@@ -124,7 +129,12 @@ fn encrypt_fields_yaml(
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = yaml_field_mut(&mut value, &path) {
-            let current = v.as_str().unwrap_or("").to_string();
+            let current = v
+                .as_str()
+                .ok_or_else(|| {
+                    GitvaultError::Usage(format!("field '{field}' is not a string"))
+                })?
+                .to_string();
             let encrypted = determine_encrypted_value(&current, recipient_keys)?;
             *v = serde_yml::Value::String(encrypted);
         }
@@ -144,7 +154,12 @@ fn encrypt_fields_toml(
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = toml_field_mut(&mut value, &path) {
-            let current = v.as_str().unwrap_or("").to_string();
+            let current = v
+                .as_str()
+                .ok_or_else(|| {
+                    GitvaultError::Usage(format!("field '{field}' is not a string"))
+                })?
+                .to_string();
             let encrypted = determine_encrypted_value(&current, recipient_keys)?;
             *v = toml::Value::String(encrypted);
         }
