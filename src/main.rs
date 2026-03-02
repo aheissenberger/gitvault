@@ -5,8 +5,10 @@ mod crypto;
 mod env;
 mod error;
 mod fhsm;
+mod identity;
 mod keyring_store;
 mod materialize;
+mod merge;
 mod permissions;
 mod repo;
 mod run;
@@ -15,10 +17,10 @@ mod structured;
 use clap::Parser;
 use cli::{Cli, Commands, KeyringAction, RecipientAction};
 use error::GitvaultError;
-use regex::Regex;
+use identity::*;
+use merge::*;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandOutcome {
@@ -174,42 +176,6 @@ fn output_success(message: &str, json: bool) {
     }
 }
 
-fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultError> {
-    dotenvy::from_read_iter(content.as_bytes())
-        .map(|pair| pair.map_err(|e| GitvaultError::Usage(format!("Invalid .env content: {e}"))))
-        .collect()
-}
-
-fn parse_env_key_from_line(line: &str) -> Option<String> {
-    let input = format!("{line}\n");
-    let mut iter = dotenvy::from_read_iter(input.as_bytes());
-    match iter.next() {
-        Some(Ok((key, _))) => Some(key),
-        _ => None,
-    }
-}
-
-fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
-    let Some(eq_index) = original_line.find('=') else {
-        return original_line.to_string();
-    };
-
-    let prefix = &original_line[..=eq_index];
-    let rhs = &original_line[eq_index + 1..];
-    let ws_len: usize = rhs
-        .chars()
-        .take_while(|ch| ch.is_whitespace())
-        .map(char::len_utf8)
-        .sum();
-    let leading_ws = &rhs[..ws_len];
-    let suffix = rhs
-        .find(" #")
-        .filter(|idx| *idx >= ws_len)
-        .map(|idx| &rhs[idx..])
-        .unwrap_or("");
-    format!("{prefix}{leading_ws}{new_value}{suffix}")
-}
-
 /// Encrypt a file and write the .age output under secrets/
 fn cmd_encrypt(
     file: String,
@@ -314,26 +280,6 @@ fn cmd_encrypt(
 
     output_success(&format!("Encrypted to {}", out_path.display()), json);
     Ok(())
-}
-
-fn resolve_recipient_keys(
-    repo_root: &Path,
-    recipient_keys: Vec<String>,
-) -> Result<Vec<String>, GitvaultError> {
-    if !recipient_keys.is_empty() {
-        return Ok(recipient_keys);
-    }
-
-    // Try persistent recipients file (REQ-36)
-    let from_file = repo::read_recipients(repo_root)?;
-    if !from_file.is_empty() {
-        return Ok(from_file);
-    }
-
-    // Fall back to local identity public key
-    let identity_str = load_identity(None)?;
-    let identity = crypto::parse_identity(&identity_str)?;
-    Ok(vec![identity.to_public().to_string()])
 }
 
 /// Decrypt a .age file and write plaintext
@@ -446,22 +392,6 @@ fn decrypt_env_secrets(
     }
 
     Ok(secrets)
-}
-
-/// Map an [`fhsm::IdentitySource`] to a raw identity key string.
-///
-/// The `Inline("")` sentinel (emitted by the FHSM when no path was supplied)
-/// triggers the standard env-var / keyring fallback via [`load_identity`].
-fn load_identity_from_source(source: &fhsm::IdentitySource) -> Result<String, GitvaultError> {
-    match source {
-        fhsm::IdentitySource::FilePath(p) => load_identity_source(p, "--identity"),
-        fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),
-        fhsm::IdentitySource::Keyring => keyring_store::keyring_get()
-            .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}"))),
-        fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(s.clone()),
-        // Empty Inline is the FHSM sentinel meaning "executor must resolve from env vars".
-        fhsm::IdentitySource::Inline(_) => load_identity(None),
-    }
 }
 
 /// Injectable side-effect executor for [`execute_effects_with`].
@@ -711,114 +641,6 @@ fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
     Ok(())
 }
 
-/// Pure three-way merge of .env file content. Returns `(merged_content, has_conflict)`.
-/// No filesystem access — all inputs are string slices.
-///
-/// Uses a standard three-way merge algorithm: for each key, if only one side changed
-/// relative to base, take that change; if both changed identically, accept it; if both
-/// changed differently, emit a conflict marker block.
-fn merge_env_content(base: &str, ours: &str, theirs: &str) -> (String, bool) {
-    // Parse errors are treated as empty maps; callers should validate content first.
-    fn to_map(content: &str) -> std::collections::HashMap<String, String> {
-        parse_env_pairs(content)
-            .unwrap_or_default()
-            .into_iter()
-            .collect()
-    }
-
-    let base_map = to_map(base);
-    let ours_map = to_map(ours);
-    let theirs_map = to_map(theirs);
-
-    // Collect all keys across all three versions
-    let mut all_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    all_keys.extend(base_map.keys().cloned());
-    all_keys.extend(ours_map.keys().cloned());
-    all_keys.extend(theirs_map.keys().cloned());
-
-    // Three-way merge per key
-    let mut merged_map: std::collections::BTreeMap<String, Option<String>> =
-        std::collections::BTreeMap::new();
-    let mut has_conflict = false;
-
-    for key in &all_keys {
-        let base_val = base_map.get(key).map(|s| s.as_str());
-        let ours_val = ours_map.get(key).map(|s| s.as_str());
-        let theirs_val = theirs_map.get(key).map(|s| s.as_str());
-
-        let base_eq_ours = base_val == ours_val;
-        let base_eq_theirs = base_val == theirs_val;
-        let ours_eq_theirs = ours_val == theirs_val;
-
-        let merged = if base_eq_ours && base_eq_theirs {
-            // All same → keep ours
-            ours_val.map(|s| s.to_string())
-        } else if base_eq_ours && !base_eq_theirs {
-            // Ours unchanged, theirs changed → take theirs
-            theirs_val.map(|s| s.to_string())
-        } else if !base_eq_ours && base_eq_theirs {
-            // Ours changed, theirs unchanged → keep ours
-            ours_val.map(|s| s.to_string())
-        } else if ours_eq_theirs {
-            // Both changed to same value → keep ours
-            ours_val.map(|s| s.to_string())
-        } else {
-            // All three differ → conflict marker
-            has_conflict = true;
-            let ours_line = ours_val
-                .map(|v| format!("{key}={v}"))
-                .unwrap_or_else(|| format!("# {key} deleted in ours"));
-            let theirs_line = theirs_val
-                .map(|v| format!("{key}={v}"))
-                .unwrap_or_else(|| format!("# {key} deleted in theirs"));
-            Some(format!(
-                "<<<<<<< ours\n{ours_line}\n=======\n{theirs_line}\n>>>>>>> theirs"
-            ))
-        };
-        merged_map.insert(key.clone(), merged);
-    }
-
-    // Build output preserving ours structure (comments, blanks) and replacing key-values
-    let mut output_lines: Vec<String> = Vec::new();
-    let mut processed_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for line in ours.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            output_lines.push(line.to_string());
-        } else if let Some(k) = parse_env_key_from_line(line) {
-            if let Some(Some(val)) = merged_map.get(&k) {
-                if val.starts_with("<<<<<<") {
-                    output_lines.push(val.clone());
-                } else if ours_map.get(&k).map(String::as_str) == Some(val.as_str()) {
-                    output_lines.push(line.to_string());
-                } else {
-                    output_lines.push(rewrite_env_assignment_line(line, val));
-                }
-                // If merged is None → key was deleted, skip it
-            }
-            processed_keys.insert(k);
-        } else {
-            output_lines.push(line.to_string());
-        }
-    }
-
-    // Append keys that are new (not in ours)
-    for (k, val_opt) in &merged_map {
-        if !processed_keys.contains(k)
-            && let Some(val) = val_opt
-        {
-            if val.starts_with("<<<<<<") {
-                output_lines.push(val.clone());
-            } else {
-                output_lines.push(format!("{k}={val}"));
-            }
-        }
-    }
-
-    (output_lines.join("\n") + "\n", has_conflict)
-}
-
 /// Run as git merge driver for .env files (REQ-34)
 fn cmd_merge_driver(
     base: String,
@@ -1023,62 +845,6 @@ fn cmd_check(
         println!("   Secrets     : {secrets_count} encrypted file(s)");
     }
     Ok(())
-}
-
-/// Load identity key string from file path or GITVAULT_IDENTITY env var
-fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
-    load_identity_with(path, keyring_store::keyring_get)
-}
-
-fn load_identity_with<F>(path: Option<String>, keyring_get_fn: F) -> Result<String, GitvaultError>
-where
-    F: Fn() -> Result<String, String>,
-{
-    if let Some(p) = path {
-        return load_identity_source(&p, "--identity");
-    }
-    if let Ok(key) = std::env::var("GITVAULT_IDENTITY") {
-        return load_identity_source(&key, "GITVAULT_IDENTITY");
-    }
-    // REQ-39: load from OS keyring if GITVAULT_KEYRING=1
-    if std::env::var("GITVAULT_KEYRING").as_deref() == Ok("1") {
-        return keyring_get_fn().map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")));
-    }
-    Err(GitvaultError::Usage(
-        "No identity provided. Use --identity <file>, set GITVAULT_IDENTITY, or use GITVAULT_KEYRING=1".to_string(),
-    ))
-}
-
-fn load_identity_source(source: &str, source_name: &str) -> Result<String, GitvaultError> {
-    let value = source.trim();
-
-    if value.starts_with("AGE-SECRET-KEY-") {
-        return Ok(value.to_string());
-    }
-
-    let file_content = std::fs::read_to_string(value).map_err(|e| {
-        GitvaultError::Usage(format!(
-            "{source_name} must be an identity file path or AGE-SECRET-KEY value: {e}"
-        ))
-    })?;
-
-    extract_identity_key(&file_content).ok_or_else(|| {
-        GitvaultError::Usage(format!(
-            "{source_name} file does not contain a valid AGE-SECRET-KEY line"
-        ))
-    })
-}
-
-fn extract_identity_key(content: &str) -> Option<String> {
-    static IDENTITY_LINE_RE: OnceLock<Regex> = OnceLock::new();
-    let identity_line_re = IDENTITY_LINE_RE.get_or_init(|| {
-        Regex::new(r"(?m)^\s*(AGE-SECRET-KEY-[A-Z0-9]+)\s*(?:#.*)?$")
-            .expect("identity regex must compile")
-    });
-
-    identity_line_re
-        .captures(content)
-        .map(|captures| captures[1].to_string())
 }
 
 #[cfg(test)]
@@ -1470,12 +1236,6 @@ mod tests {
             assert!(resolve_no_prompt(true));
             assert!(!ci_is_non_interactive());
         });
-    }
-
-    #[test]
-    fn test_parse_env_pairs_reports_invalid_content() {
-        let result = parse_env_pairs("NOT VALID\n=A");
-        assert!(matches!(result, Err(GitvaultError::Usage(_))));
     }
 
     #[test]
@@ -2250,129 +2010,6 @@ mod tests {
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
-    #[test]
-    fn merge_env_no_changes() {
-        let base = "FOO=1\nBAR=2\n";
-        let (merged, conflict) = merge_env_content(base, base, base);
-        assert!(!conflict);
-        assert!(merged.contains("FOO=1"));
-        assert!(merged.contains("BAR=2"));
-    }
-
-    #[test]
-    fn merge_env_ours_only_change() {
-        let base = "FOO=1\n";
-        let ours = "FOO=2\n";
-        let theirs = "FOO=1\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
-        assert!(!conflict);
-        assert!(merged.contains("FOO=2"));
-    }
-
-    #[test]
-    fn merge_env_theirs_only_change() {
-        let base = "FOO=1\n";
-        let ours = "FOO=1\n";
-        let theirs = "FOO=3\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
-        assert!(!conflict);
-        assert!(merged.contains("FOO=3"));
-    }
-
-    #[test]
-    fn merge_env_both_same_change() {
-        let base = "FOO=1\n";
-        let ours = "FOO=9\n";
-        let theirs = "FOO=9\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
-        assert!(!conflict);
-        assert!(merged.contains("FOO=9"));
-    }
-
-    #[test]
-    fn merge_env_conflict() {
-        let base = "FOO=1\n";
-        let ours = "FOO=2\n";
-        let theirs = "FOO=3\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
-        assert!(conflict);
-        assert!(merged.contains("<<<<<<<"));
-    }
-
-    #[test]
-    fn merge_env_key_deleted_in_ours() {
-        let base = "FOO=1\nBAR=2\n";
-        let ours = "FOO=1\n"; // BAR deleted
-        let theirs = "FOO=1\nBAR=2\n";
-        let (merged, conflict) = merge_env_content(base, ours, theirs);
-        assert!(!conflict);
-        // BAR deleted in ours, unchanged in theirs → keep deletion
-        assert!(!merged.contains("BAR=2"));
-    }
-
-    // ─── parse_env_key_from_line ──────────────────────────────────────────────
-
-    #[test]
-    fn parse_env_key_from_line_valid_assignment_returns_key() {
-        assert_eq!(
-            parse_env_key_from_line("KEY=value"),
-            Some("KEY".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_env_key_from_line_comment_returns_none() {
-        assert_eq!(parse_env_key_from_line("# comment"), None);
-    }
-
-    #[test]
-    fn parse_env_key_from_line_blank_returns_none() {
-        assert_eq!(parse_env_key_from_line(""), None);
-    }
-
-    #[test]
-    fn parse_env_key_from_line_no_key_before_equals_returns_none() {
-        assert_eq!(parse_env_key_from_line("=no_key"), None);
-    }
-
-    #[test]
-    fn parse_env_key_from_line_key_with_underscore_and_digits() {
-        assert_eq!(
-            parse_env_key_from_line("MY_KEY_2=x"),
-            Some("MY_KEY_2".to_string())
-        );
-    }
-
-    // ─── rewrite_env_assignment_line ─────────────────────────────────────────
-
-    #[test]
-    fn rewrite_env_assignment_line_basic_replacement() {
-        assert_eq!(rewrite_env_assignment_line("KEY=old", "new"), "KEY=new");
-    }
-
-    #[test]
-    fn rewrite_env_assignment_line_preserves_leading_whitespace() {
-        assert_eq!(rewrite_env_assignment_line("KEY= old", "new"), "KEY= new");
-    }
-
-    #[test]
-    fn rewrite_env_assignment_line_preserves_inline_comment() {
-        assert_eq!(
-            rewrite_env_assignment_line("KEY=old # comment", "new"),
-            "KEY=new # comment"
-        );
-    }
-
-    #[test]
-    fn rewrite_env_assignment_line_no_equals_returns_unchanged() {
-        assert_eq!(rewrite_env_assignment_line("no_equals", "new"), "no_equals");
-    }
-
-    #[test]
-    fn rewrite_env_assignment_line_empty_value_replaced() {
-        assert_eq!(rewrite_env_assignment_line("KEY=", "new"), "KEY=new");
-    }
-
     // ─── load_identity_from_source ────────────────────────────────────────────
 
     #[test]
@@ -2705,5 +2342,117 @@ mod tests {
         ];
         let result = execute_effects_with(effects, tmp.path(), &runner);
         assert!(result.is_err());
+    }
+
+    // ─── cmd_status json output ───────────────────────────────────────────────
+
+    #[test]
+    fn test_cmd_status_json_output() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        cmd_harden(false).expect("harden should succeed");
+        // json=true covers the JSON output branch (lines 649-656).
+        cmd_status(true, false).expect("status json should succeed");
+    }
+
+    // ─── cmd_recipient list branches ─────────────────────────────────────────
+
+    #[test]
+    fn test_cmd_recipient_list_json_with_recipients() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let pubkey = x25519::Identity::generate().to_public().to_string();
+        cmd_recipient(
+            RecipientAction::Add {
+                pubkey: pubkey.clone(),
+            },
+            false,
+        )
+        .expect("add should succeed");
+
+        // json=true covers the JSON recipients output branch (line 881).
+        cmd_recipient(RecipientAction::List, true).expect("list json should succeed");
+    }
+
+    #[test]
+    fn test_cmd_recipient_list_empty_plain() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // No recipients added → empty list message (lines 883-884).
+        cmd_recipient(RecipientAction::List, false)
+            .expect("list empty plain should succeed");
+    }
+
+    // ─── cmd_check with valid recipients ─────────────────────────────────────
+
+    #[test]
+    fn test_cmd_check_validates_recipient_keys_in_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Write a valid recipient so that the for loop on lines 995-1000 executes.
+        let pubkey = identity.to_public().to_string();
+        repo::write_recipients(dir.path(), &[pubkey]).expect("write_recipients should succeed");
+
+        with_identity_env(identity_file.path(), || {
+            cmd_check(None, None, false).expect("check with valid recipient should succeed");
+        });
+    }
+
+    // ─── load_identity_source: file without AGE key ───────────────────────────
+
+    #[test]
+    fn test_load_identity_source_file_without_age_key_errors() {
+        let tmp = NamedTempFile::new().expect("temp file should be created");
+        std::fs::write(tmp.path(), "not-an-age-key\nsome: yaml: content\n")
+            .expect("write should succeed");
+        // Lines 1065-1069: extract_identity_key returns None → Usage error.
+        let result = load_identity_source(tmp.path().to_str().unwrap(), "test-source");
+        assert!(matches!(result, Err(GitvaultError::Usage(_))));
+    }
+
+    // ─── resolve_recipient_keys from recipients file ───────────────────────────
+
+    #[test]
+    fn test_resolve_recipient_keys_returns_recipients_from_file() {
+        let dir = TempDir::new().unwrap();
+        let pubkey = x25519::Identity::generate().to_public().to_string();
+        // Write a non-empty recipients file so that line 330 (early return) executes.
+        repo::write_recipients(dir.path(), &[pubkey.clone()])
+            .expect("write_recipients should succeed");
+
+        let result =
+            resolve_recipient_keys(dir.path(), vec![]).expect("should return recipients from file");
+        assert_eq!(result, vec![pubkey]);
+    }
+
+    // ─── execute_effects_with: DecryptFile arm (line 602) ────────────────────
+
+    #[test]
+    fn execute_effects_with_decrypt_file_arm_is_noop() {
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
+        let tmp = TempDir::new().unwrap();
+        // A DecryptFile effect in execute_effects_with is a no-op (line 602).
+        let effects = vec![fhsm::Effect::DecryptFile {
+            file: tmp.path().join("dummy.age"),
+            output: None,
+        }];
+        let outcome = execute_effects_with(effects, tmp.path(), &runner)
+            .expect("DecryptFile arm should succeed as no-op");
+        assert_eq!(outcome, CommandOutcome::Success);
     }
 }

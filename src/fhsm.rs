@@ -478,4 +478,66 @@ mod tests {
             IdentitySource::EnvVar("AGE-SECRET-KEY-abc".to_string())
         );
     }
+
+    // ── parse_pass_vars (via transition) ────────────────────────────────────
+
+    #[test]
+    fn run_with_pass_raw_parses_valid_pairs_into_run_command() {
+        let event = Event::Run {
+            env: Some("dev".to_string()),
+            identity: None,
+            prod: false,
+            no_prompt: false,
+            clear_env: false,
+            pass_raw: Some("KEY=value,OTHER=x".to_string()),
+            command: vec!["env".to_string()],
+        };
+        let effects = transition(&event).expect("should succeed");
+        let run_cmd = effects.iter().find_map(|e| {
+            if let Effect::RunCommand { pass_vars, .. } = e {
+                Some(pass_vars.clone())
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            run_cmd,
+            Some(vec![
+                ("KEY".to_string(), "value".to_string()),
+                ("OTHER".to_string(), "x".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn run_with_pass_raw_skips_entries_without_equals() {
+        let event = Event::Run {
+            env: Some("dev".to_string()),
+            identity: None,
+            prod: false,
+            no_prompt: false,
+            clear_env: false,
+            pass_raw: Some("NOEQUALS,KEY=val".to_string()),
+            command: vec!["env".to_string()],
+        };
+        let effects = transition(&event).expect("should succeed");
+        let pass_vars = effects.iter().find_map(|e| {
+            if let Effect::RunCommand { pass_vars, .. } = e {
+                Some(pass_vars.clone())
+            } else {
+                None
+            }
+        });
+        // "NOEQUALS" has no '=' so it should be silently skipped.
+        assert_eq!(
+            pass_vars,
+            Some(vec![("KEY".to_string(), "val".to_string())])
+        );
+    }
+
+    #[test]
+    fn resolve_identity_source_none_inputs_returns_inline_empty() {
+        let source = resolve_identity_source(None, None, None);
+        assert_eq!(source, IdentitySource::Inline(String::new()));
+    }
 }
