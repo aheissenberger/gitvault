@@ -2211,4 +2211,206 @@ mod tests {
         // BAR deleted in ours, unchanged in theirs → keep deletion
         assert!(!merged.contains("BAR=2"));
     }
+
+    // ─── parse_env_key_from_line ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_env_key_from_line_valid_assignment_returns_key() {
+        assert_eq!(
+            parse_env_key_from_line("KEY=value"),
+            Some("KEY".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_env_key_from_line_comment_returns_none() {
+        assert_eq!(parse_env_key_from_line("# comment"), None);
+    }
+
+    #[test]
+    fn parse_env_key_from_line_blank_returns_none() {
+        assert_eq!(parse_env_key_from_line(""), None);
+    }
+
+    #[test]
+    fn parse_env_key_from_line_no_key_before_equals_returns_none() {
+        assert_eq!(parse_env_key_from_line("=no_key"), None);
+    }
+
+    #[test]
+    fn parse_env_key_from_line_key_with_underscore_and_digits() {
+        assert_eq!(
+            parse_env_key_from_line("MY_KEY_2=x"),
+            Some("MY_KEY_2".to_string())
+        );
+    }
+
+    // ─── rewrite_env_assignment_line ─────────────────────────────────────────
+
+    #[test]
+    fn rewrite_env_assignment_line_basic_replacement() {
+        assert_eq!(rewrite_env_assignment_line("KEY=old", "new"), "KEY=new");
+    }
+
+    #[test]
+    fn rewrite_env_assignment_line_preserves_leading_whitespace() {
+        assert_eq!(rewrite_env_assignment_line("KEY= old", "new"), "KEY= new");
+    }
+
+    #[test]
+    fn rewrite_env_assignment_line_preserves_inline_comment() {
+        assert_eq!(
+            rewrite_env_assignment_line("KEY=old # comment", "new"),
+            "KEY=new # comment"
+        );
+    }
+
+    #[test]
+    fn rewrite_env_assignment_line_no_equals_returns_unchanged() {
+        assert_eq!(rewrite_env_assignment_line("no_equals", "new"), "no_equals");
+    }
+
+    #[test]
+    fn rewrite_env_assignment_line_empty_value_replaced() {
+        assert_eq!(rewrite_env_assignment_line("KEY=", "new"), "KEY=new");
+    }
+
+    // ─── load_identity_from_source ────────────────────────────────────────────
+
+    #[test]
+    fn load_identity_from_source_file_path_valid() {
+        let (tmp_file, _) = setup_identity_file();
+        let source = fhsm::IdentitySource::FilePath(tmp_file.path().to_string_lossy().to_string());
+        assert!(load_identity_from_source(&source).is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_file_path_nonexistent_errors() {
+        let source =
+            fhsm::IdentitySource::FilePath("/nonexistent/path/to/identity.age".to_string());
+        assert!(load_identity_from_source(&source).is_err());
+    }
+
+    #[test]
+    fn load_identity_from_source_env_var_with_file_path() {
+        // EnvVar(v) passes `v` as the value to load_identity_source, so a file path works.
+        let (tmp_file, _) = setup_identity_file();
+        let source = fhsm::IdentitySource::EnvVar(tmp_file.path().to_string_lossy().to_string());
+        assert!(load_identity_from_source(&source).is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_inline_nonempty_returns_ok() {
+        let (_, identity) = setup_identity_file();
+        let key_str = identity.to_string().expose_secret().to_string();
+        let source = fhsm::IdentitySource::Inline(key_str);
+        assert!(load_identity_from_source(&source).is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_inline_empty_falls_back_to_env_var() {
+        let _lock = global_test_lock().lock().unwrap();
+        let (tmp_file, _) = setup_identity_file();
+        let source = fhsm::IdentitySource::Inline(String::new());
+        // Provide GITVAULT_IDENTITY so load_identity(None) can resolve it.
+        let result = with_env_var(
+            "GITVAULT_IDENTITY",
+            Some(tmp_file.path().to_string_lossy().as_ref()),
+            || {
+                with_env_var("GITVAULT_KEYRING", None, || {
+                    load_identity_from_source(&source)
+                })
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_keyring_without_setup_errors() {
+        let source = fhsm::IdentitySource::Keyring;
+        // Without the OS keyring configured this call returns an error.
+        assert!(load_identity_from_source(&source).is_err());
+    }
+
+    // ─── output_success ───────────────────────────────────────────────────────
+
+    #[test]
+    fn output_success_plain_does_not_panic() {
+        output_success("hello", false);
+    }
+
+    #[test]
+    fn output_success_json_does_not_panic() {
+        output_success("hello", true);
+    }
+
+    // ─── cmd_keyring_with_ops ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_cmd_keyring_set_stores_key() {
+        let (tmp_file, _) = setup_identity_file();
+        let stored = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let stored_clone = stored.clone();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Set {
+                identity: Some(tmp_file.path().to_string_lossy().to_string()),
+            },
+            false,
+            move |key: &str| {
+                *stored_clone.lock().unwrap() = key.to_string();
+                Ok(())
+            },
+            || Err("not used".to_string()),
+            || Err("not used".to_string()),
+        );
+        assert!(result.is_ok());
+        assert!(stored.lock().unwrap().starts_with("AGE-SECRET-KEY-"));
+    }
+
+    #[test]
+    fn test_cmd_keyring_get_returns_public_key() {
+        let (_, identity) = setup_identity_file();
+        let key_str = identity.to_string().expose_secret().to_string();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Get,
+            false,
+            |_| Err("not used".to_string()),
+            move || Ok(key_str.clone()),
+            || Err("not used".to_string()),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_cmd_keyring_delete_calls_delete_fn() {
+        let called = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let called_clone = called.clone();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Delete,
+            false,
+            |_| Err("not used".to_string()),
+            || Err("not used".to_string()),
+            move || {
+                *called_clone.lock().unwrap() = true;
+                Ok(())
+            },
+        );
+        assert!(result.is_ok());
+        assert!(*called.lock().unwrap());
+    }
+
+    #[test]
+    fn test_cmd_keyring_set_propagates_store_error() {
+        let (tmp_file, _) = setup_identity_file();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::Set {
+                identity: Some(tmp_file.path().to_string_lossy().to_string()),
+            },
+            false,
+            |_| Err("store failed".to_string()),
+            || Err("not used".to_string()),
+            || Err("not used".to_string()),
+        );
+        assert!(matches!(result, Err(GitvaultError::Other(_))));
+    }
 }
