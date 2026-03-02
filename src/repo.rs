@@ -360,7 +360,9 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
 ///
 /// Returns [`crate::error::GitvaultError::Usage`] if no `.git` is found — the caller is
 /// not inside a git repository.
-pub fn find_repo_root_from(start: &std::path::Path) -> Result<std::path::PathBuf, crate::error::GitvaultError> {
+pub fn find_repo_root_from(
+    start: &std::path::Path,
+) -> Result<std::path::PathBuf, crate::error::GitvaultError> {
     let mut dir = start.to_path_buf();
     loop {
         if dir.join(".git").exists() {

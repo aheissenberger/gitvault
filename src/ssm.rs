@@ -56,10 +56,7 @@ fn get_app_name(repo_root: &Path) -> String {
 
 /// Load the refs map from disk.  Returns an empty map when the file does not
 /// exist yet.
-fn load_refs(
-    repo_root: &Path,
-    env: &str,
-) -> Result<HashMap<String, String>, GitvaultError> {
+fn load_refs(repo_root: &Path, env: &str) -> Result<HashMap<String, String>, GitvaultError> {
     let path = refs_file_path(repo_root, env);
     if !path.exists() {
         return Ok(HashMap::new());
@@ -80,8 +77,8 @@ fn save_refs(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let text = serde_json::to_string_pretty(refs)
-        .map_err(|e| GitvaultError::Other(e.to_string()))?;
+    let text =
+        serde_json::to_string_pretty(refs).map_err(|e| GitvaultError::Other(e.to_string()))?;
     std::fs::write(&path, text)?;
     Ok(())
 }
@@ -339,10 +336,7 @@ mod tests {
 
     #[test]
     fn test_ssm_path_format() {
-        assert_eq!(
-            ssm_path("myapp", "prod", "DB_PASS"),
-            "/myapp/prod/DB_PASS"
-        );
+        assert_eq!(ssm_path("myapp", "prod", "DB_PASS"), "/myapp/prod/DB_PASS");
         assert_eq!(ssm_path("app", "dev", "KEY"), "/app/dev/KEY");
     }
 
@@ -350,7 +344,10 @@ mod tests {
     fn test_refs_file_path() {
         let dir = TempDir::new().unwrap();
         let repo_root = dir.path();
-        let expected = repo_root.join("secrets").join("prod").join(".ssm-refs.json");
+        let expected = repo_root
+            .join("secrets")
+            .join("prod")
+            .join(".ssm-refs.json");
         assert_eq!(refs_file_path(repo_root, "prod"), expected);
     }
 
@@ -369,8 +366,14 @@ mod tests {
         save_refs(repo_root, env, &refs).expect("save_refs should succeed");
         let loaded = load_refs(repo_root, env).expect("load_refs should succeed");
 
-        assert_eq!(loaded.get("DB_PASS").map(String::as_str), Some("/myapp/staging/DB_PASS"));
-        assert_eq!(loaded.get("API_KEY").map(String::as_str), Some("/myapp/staging/API_KEY"));
+        assert_eq!(
+            loaded.get("DB_PASS").map(String::as_str),
+            Some("/myapp/staging/DB_PASS")
+        );
+        assert_eq!(
+            loaded.get("API_KEY").map(String::as_str),
+            Some("/myapp/staging/API_KEY")
+        );
         assert_eq!(loaded.len(), 2);
     }
 

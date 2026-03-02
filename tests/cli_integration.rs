@@ -353,9 +353,7 @@ fn recipient_list_json_outputs_valid_json() {
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("recipient list output should be valid JSON");
     assert!(
-        v.get("recipients")
-            .and_then(|r| r.as_array())
-            .is_some(),
+        v.get("recipients").and_then(|r| r.as_array()).is_some(),
         "JSON output should contain a 'recipients' array; got: {stdout}"
     );
 }

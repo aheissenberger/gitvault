@@ -11,18 +11,18 @@ mod identity;
 mod keyring_store;
 mod materialize;
 mod merge;
-mod permissions;
 mod output;
+mod permissions;
 mod repo;
 mod run;
-mod structured;
 #[cfg(feature = "ssm")]
 mod ssm;
+mod structured;
 
 use clap::Parser;
-use cli::{Cli, Commands};
 #[cfg(feature = "ssm")]
 use cli::SsmAction;
+use cli::{Cli, Commands};
 use commands::CommandOutcome;
 use error::GitvaultError;
 use std::process;
@@ -149,7 +149,8 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
                         }
                         SsmAction::Set { key, value, env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json).await
+                            crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json)
+                                .await
                         }
                         SsmAction::Push { env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
@@ -418,7 +419,6 @@ mod tests {
         let err = run(cli).expect_err("invalid identity source should fail keyring set");
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
-
 
     #[test]
     fn test_with_env_var_restores_existing_value() {

@@ -112,8 +112,19 @@ mod tests {
 
     #[test]
     fn keyring_helpers_propagate_errors() {
-        assert!(keyring_set_with("k", |_s, _u, _k| Err(GitvaultError::Keyring("set failed".to_string()))).is_err());
-        assert!(keyring_get_with(|_s, _u| Err(GitvaultError::Keyring("get failed".to_string()))).is_err());
-        assert!(keyring_delete_with(|_s, _u| Err(GitvaultError::Keyring("delete failed".to_string()))).is_err());
+        assert!(
+            keyring_set_with("k", |_s, _u, _k| Err(GitvaultError::Keyring(
+                "set failed".to_string()
+            )))
+            .is_err()
+        );
+        assert!(
+            keyring_get_with(|_s, _u| Err(GitvaultError::Keyring("get failed".to_string())))
+                .is_err()
+        );
+        assert!(
+            keyring_delete_with(|_s, _u| Err(GitvaultError::Keyring("delete failed".to_string())))
+                .is_err()
+        );
     }
 }

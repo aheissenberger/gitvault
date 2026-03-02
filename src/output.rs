@@ -3,7 +3,10 @@
 /// Print a success message. If `json` is true, emits `{"status":"ok","message":"..."}` to stdout.
 pub(crate) fn output_success(message: &str, json: bool) {
     if json {
-        println!("{}", serde_json::json!({"status": "ok", "message": message}));
+        println!(
+            "{}",
+            serde_json::json!({"status": "ok", "message": message})
+        );
     } else {
         println!("{message}");
     }

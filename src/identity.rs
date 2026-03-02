@@ -107,9 +107,7 @@ pub(crate) fn resolve_recipient_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_helpers::{
-        global_test_lock, setup_identity_file, with_env_var,
-    };
+    use crate::commands::test_helpers::{global_test_lock, setup_identity_file, with_env_var};
     use crate::error::GitvaultError;
     use crate::fhsm;
     use age::secrecy::ExposeSecret;
@@ -199,7 +197,8 @@ mod tests {
             std::env::set_var("GITVAULT_KEYRING", "1");
         }
 
-        let err = load_identity_with(None, || Err(GitvaultError::Keyring("no key".to_string()))).unwrap_err();
+        let err = load_identity_with(None, || Err(GitvaultError::Keyring("no key".to_string())))
+            .unwrap_err();
 
         unsafe {
             std::env::remove_var("GITVAULT_KEYRING");

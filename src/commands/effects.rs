@@ -150,13 +150,10 @@ pub(crate) fn execute_effects_with(
             // Decrypt a single ciphertext file to an output path or stdout.
             fhsm::Effect::DecryptFile { file, output } => {
                 let identity = identity_opt.as_deref().ok_or_else(|| {
-                    GitvaultError::Usage(
-                        "identity not resolved before DecryptFile".to_string(),
-                    )
+                    GitvaultError::Usage("identity not resolved before DecryptFile".to_string())
                 })?;
-                let in_file = std::io::BufReader::new(
-                    std::fs::File::open(&file).map_err(GitvaultError::Io)?,
-                );
+                let in_file =
+                    std::io::BufReader::new(std::fs::File::open(&file).map_err(GitvaultError::Io)?);
                 match output {
                     Some(out_path) => {
                         let tmp = tempfile::NamedTempFile::new_in(

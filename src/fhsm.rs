@@ -473,10 +473,7 @@ mod tests {
                 None
             }
         });
-        assert_eq!(
-            run_cmd,
-            Some(vec!["KEY".to_string(), "OTHER".to_string()])
-        );
+        assert_eq!(run_cmd, Some(vec!["KEY".to_string(), "OTHER".to_string()]));
     }
 
     #[test]
@@ -499,10 +496,7 @@ mod tests {
             }
         });
         // "NOEQUALS" has no '=' so it should be silently skipped.
-        assert_eq!(
-            pass_vars,
-            Some(vec!["KEY".to_string()])
-        );
+        assert_eq!(pass_vars, Some(vec!["KEY".to_string()]));
     }
 
     #[test]

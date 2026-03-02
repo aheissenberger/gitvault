@@ -53,7 +53,6 @@ pub fn run_command(
     Ok(status.code().unwrap_or(crate::error::EXIT_ERROR))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
