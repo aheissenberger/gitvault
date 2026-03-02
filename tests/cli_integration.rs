@@ -225,6 +225,141 @@ fn harden_installs_hook_that_blocks_push_on_drift() {
 }
 
 #[test]
+#[ignore = "pending R064-S1 implementation"]
+fn r064_s1_husky_adapter_discovery_is_deterministic() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R064-S2 implementation"]
+fn r064_s2_husky_missing_adapter_ci_fails_deterministically() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R064-S3 implementation"]
+fn r064_s3_husky_pre_commit_blocks_plaintext() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R064-S4 implementation"]
+fn r064_s4_husky_pre_push_blocks_drift() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R064-S5 implementation"]
+fn r064_s5_husky_install_later_activates_without_rebuild() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R065-S1 implementation"]
+fn r065_s1_pre_commit_adapter_discovery_is_deterministic() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R065-S2 implementation"]
+fn r065_s2_pre_commit_missing_runtime_ci_fails_machine_parseable() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R065-S3 implementation"]
+fn r065_s3_pre_commit_blocks_plaintext() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R065-S4 implementation"]
+fn r065_s4_pre_commit_blocks_drift_on_push_path() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R065-S5 implementation"]
+fn r065_s5_pre_commit_config_is_preserved() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R066-S1 implementation"]
+fn r066_s1_lefthook_adapter_discovery_is_deterministic() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R066-S2 implementation"]
+fn r066_s2_lefthook_missing_adapter_ci_fails_deterministically() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R066-S3 implementation"]
+fn r066_s3_lefthook_pre_commit_blocks_plaintext() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R066-S4 implementation"]
+fn r066_s4_lefthook_pre_push_blocks_drift() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
+#[ignore = "pending R066-S5 implementation"]
+fn r066_s5_lefthook_repeated_runs_are_idempotent() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    configure_git_identity(repo.path());
+    let _out = bin().arg("status").current_dir(repo.path()).output().unwrap();
+}
+
+#[test]
 fn harden_installs_merge_driver_and_git_merge_uses_it() {
     let repo = TempDir::new().unwrap();
     init_git_repo(repo.path());

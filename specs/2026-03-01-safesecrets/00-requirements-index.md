@@ -60,11 +60,17 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-61 -> `19-ssh-identity-requirements.md`
 - REQ-62 -> `20-optional-keyring-passphrase-fetch.md`
 - REQ-63 -> `21-optional-ssh-agent-support.md`
+- REQ-64 -> `22-husky-hook-manager-plugin.md`
+- REQ-65 -> `23-pre-commit-hook-manager-plugin.md`
+- REQ-66 -> `24-lefthook-hook-manager-plugin.md`
 
 ## Plan Specs (Additive)
 - `19-ssh-identity-requirements.md` -> Plan: SSH identity requirements
 - `20-optional-keyring-passphrase-fetch.md` -> Plan: Optional keyring passphrase fetch
 - `21-optional-ssh-agent-support.md` -> Plan: Optional SSH-agent support
+- `22-husky-hook-manager-plugin.md` -> Plan: Husky hook manager plugin integration
+- `23-pre-commit-hook-manager-plugin.md` -> Plan: pre-commit hook manager plugin integration
+- `24-lefthook-hook-manager-plugin.md` -> Plan: lefthook hook manager plugin integration
 
 ## Acceptance Criteria
 - AC1: Coverage map exists and is complete.
@@ -77,4 +83,4 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 This index is the canonical source for requirement-to-spec traceability.
 
 ## Current Verification Status
-cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-63.
+cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-66.
