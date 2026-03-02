@@ -3,13 +3,16 @@ use base64::Engine;
 use std::io::{Read, Write};
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
-pub(crate) fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<String, GitvaultError> {
+pub(crate) fn encrypt_armor(
+    plaintext: &[u8],
+    recipient_keys: &[String],
+) -> Result<String, GitvaultError> {
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
-            let r: age::x25519::Recipient = k
-                .parse()
-                .map_err(|e| GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}")))?;
+            let r: age::x25519::Recipient = k.parse().map_err(|e| {
+                GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}"))
+            })?;
             Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
@@ -39,16 +42,21 @@ pub(crate) fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Resu
 }
 
 /// Decrypt an age armor string using the given identity.
-pub(crate) fn decrypt_armor(armored: &str, identity: &dyn age::Identity) -> Result<Vec<u8>, GitvaultError> {
+pub(crate) fn decrypt_armor(
+    armored: &str,
+    identity: &dyn age::Identity,
+) -> Result<Vec<u8>, GitvaultError> {
     let armor = age::armor::ArmoredReader::new(armored.as_bytes());
-    let decryptor =
-        age::Decryptor::new(armor).map_err(|e| GitvaultError::Decryption(format!("Decryptor create: {e}")))?;
+    let decryptor = age::Decryptor::new(armor)
+        .map_err(|e| GitvaultError::Decryption(format!("Decryptor create: {e}")))?;
     let mut reader = match decryptor {
         age::Decryptor::Recipients(d) => d
             .decrypt(std::iter::once(identity))
             .map_err(|e| GitvaultError::Decryption(format!("Decrypt: {e}")))?,
         age::Decryptor::Passphrase(_) => {
-            return Err(GitvaultError::Decryption("Passphrase-encrypted files not supported".to_string()));
+            return Err(GitvaultError::Decryption(
+                "Passphrase-encrypted files not supported".to_string(),
+            ));
         }
     };
     let mut plaintext = Vec::new();
@@ -59,13 +67,16 @@ pub(crate) fn decrypt_armor(armored: &str, identity: &dyn age::Identity) -> Resu
 }
 
 /// Encrypt plaintext bytes using binary age (no armor), returning base64-encoded result.
-pub(crate) fn encrypt_binary_b64(plaintext: &[u8], recipient_keys: &[String]) -> Result<String, GitvaultError> {
+pub(crate) fn encrypt_binary_b64(
+    plaintext: &[u8],
+    recipient_keys: &[String],
+) -> Result<String, GitvaultError> {
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
-            let r: age::x25519::Recipient = k
-                .parse()
-                .map_err(|e| GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}")))?;
+            let r: age::x25519::Recipient = k.parse().map_err(|e| {
+                GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}"))
+            })?;
             Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
@@ -87,7 +98,10 @@ pub(crate) fn encrypt_binary_b64(plaintext: &[u8], recipient_keys: &[String]) ->
     Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
 
-pub(crate) fn decrypt_binary_b64(encoded: &str, identity: &dyn age::Identity) -> Result<Vec<u8>, GitvaultError> {
+pub(crate) fn decrypt_binary_b64(
+    encoded: &str,
+    identity: &dyn age::Identity,
+) -> Result<Vec<u8>, GitvaultError> {
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|e| GitvaultError::Decryption(format!("Invalid base64 payload: {e}")))?;
@@ -98,7 +112,9 @@ pub(crate) fn decrypt_binary_b64(encoded: &str, identity: &dyn age::Identity) ->
             .decrypt(std::iter::once(identity))
             .map_err(|e| GitvaultError::Decryption(format!("Decrypt: {e}")))?,
         age::Decryptor::Passphrase(_) => {
-            return Err(GitvaultError::Decryption("Passphrase-encrypted not supported".to_string()));
+            return Err(GitvaultError::Decryption(
+                "Passphrase-encrypted not supported".to_string(),
+            ));
         }
     };
     let mut plaintext = Vec::new();

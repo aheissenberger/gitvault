@@ -7,7 +7,10 @@ use super::helpers::{atomic_write, is_age_armor};
 /// Determine the new encrypted value for a field, applying REQ-5 determinism:
 /// if the current value is already age armor, keep it unchanged.
 /// Otherwise, encrypt the current plaintext value.
-fn determine_encrypted_value(current: &str, recipient_keys: &[String]) -> Result<String, GitvaultError> {
+fn determine_encrypted_value(
+    current: &str,
+    recipient_keys: &[String],
+) -> Result<String, GitvaultError> {
     if is_age_armor(current) {
         return Ok(current.to_string());
     }
@@ -81,7 +84,11 @@ pub fn encrypt_fields(
         "json" => encrypt_fields_json(&content, fields, recipient_keys)?,
         "yaml" | "yml" => encrypt_fields_yaml(&content, fields, recipient_keys)?,
         "toml" => encrypt_fields_toml(&content, fields, recipient_keys)?,
-        _ => return Err(GitvaultError::Other(format!("Unsupported file format: .{ext}"))),
+        _ => {
+            return Err(GitvaultError::Other(format!(
+                "Unsupported file format: .{ext}"
+            )));
+        }
     };
 
     atomic_write(file_path, new_content.as_bytes())
@@ -103,7 +110,8 @@ fn encrypt_fields_json(
         }
     }
     Ok(serde_json::to_string_pretty(&value)
-        .map_err(|e| GitvaultError::Encryption(format!("JSON serialize error: {e}")))? + "\n")
+        .map_err(|e| GitvaultError::Encryption(format!("JSON serialize error: {e}")))?
+        + "\n")
 }
 
 fn encrypt_fields_yaml(
@@ -130,7 +138,8 @@ fn encrypt_fields_toml(
     fields: &[&str],
     recipient_keys: &[String],
 ) -> Result<String, GitvaultError> {
-    let mut value: toml::Value = content.parse::<toml::Value>()
+    let mut value: toml::Value = content
+        .parse::<toml::Value>()
         .map_err(|e| GitvaultError::Encryption(format!("TOML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
@@ -162,7 +171,11 @@ pub fn decrypt_fields(
         "json" => decrypt_fields_json(&content, fields, identity)?,
         "yaml" | "yml" => decrypt_fields_yaml(&content, fields, identity)?,
         "toml" => decrypt_fields_toml(&content, fields, identity)?,
-        _ => return Err(GitvaultError::Other(format!("Unsupported file format: .{ext}"))),
+        _ => {
+            return Err(GitvaultError::Other(format!(
+                "Unsupported file format: .{ext}"
+            )));
+        }
     };
 
     atomic_write(file_path, new_content.as_bytes())
@@ -182,11 +195,15 @@ fn decrypt_fields_json(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = serde_json::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
+            *v = serde_json::Value::String(
+                String::from_utf8(plain)
+                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
+            );
         }
     }
     Ok(serde_json::to_string_pretty(&value)
-        .map_err(|e| GitvaultError::Decryption(format!("JSON serialize error: {e}")))? + "\n")
+        .map_err(|e| GitvaultError::Decryption(format!("JSON serialize error: {e}")))?
+        + "\n")
 }
 
 fn decrypt_fields_yaml(
@@ -203,7 +220,10 @@ fn decrypt_fields_yaml(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = serde_yaml::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
+            *v = serde_yaml::Value::String(
+                String::from_utf8(plain)
+                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
+            );
         }
     }
     serde_yaml::to_string(&value)
@@ -215,7 +235,8 @@ fn decrypt_fields_toml(
     fields: &[&str],
     identity: &dyn age::Identity,
 ) -> Result<String, GitvaultError> {
-    let mut value: toml::Value = content.parse::<toml::Value>()
+    let mut value: toml::Value = content
+        .parse::<toml::Value>()
         .map_err(|e| GitvaultError::Decryption(format!("TOML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
@@ -224,7 +245,10 @@ fn decrypt_fields_toml(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = toml::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
+            *v = toml::Value::String(
+                String::from_utf8(plain)
+                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
+            );
         }
     }
     toml::to_string_pretty(&value)

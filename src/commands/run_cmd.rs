@@ -1,6 +1,6 @@
 //! `gitvault run` command implementation.
 
-use crate::commands::effects::{execute_effects, CommandOutcome};
+use crate::commands::effects::{CommandOutcome, execute_effects};
 use crate::error::GitvaultError;
 use crate::fhsm;
 

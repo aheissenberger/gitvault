@@ -43,7 +43,10 @@ pub(crate) fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<(), Gitvault
 /// Harden the repository: update .gitignore, install git hooks
 pub(crate) fn cmd_harden(json: bool) -> Result<(), GitvaultError> {
     let repo_root = crate::find_repo_root()?;
-    crate::materialize::ensure_gitignored(&repo_root, crate::materialize::REQUIRED_GITIGNORE_ENTRIES)?;
+    crate::materialize::ensure_gitignored(
+        &repo_root,
+        crate::materialize::REQUIRED_GITIGNORE_ENTRIES,
+    )?;
     repo::install_git_hooks(&repo_root)?;
     crate::output_success(
         "Repository hardened: .gitignore updated, git hooks installed.",

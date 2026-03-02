@@ -2,7 +2,7 @@ use crate::error::GitvaultError;
 use crate::merge::{parse_env_pair_from_line, rewrite_env_assignment_line};
 
 use super::armor::{decrypt_binary_b64, encrypt_binary_b64};
-use super::helpers::{is_env_encrypted, ENV_ENC_PREFIX};
+use super::helpers::{ENV_ENC_PREFIX, is_env_encrypted};
 
 /// REQ-6: Encrypt each VALUE in a .env file individually (KEY=enc:base64).
 /// Returns the new .env content.
@@ -54,7 +54,10 @@ pub fn encrypt_env_values(
 
 #[allow(dead_code)]
 /// REQ-6: Decrypt each VALUE in a .env file that was encrypted with encrypt_env_values.
-pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result<String, GitvaultError> {
+pub fn decrypt_env_values(
+    content: &str,
+    identity: &dyn age::Identity,
+) -> Result<String, GitvaultError> {
     let mut lines_out = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
@@ -66,7 +69,8 @@ pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result
             if is_env_encrypted(&value) {
                 let encoded = &value[ENV_ENC_PREFIX.len()..];
                 let plain = decrypt_binary_b64(encoded, identity)?;
-                let plain_text = String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?;
+                let plain_text = String::from_utf8(plain)
+                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?;
                 lines_out.push(rewrite_env_assignment_line(line, &plain_text));
             } else {
                 lines_out.push(line.to_string());
@@ -85,9 +89,9 @@ pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use age::x25519;
     use crate::merge::parse_env_pair_from_line;
     use crate::merge::rewrite_env_assignment_line;
+    use age::x25519;
 
     fn gen_identity() -> x25519::Identity {
         x25519::Identity::generate()

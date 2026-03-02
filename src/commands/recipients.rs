@@ -87,8 +87,8 @@ pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use age::x25519;
     use crate::commands::test_helpers::*;
+    use age::x25519;
     use tempfile::TempDir;
 
     #[test]

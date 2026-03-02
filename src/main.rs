@@ -46,13 +46,7 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             fields,
             value_only,
         } => {
-            commands::encrypt::cmd_encrypt(
-                file,
-                recipients,
-                fields,
-                value_only,
-                cli.json,
-            )?;
+            commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json)?;
             Ok(CommandOutcome::Success)
         }
         Commands::Decrypt {
@@ -180,15 +174,14 @@ pub(crate) fn output_success(message: &str, json: bool) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_helpers::*;
+    use crate::fhsm;
+    use crate::identity::{load_identity_from_source, load_identity_source, load_identity_with};
     use age::secrecy::ExposeSecret;
     use age::x25519;
-    use crate::commands::test_helpers::*;
-    use crate::identity::{load_identity_from_source, load_identity_with, load_identity_source};
-    use crate::fhsm;
     use cli::{Commands, KeyringAction};
     use tempfile::NamedTempFile;
     use tempfile::TempDir;
