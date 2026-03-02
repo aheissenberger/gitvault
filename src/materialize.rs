@@ -251,8 +251,7 @@ mod tests {
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(
             mode, 0o600,
-            ".env should have 0600 permissions, got {:o}",
-            mode
+            ".env should have 0600 permissions, got {mode:o}"
         );
     }
 
@@ -388,8 +387,7 @@ mod tests {
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(
             mode, 0o600,
-            "temp file must have 0600 BEFORE persist — got {:o}",
-            mode
+            "temp file must have 0600 BEFORE persist — got {mode:o}"
         );
 
         // Now persist — the final file should inherit the restricted permissions.
@@ -399,8 +397,7 @@ mod tests {
         let final_mode = final_meta.permissions().mode() & 0o777;
         assert_eq!(
             final_mode, 0o600,
-            "final .env must have 0600 after persist — got {:o}",
-            final_mode
+            "final .env must have 0600 after persist — got {final_mode:o}"
         );
     }
 }

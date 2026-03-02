@@ -14,10 +14,7 @@ pub fn output_success(message: &str, json: bool) {
 
 /// Return true if the CI env var is set to a truthy value (1/true/yes).
 pub fn ci_is_non_interactive() -> bool {
-    matches!(
-        std::env::var("CI").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    )
+    matches!(std::env::var("CI").as_deref(), Ok("1" | "true" | "yes"))
 }
 
 /// Return the effective no_prompt setting — always true in CI.

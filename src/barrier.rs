@@ -464,8 +464,7 @@ mod tests {
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(
             mode, 0o600,
-            "temp token file must have 0600 BEFORE persist — got {:o}",
-            mode
+            "temp token file must have 0600 BEFORE persist — got {mode:o}"
         );
 
         // Now persist — final token file should inherit restricted permissions.
@@ -475,8 +474,7 @@ mod tests {
         let final_mode = final_meta.permissions().mode() & 0o777;
         assert_eq!(
             final_mode, 0o600,
-            "final token file must have 0600 after persist — got {:o}",
-            final_mode
+            "final token file must have 0600 after persist — got {final_mode:o}"
         );
     }
 }

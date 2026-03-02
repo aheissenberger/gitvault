@@ -150,7 +150,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_check_and_status() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -186,7 +188,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_run_returns_exit_outcome() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -217,7 +221,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_encrypt_then_decrypt_arms() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -272,7 +278,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_allow_prod_succeeds() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -292,7 +300,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_rotate_succeeds() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -316,7 +326,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_merge_driver_outcomes() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
 
         let base = dir.path().join("base.env");
@@ -363,7 +375,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_keyring_set_invalid_identity_errors() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -386,7 +400,9 @@ mod tests {
 
     #[test]
     fn test_with_env_var_restores_existing_value() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         unsafe {
             std::env::set_var("GITVAULT_TEST_VAR", "before");
         }
@@ -404,7 +420,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_revoke_prod_succeeds() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -432,7 +450,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_keyring_set_exercises_dispatch() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
@@ -462,7 +482,9 @@ mod tests {
 
     #[test]
     fn test_run_dispatch_decrypt_nonexistent_file_propagates_error() {
-        let _lock = global_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());

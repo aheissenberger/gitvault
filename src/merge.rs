@@ -45,8 +45,7 @@ pub fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> Stri
     let suffix = rhs
         .find(" #")
         .filter(|idx| *idx >= ws_len)
-        .map(|idx| &rhs[idx..])
-        .unwrap_or("");
+        .map_or("", |idx| &rhs[idx..]);
     format!("{prefix}{leading_ws}{new_value}{suffix}")
 }
 
@@ -81,9 +80,9 @@ pub fn merge_env_content(
     let mut has_conflict = false;
 
     for key in &all_keys {
-        let base_val = base_map.get(key).map(|s| s.as_str());
-        let ours_val = ours_map.get(key).map(|s| s.as_str());
-        let theirs_val = theirs_map.get(key).map(|s| s.as_str());
+        let base_val = base_map.get(key).map(std::string::String::as_str);
+        let ours_val = ours_map.get(key).map(std::string::String::as_str);
+        let theirs_val = theirs_map.get(key).map(std::string::String::as_str);
 
         let base_eq_ours = base_val == ours_val;
         let base_eq_theirs = base_val == theirs_val;
@@ -91,25 +90,27 @@ pub fn merge_env_content(
 
         let merged = if base_eq_ours && base_eq_theirs {
             // All same → keep ours
-            ours_val.map(|s| s.to_string())
+            ours_val.map(std::string::ToString::to_string)
         } else if base_eq_ours && !base_eq_theirs {
             // Ours unchanged, theirs changed → take theirs
-            theirs_val.map(|s| s.to_string())
+            theirs_val.map(std::string::ToString::to_string)
         } else if !base_eq_ours && base_eq_theirs {
             // Ours changed, theirs unchanged → keep ours
-            ours_val.map(|s| s.to_string())
+            ours_val.map(std::string::ToString::to_string)
         } else if ours_eq_theirs {
             // Both changed to same value → keep ours
-            ours_val.map(|s| s.to_string())
+            ours_val.map(std::string::ToString::to_string)
         } else {
             // All three differ → conflict marker
             has_conflict = true;
-            let ours_line = ours_val
-                .map(|v| format!("{key}={v}"))
-                .unwrap_or_else(|| format!("# {key} deleted in ours"));
-            let theirs_line = theirs_val
-                .map(|v| format!("{key}={v}"))
-                .unwrap_or_else(|| format!("# {key} deleted in theirs"));
+            let ours_line = ours_val.map_or_else(
+                || format!("# {key} deleted in ours"),
+                |v| format!("{key}={v}"),
+            );
+            let theirs_line = theirs_val.map_or_else(
+                || format!("# {key} deleted in theirs"),
+                |v| format!("{key}={v}"),
+            );
             Some(format!(
                 "<<<<<<< ours\n{ours_line}\n=======\n{theirs_line}\n>>>>>>> theirs"
             ))

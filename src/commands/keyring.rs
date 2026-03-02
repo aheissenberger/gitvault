@@ -110,7 +110,7 @@ mod tests {
             age::x25519::Identity::generate()
                 .to_string()
                 .expose_secret()
-                .to_string(),
+                .clone(),
         ))
     }
 
@@ -221,7 +221,7 @@ mod tests {
     fn test_cmd_keyring_get_returns_public_key() {
         let (_, identity) = setup_identity_file();
         use age::secrecy::ExposeSecret;
-        let key_str = identity.to_string().expose_secret().to_string();
+        let key_str = identity.to_string().expose_secret().clone();
         // set_ok / delete_ok bodies covered by other tests.
         let result = cmd_keyring_with_ops(
             KeyringAction::Get,
@@ -298,7 +298,7 @@ mod tests {
     fn test_cmd_keyring_get_json_output() {
         let (_, identity) = setup_identity_file();
         use age::secrecy::ExposeSecret;
-        let key_str = identity.to_string().expose_secret().to_string();
+        let key_str = identity.to_string().expose_secret().clone();
         let result = cmd_keyring_with_ops(
             KeyringAction::Get,
             true,

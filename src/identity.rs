@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn load_identity_from_source_inline_nonempty_returns_ok() {
         let (_, identity) = setup_identity_file();
-        let key_str = identity.to_string().expose_secret().to_string();
+        let key_str = identity.to_string().expose_secret().clone();
         let source = fhsm::IdentitySource::Inline(key_str);
         assert!(load_identity_from_source(&source).is_ok());
     }

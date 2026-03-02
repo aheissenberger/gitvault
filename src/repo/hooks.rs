@@ -16,13 +16,13 @@ if command -v gitvault >/dev/null 2>&1; then
 fi
 "#;
 
-const PRE_PUSH_HOOK: &str = r#"#!/usr/bin/env sh
+const PRE_PUSH_HOOK: &str = r"#!/usr/bin/env sh
 # gitvault: run safety check before push
 set -e
 if command -v gitvault >/dev/null 2>&1; then
     gitvault status --no-prompt --fail-if-dirty
 fi
-"#;
+";
 
 fn atomic_write(path: &Path, content: &[u8]) -> Result<(), GitvaultError> {
     let mut tmp = tempfile::Builder::new()

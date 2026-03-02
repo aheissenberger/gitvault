@@ -346,8 +346,7 @@ mod tests {
         let last = effects.last().expect("effects must not be empty");
         assert!(
             matches!(last, Effect::RunCommand { command, .. } if command[0] == "env"),
-            "last effect must be RunCommand, got: {:?}",
-            last
+            "last effect must be RunCommand, got: {last:?}"
         );
     }
 

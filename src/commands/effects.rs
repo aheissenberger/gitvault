@@ -281,12 +281,12 @@ mod tests {
     #[test]
     fn execute_effects_run_command_returns_exit_code() {
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 42);
         let tmp = TempDir::new().unwrap();
         let event = fhsm::Event::Run {
             env: Some("dev".to_string()),
-            identity: Some(age_key.to_string().expose_secret().to_string()),
+            identity: Some(age_key.to_string().expose_secret().clone()),
             prod: false,
             no_prompt: true,
             clear_env: false,
@@ -325,13 +325,13 @@ mod tests {
     #[test]
     fn execute_effects_materialize_uses_cached_secrets() {
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let secrets = vec![("FOO".to_string(), "bar".to_string())];
         let runner = FakeEffectRunner::succeeds_with(key_str, secrets, 0);
         let tmp = TempDir::new().unwrap();
         let event = fhsm::Event::Materialize {
             env: None,
-            identity: Some(age_key.to_string().expose_secret().to_string()),
+            identity: Some(age_key.to_string().expose_secret().clone()),
             prod: false,
             no_prompt: true,
         };
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn execute_effects_with_decrypt_file_decrypts_to_output_path() {
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner::succeeds_with(key_str.clone(), vec![], 0);
         let tmp = TempDir::new().unwrap();
 
@@ -404,7 +404,7 @@ mod tests {
     fn execute_effects_with_decrypt_file_without_identity_errors() {
         let tmp = TempDir::new().unwrap();
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
 
         // DecryptFile without a prior ResolveIdentity should fail.
@@ -438,7 +438,7 @@ mod tests {
     fn execute_effects_with_decrypt_file_to_stdout() {
         // Covers DecryptFile with output=None → decrypt to stdout (lines 170-171).
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner::succeeds_with(key_str.clone(), vec![], 0);
         let tmp = TempDir::new().unwrap();
 
@@ -469,7 +469,7 @@ mod tests {
     fn fake_runner_materialize_error_propagates() {
         // Covers the Some(msg) error branch in FakeEffectRunner::materialize_secrets (line 267).
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner {
             barrier_err: None,
             identity_str: Ok(key_str.clone()),
@@ -493,7 +493,7 @@ mod tests {
     fn execute_effects_decrypt_secrets_without_prior_identity_errors() {
         // Covers the ok_or_else "identity not resolved" closure in DecryptSecrets arm.
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
         let tmp = TempDir::new().unwrap();
 
@@ -516,7 +516,7 @@ mod tests {
     fn execute_effects_materialize_without_prior_decrypt_errors() {
         // Covers the ok_or_else "secrets not decrypted" closure in MaterializeSecrets arm.
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
         let tmp = TempDir::new().unwrap();
 
@@ -539,7 +539,7 @@ mod tests {
     fn fake_runner_run_command_error_propagates() {
         // Covers the map_err error closure in FakeEffectRunner::run_command.
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner {
             barrier_err: None,
             identity_str: Ok(key_str.clone()),
@@ -566,7 +566,7 @@ mod tests {
     fn fake_runner_decrypt_secrets_error_propagates() {
         // Covers the map_err error closure in FakeEffectRunner::decrypt_secrets.
         let age_key = age::x25519::Identity::generate();
-        let key_str = age_key.to_string().expose_secret().to_string();
+        let key_str = age_key.to_string().expose_secret().clone();
         let runner = FakeEffectRunner {
             barrier_err: None,
             identity_str: Ok(key_str.clone()),

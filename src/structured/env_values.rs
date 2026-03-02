@@ -26,7 +26,7 @@ pub fn encrypt_env_values(
                     // We don't have a "new plaintext" in encrypt_env_values;
                     // this function always re-encrypts. For idempotency, keep existing.
                     let _ = existing_plain;
-                    value.to_string()
+                    value.clone()
                 } else {
                     return Err(GitvaultError::Decryption(
                         "existing ciphertext cannot be decrypted by current identity - re-encrypt from plaintext source after key rotation".to_string(),
