@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-R000"
 title: "SafeSecrets REQ-by-REQ index"
-status: "draft"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

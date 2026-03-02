@@ -3,7 +3,7 @@
 A Git-native secrets manager for multi-developer and multi-agent workflows. Secrets are encrypted
 with [age](https://age-encryption.org) and stored in your repository — never plaintext.
 
-## Features (MVP — 91% of full spec; SSM backend pending)
+## Features (100% of spec — all REQ-1..58 implemented)
 
 - **age encryption** — standard file format, native Rust, no external binaries required (REQ-1, 2)
 - **Multi-recipient** — encrypt once for every team member; any recipient can decrypt (REQ-3)
@@ -42,16 +42,14 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   side effects (REQ-50)
 - **Streaming crypto** — encryption and decryption are streaming-capable; no full-file buffering
   for large files (REQ-51, 52)
-- **AWS auth config** — `--aws-profile` / `--aws-role-arn` global flags (and env vars) for future
-  SSM backend integration (REQ-49)
+- **AWS SSM backend** — `gitvault ssm pull/push/diff/set` sync secrets with AWS SSM Parameter Store;
+  enable with `--features ssm`; uses `--aws-profile` / `--aws-role-arn` (REQ-26–30, 49)
 - **Signed releases** — CI produces cosign-signed binaries for Linux, macOS, and Windows (REQ-54)
 - **Format versioning** — format version visible in `gitvault --version` output (REQ-55)
 - **Build metadata in version output** — `gitvault --version --long` includes git SHA and commit date
 - **Tag/version release gate** — `cargo xtask release-check` enforces `Cargo.toml` version ↔ git tag parity (`vX.Y.Z`), clean tree, and annotated tags
 - **Stable exit codes** — documented, machine-readable (REQ-47)
 - **Spec gate** — `cargo xtask spec-verify` enforces frontmatter on every requirement spec (REQ-56)
-
-> **Not yet implemented**: REQ-26..30 (AWS SSM backend — pull/push/diff/set with SSM Parameter Store)
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-RM01"
 title: "SafeSecrets agent assignment matrix"
-status: "draft"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:
