@@ -50,6 +50,25 @@ impl AwsConfig {
 mod tests {
     use super::AwsConfig;
 
+    #[cfg(feature = "ssm")]
+    #[tokio::test]
+    async fn build_client_without_role_returns_ok() {
+        let cfg = AwsConfig::from_cli(None, None);
+        // build_client creates an SDK client from env — no API call is made here.
+        let result = cfg.build_client().await;
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "ssm")]
+    #[tokio::test]
+    async fn build_client_with_profile_returns_ok() {
+        let cfg = AwsConfig::from_cli(Some("nonexistent-test-profile".to_string()), None);
+        // SDK client creation succeeds even with a nonexistent profile name;
+        // the error (if any) only surfaces on actual API calls.
+        let result = cfg.build_client().await;
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn from_cli_keeps_values() {
         let cfg = AwsConfig::from_cli(
