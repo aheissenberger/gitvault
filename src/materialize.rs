@@ -110,22 +110,7 @@ pub fn ensure_gitattributes(repo_root: &Path, entries: &[&str]) -> Result<(), Gi
 }
 
 fn merge_gitattributes_entries(existing: &str, entries: &[&str]) -> Option<String> {
-    let mut content = existing.to_string();
-    let mut changed = false;
-
-    for entry in entries {
-        let already_present = existing.lines().any(|line| line.trim() == *entry);
-        if !already_present {
-            if !content.is_empty() && !content.ends_with('\n') {
-                content.push('\n');
-            }
-            content.push_str(entry);
-            content.push('\n');
-            changed = true;
-        }
-    }
-
-    if changed { Some(content) } else { None }
+    merge_file_entries(existing, entries)
 }
 
 /// Ensure the given entries exist in `.gitignore`. REQ-9, REQ-20
@@ -150,6 +135,14 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
 }
 
 fn merge_gitignore_entries(existing: &str, entries: &[&str]) -> Option<String> {
+    merge_file_entries(existing, entries)
+}
+
+/// Append any missing `entries` to `existing` content, preserving existing lines.
+///
+/// Returns `Some(new_content)` if anything was added, or `None` if all entries
+/// were already present (so callers can skip writing when nothing changed).
+fn merge_file_entries(existing: &str, entries: &[&str]) -> Option<String> {
     let mut content = existing.to_string();
     let mut changed = false;
 
