@@ -7,6 +7,8 @@ pub fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultE
         .collect()
 }
 
+/// Parse the key from a single `.env` assignment line, discarding the value.
+/// Returns `None` for blank lines and comments.
 pub fn parse_env_key_from_line(line: &str) -> Option<String> {
     let input = format!("{line}\n");
     let mut iter = dotenvy::from_read_iter(input.as_bytes());

@@ -56,7 +56,6 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
 }
 
 /// Get the path for an encrypted artifact under secrets/. REQ-7
-#[allow(dead_code)]
 pub fn get_encrypted_path(repo_root: &Path, name: &str) -> PathBuf {
     repo_root.join(SECRETS_DIR).join(name)
 }
@@ -135,7 +134,6 @@ fn collect_age_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), GitvaultE
 }
 
 /// Get the path for a plaintext artifact under .secrets/plain/<env>/. REQ-8
-#[allow(dead_code)]
 pub fn get_plain_path(repo_root: &Path, env: &str, name: &str) -> PathBuf {
     repo_root.join(PLAIN_BASE_DIR).join(env).join(name)
 }
