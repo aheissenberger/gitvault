@@ -97,4 +97,34 @@ mod tests {
         assert_eq!(resolve_env(dir1.path()), "staging");
         assert_eq!(resolve_env(dir2.path()), "dev");
     }
+
+    #[test]
+    fn test_whitespace_env_var_falls_back_to_file() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".secrets")).unwrap();
+        fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
+
+        unsafe {
+            std::env::set_var("SECRETS_ENV", "   ");
+        }
+        let env = resolve_env(dir.path());
+        unsafe {
+            std::env::remove_var("SECRETS_ENV");
+        }
+
+        assert_eq!(env, "staging");
+    }
+
+    #[test]
+    fn test_whitespace_env_file_falls_back_to_dev() {
+        let dir = TempDir::new().unwrap();
+        unsafe {
+            std::env::remove_var("SECRETS_ENV");
+        }
+        fs::create_dir_all(dir.path().join(".secrets")).unwrap();
+        fs::write(dir.path().join(".secrets").join("env"), "  \n").unwrap();
+
+        let env = resolve_env(dir.path());
+        assert_eq!(env, "dev");
+    }
 }

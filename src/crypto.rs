@@ -1,6 +1,6 @@
 use crate::error::GitvaultError;
 use age::{Decryptor, Encryptor, x25519};
-use std::io::{Read, Write};
+use std::io::Read;
 
 /// Gitvault encrypted format version (REQ-55).
 /// Increment when the encryption format changes incompatibly.
@@ -26,21 +26,9 @@ pub fn encrypt(
     recipients: Vec<Box<dyn age::Recipient + Send>>,
     plaintext: &[u8],
 ) -> Result<Vec<u8>, GitvaultError> {
-    let encryptor = Encryptor::with_recipients(recipients)
-        .ok_or_else(|| GitvaultError::Encryption("At least one recipient required".to_string()))?;
-
+    let mut reader = std::io::Cursor::new(plaintext);
     let mut output = Vec::new();
-    let mut writer = encryptor.wrap_output(&mut output).map_err(|e| {
-        GitvaultError::Encryption(format!("Failed to create encrypted writer: {e}"))
-    })?;
-
-    writer
-        .write_all(plaintext)
-        .map_err(|e| GitvaultError::Encryption(format!("Failed to write plaintext: {e}")))?;
-    writer
-        .finish()
-        .map_err(|e| GitvaultError::Encryption(format!("Failed to finalize encryption: {e}")))?;
-
+    encrypt_stream(recipients, &mut reader, &mut output)?;
     Ok(output)
 }
 
@@ -113,6 +101,8 @@ pub fn decrypt_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use age::secrecy::SecretString;
+    use std::io::Write;
 
     fn gen_identity() -> x25519::Identity {
         x25519::Identity::generate()
@@ -211,5 +201,76 @@ mod tests {
         decrypt_stream(&identity, std::io::Cursor::new(&ciphertext), &mut decrypted)
             .expect("decrypt_stream failed");
         assert_eq!(decrypted, plaintext);
+    }
+
+    fn encrypt_with_passphrase_binary(plaintext: &[u8]) -> Vec<u8> {
+        let encryptor = Encryptor::with_user_passphrase(SecretString::from("pw".to_string()));
+        let mut output = Vec::new();
+        let mut writer = encryptor.wrap_output(&mut output).unwrap();
+        writer.write_all(plaintext).unwrap();
+        writer.finish().unwrap();
+        output
+    }
+
+    #[test]
+    fn test_decrypt_rejects_passphrase_ciphertext() {
+        let identity = gen_identity();
+        let ciphertext = encrypt_with_passphrase_binary(b"secret");
+
+        let result = decrypt(&identity, &ciphertext);
+        assert!(matches!(result, Err(GitvaultError::Decryption(_))));
+    }
+
+    #[test]
+    fn test_decrypt_stream_rejects_passphrase_ciphertext() {
+        let identity = gen_identity();
+        let ciphertext = encrypt_with_passphrase_binary(b"secret");
+        let mut out = Vec::new();
+
+        let result = decrypt_stream(&identity, std::io::Cursor::new(ciphertext), &mut out);
+        assert!(matches!(result, Err(GitvaultError::Decryption(_))));
+    }
+
+    #[test]
+    fn test_decrypt_stream_wrong_identity_fails() {
+        let identity = gen_identity();
+        let wrong_identity = gen_identity();
+        let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
+
+        let mut reader = std::io::Cursor::new(b"STREAM_SECRET=1\n".to_vec());
+        let mut ciphertext = Vec::new();
+        encrypt_stream(vec![recipient], &mut reader, &mut ciphertext)
+            .expect("encrypt_stream failed");
+
+        let mut decrypted = Vec::new();
+        let result = decrypt_stream(
+            &wrong_identity,
+            std::io::Cursor::new(ciphertext),
+            &mut decrypted,
+        );
+        assert!(matches!(result, Err(GitvaultError::Decryption(_))));
+    }
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("write failed"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_encrypt_stream_fails_when_output_writer_errors() {
+        let identity = gen_identity();
+        let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
+        let mut reader = std::io::Cursor::new(b"x".to_vec());
+        let mut writer = FailingWriter;
+
+        let result = encrypt_stream(vec![recipient], &mut reader, &mut writer);
+        assert!(matches!(result, Err(GitvaultError::Encryption(_))));
     }
 }

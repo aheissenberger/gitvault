@@ -38,3 +38,41 @@ impl GitvaultError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_codes_map_correctly() {
+        let io_err = GitvaultError::Io(std::io::Error::other("io"));
+        let enc_err = GitvaultError::Encryption("enc".to_string());
+        let dec_err = GitvaultError::Decryption("dec".to_string());
+        let leak_err = GitvaultError::PlaintextLeak(".env".to_string());
+        let usage_err = GitvaultError::Usage("usage".to_string());
+        let other_err = GitvaultError::Other("other".to_string());
+        let barrier_err = GitvaultError::BarrierNotSatisfied("barrier".to_string());
+
+        assert_eq!(io_err.exit_code(), EXIT_ERROR);
+        assert_eq!(enc_err.exit_code(), EXIT_ERROR);
+        assert_eq!(dec_err.exit_code(), EXIT_DECRYPT_ERROR);
+        assert_eq!(leak_err.exit_code(), EXIT_PLAINTEXT_LEAK);
+        assert_eq!(usage_err.exit_code(), EXIT_USAGE);
+        assert_eq!(other_err.exit_code(), EXIT_ERROR);
+        assert_eq!(barrier_err.exit_code(), EXIT_BARRIER);
+    }
+
+    #[test]
+    fn display_messages_include_context() {
+        assert!(
+            GitvaultError::Usage("bad arg".to_string())
+                .to_string()
+                .contains("Invalid argument")
+        );
+        assert!(
+            GitvaultError::BarrierNotSatisfied("missing token".to_string())
+                .to_string()
+                .contains("Production barrier not satisfied")
+        );
+    }
+}

@@ -9,6 +9,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::GitvaultError;
+use crate::permissions;
 
 /// Default token TTL in seconds (1 hour).
 pub const DEFAULT_TOKEN_TTL_SECS: u64 = 3600;
@@ -30,6 +31,25 @@ pub fn check_prod_barrier(
     prod_flag: bool,
     no_prompt: bool,
 ) -> Result<(), GitvaultError> {
+    check_prod_barrier_with_confirm(
+        repo_root,
+        env,
+        prod_flag,
+        no_prompt,
+        prompt_prod_confirmation,
+    )
+}
+
+fn check_prod_barrier_with_confirm<F>(
+    repo_root: &Path,
+    env: &str,
+    prod_flag: bool,
+    no_prompt: bool,
+    confirm: F,
+) -> Result<(), GitvaultError>
+where
+    F: FnOnce() -> Result<bool, GitvaultError>,
+{
     if env != "prod" {
         return Ok(());
     }
@@ -54,20 +74,35 @@ pub fn check_prod_barrier(
         ));
     }
 
-    // Interactive confirmation
-    eprint!("⚠️  You are about to access PRODUCTION secrets. Confirm? [y/N] ");
-    let mut input = String::new();
-    std::io::stdin()
-        .read_line(&mut input)
-        .map_err(GitvaultError::Io)?;
-
-    if input.trim().eq_ignore_ascii_case("y") {
+    if confirm()? {
         Ok(())
     } else {
         Err(GitvaultError::BarrierNotSatisfied(
             "production access denied by user".to_string(),
         ))
     }
+}
+
+fn prompt_prod_confirmation() -> Result<bool, GitvaultError> {
+    #[cfg(not(test))]
+    {
+        eprint!("⚠️  You are about to access PRODUCTION secrets. Confirm? [y/N] ");
+        let mut stdin = std::io::stdin().lock();
+        read_confirmation_from(&mut stdin)
+    }
+
+    #[cfg(test)]
+    {
+        let response = std::env::var("GITVAULT_TEST_CONFIRM").unwrap_or_else(|_| "n".to_string());
+        let mut input = std::io::Cursor::new(format!("{response}\n").into_bytes());
+        read_confirmation_from(&mut input)
+    }
+}
+
+fn read_confirmation_from(reader: &mut impl std::io::BufRead) -> Result<bool, GitvaultError> {
+    let mut input = String::new();
+    reader.read_line(&mut input).map_err(GitvaultError::Io)?;
+    Ok(input.trim().eq_ignore_ascii_case("y"))
 }
 
 /// Write a timed allow token to `.secrets/.prod-token`. REQ-14.
@@ -83,18 +118,18 @@ pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError>
         fs::create_dir_all(parent)?;
     }
 
-    fs::write(&token_path, expiry.to_string())?;
-
-    // Restrict permissions: token is sensitive
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&token_path)?.permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&token_path, perms)?;
-    }
+    let token_parent = token_path.parent().unwrap_or(repo_root);
+    let tmp = tempfile::NamedTempFile::new_in(token_parent)?;
+    fs::write(tmp.path(), expiry.to_string())?;
+    tmp.persist(&token_path)
+        .map_err(|e| GitvaultError::Io(e.error))?;
+    enforce_restricted_token_permissions(&token_path)?;
 
     Ok(expiry)
+}
+
+fn enforce_restricted_token_permissions(path: &Path) -> Result<(), GitvaultError> {
+    permissions::enforce_owner_rw(path, "production token")
 }
 
 #[allow(dead_code)]
@@ -129,6 +164,7 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use tempfile::TempDir;
 
     fn root() -> TempDir {
@@ -196,5 +232,78 @@ mod tests {
     fn allow_token_token_path_is_gitignored_after_ensure() {
         // The token path itself: just verify the constant is sane
         assert!(TOKEN_PATH.starts_with(".secrets/"));
+    }
+
+    #[test]
+    fn prod_with_interactive_confirm_yes_passes() {
+        let dir = root();
+        let result = check_prod_barrier_with_confirm(dir.path(), "prod", true, false, || Ok(true));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn prod_with_interactive_confirm_no_fails() {
+        let dir = root();
+        let result = check_prod_barrier_with_confirm(dir.path(), "prod", true, false, || Ok(false));
+        assert!(matches!(result, Err(GitvaultError::BarrierNotSatisfied(_))));
+    }
+
+    #[test]
+    fn prod_confirmation_error_is_propagated() {
+        let dir = root();
+        let result = check_prod_barrier_with_confirm(dir.path(), "prod", true, false, || {
+            Err(GitvaultError::Io(std::io::Error::other("read failed")))
+        });
+        assert!(matches!(result, Err(GitvaultError::Io(_))));
+    }
+
+    #[test]
+    fn read_confirmation_from_accepts_yes_case_insensitive() {
+        let mut input = Cursor::new(b"Y\n".to_vec());
+        let accepted = read_confirmation_from(&mut input).unwrap();
+        assert!(accepted);
+    }
+
+    #[test]
+    fn read_confirmation_from_rejects_other_values() {
+        let mut input = Cursor::new(b"n\n".to_vec());
+        let accepted = read_confirmation_from(&mut input).unwrap();
+        assert!(!accepted);
+    }
+
+    #[test]
+    fn check_prod_barrier_interactive_yes_via_prompt_helper() {
+        let dir = root();
+        unsafe {
+            std::env::set_var("GITVAULT_TEST_CONFIRM", "y");
+        }
+        let result = check_prod_barrier(dir.path(), "prod", true, false);
+        unsafe {
+            std::env::remove_var("GITVAULT_TEST_CONFIRM");
+        }
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_prod_barrier_interactive_no_via_prompt_helper() {
+        let dir = root();
+        unsafe {
+            std::env::set_var("GITVAULT_TEST_CONFIRM", "n");
+        }
+        let result = check_prod_barrier(dir.path(), "prod", true, false);
+        unsafe {
+            std::env::remove_var("GITVAULT_TEST_CONFIRM");
+        }
+        assert!(matches!(result, Err(GitvaultError::BarrierNotSatisfied(_))));
+    }
+
+    #[test]
+    fn malformed_token_content_is_treated_as_invalid() {
+        let dir = root();
+        let token_path = dir.path().join(".secrets/.prod-token");
+        std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
+        std::fs::write(&token_path, "not-a-timestamp").unwrap();
+
+        assert!(!has_valid_token(dir.path()));
     }
 }

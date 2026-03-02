@@ -13,20 +13,23 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   stay minimal (REQ-5, 35)
 - **Whole-file / value-only modes** — `.env` files default to whole-file encryption; opt in to
   per-value encryption with `--value-only` (REQ-6)
-- **Repository layout** — encrypted artifacts under `secrets/`, plaintext outputs under
-  `.secrets/plain/<env>/`; one `.age` file per secret (REQ-7, 8, 33)
+- **Repository layout** — encrypted artifacts under `secrets/<env>/` (with legacy `secrets/*.age`
+  fallback), plaintext outputs under `.secrets/plain/<env>/`; one `.age` file per secret (REQ-7,
+  8, 11, 12, 33)
 - **Plaintext leak detection** — refuses to operate if `.env` or plaintext secrets are tracked by
   Git (REQ-10)
 - **Environment model** — resolves active environment from `SECRETS_ENV` → `.secrets/env` → `dev`;
   each worktree is independent (REQ-11, 12)
 - **Production barrier** — timed allow-token required to materialize or run against `prod`;
   interactive confirmation fallback (REQ-13–15)
-- **Root `.env` materialization** — atomic write, `0600` permissions, deterministic sorted output,
-  auto-added to `.gitignore` (REQ-16–20)
+- **Root `.env` materialization** — atomic write, restricted permissions (`0600` on POSIX,
+  restricted ACL on Windows), deterministic sorted output, auto-added to `.gitignore`
+  (REQ-16–20)
 - **Fileless run mode** — injects secrets directly into child process environment without writing
   `.env`; supports `--clear-env` and `--pass` (REQ-21–25)
-- **Git hooks + merge driver** — `harden` installs pre-commit / pre-push hooks; optional
-  `gitvault merge-driver` for key-level `.env` merges (REQ-31, 32, 34)
+- **Git hooks + merge driver** — `harden` installs pre-commit / pre-push hooks (`pre-push`
+  enforces drift checks with `--fail-if-dirty`); optional `gitvault merge-driver` for key-level
+  `.env` merges (REQ-31, 32, 34)
 - **Recipient management** — persistent `.secrets/recipients` file; `recipient add/remove/list`;
   `rotate` re-encrypts all secrets for the current recipient set (REQ-36, 37, 38)
 - **OS keyring** — `keyring set/get/delete`; `GITVAULT_KEYRING=1` loads identity from system
@@ -109,7 +112,7 @@ gitvault harden
 gitvault encrypt app.env \
   --recipient age1abc...  \   # your key
   --recipient age1xyz...      # teammate's key
-# Output: secrets/app.env.age  (safe to commit)
+# Output: secrets/<active-env>/app.env.age  (safe to commit)
 
 # Field-level encryption (JSON/YAML/TOML — only named fields are encrypted):
 gitvault encrypt config.json --fields db.password,api_key \
@@ -150,7 +153,7 @@ Options:
   --aws-role-arn   AWS role ARN to assume for SSM backend (or AWS_ROLE_ARN env var)
 
 Commands:
-  encrypt       Encrypt a file → secrets/<name>.age  (or field-level for JSON/YAML/TOML)
+  encrypt       Encrypt a file → secrets/<env>/<name>.age  (or field-level for JSON/YAML/TOML)
   decrypt       Decrypt a .age file  (or field-level)
   materialize   Decrypt all secrets/*.age → root .env
   status        Check repo safety (exit 3 if plaintext is tracked)
@@ -171,8 +174,9 @@ Commands:
 gitvault encrypt <FILE> [--recipient <PUBKEY>...] [--fields <FIELDS>] [--value-only]
 ```
 
-**Whole-file mode** (default): reads `<FILE>`, encrypts it for all recipients, writes `secrets/<FILE>.age`.
-If no `--recipient` is provided the local identity's public key is used.
+**Whole-file mode** (default): reads `<FILE>`, encrypts it for all recipients, writes
+`secrets/<active-env>/<FILE>.age` where active env resolves via `SECRETS_ENV` → `.secrets/env`
+→ `dev`. If no `--recipient` is provided the local identity's public key is used.
 
 **Field-level mode** (`--fields KEY1,KEY2`): for `.json`, `.yaml`/`.yml`, and `.toml` files, only
 the specified fields are encrypted in-place using age ASCII armor. Unchanged fields keep their
@@ -197,9 +201,10 @@ Identity is read from `--identity` or `GITVAULT_IDENTITY` env var.
 gitvault materialize [--env <ENV>] [--identity <KEY_FILE>] [--prod]
 ```
 
-Decrypts every `secrets/*.age` file, parses `KEY=VALUE` pairs, and writes a deterministic root
-`.env` (sorted keys, canonical quoting, `0600` permissions, atomic rename). Use `--prod` to
-activate the production barrier check (REQ-13).
+Decrypts env-specific `secrets/<env>/*.age` files (or legacy `secrets/*.age` fallback), parses
+`KEY=VALUE` pairs, and writes a deterministic root `.env` (sorted keys, canonical quoting,
+restricted permissions, atomic rename). Use `--prod` to activate the production barrier check
+(REQ-13).
 
 ### `status`
 
@@ -217,7 +222,7 @@ gitvault harden
 ```
 
 Ensures `.env` and `.secrets/plain/` are in `.gitignore` and installs idempotent pre-commit /
-pre-push hooks that block accidental plaintext commits and detect drift.
+pre-push hooks. `pre-push` runs `gitvault status --no-prompt --fail-if-dirty` to block drift.
 
 ### `run`
 
@@ -264,7 +269,7 @@ gitvault recipient list              # show current recipients
 gitvault rotate [--identity <KEY_FILE>]
 ```
 
-Re-encrypts every `secrets/*.age` file with the current `.secrets/recipients` list (REQ-38).
+Re-encrypts every `secrets/**/*.age` file with the current `.secrets/recipients` list (REQ-38).
 Run after adding or removing a recipient to enforce the new access set.
 
 ### `keyring`

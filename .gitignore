@@ -11,3 +11,5 @@ dist/
 cert.p12
 build.keychain-db
 build.keychain
+.env
+.secrets/plain/

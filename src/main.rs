@@ -6,6 +6,7 @@ mod env;
 mod error;
 mod keyring_store;
 mod materialize;
+mod permissions;
 mod repo;
 mod run;
 mod structured;
@@ -18,12 +19,19 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::OnceLock;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandOutcome {
+    Success,
+    Exit(i32),
+}
+
 fn main() {
     let cli = Cli::parse();
 
     let result = run(cli);
     match result {
-        Ok(()) => process::exit(error::EXIT_SUCCESS),
+        Ok(CommandOutcome::Success) => process::exit(error::EXIT_SUCCESS),
+        Ok(CommandOutcome::Exit(code)) => process::exit(code),
         Err(e) => {
             eprintln!("Error: {e}");
             process::exit(e.exit_code());
@@ -31,47 +39,59 @@ fn main() {
     }
 }
 
-fn run(mut cli: Cli) -> Result<(), GitvaultError> {
-    // REQ-48: CI=true auto-enables non-interactive mode
-    if !cli.no_prompt && std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false) {
-        cli.no_prompt = true;
-    }
+fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
+    cli.no_prompt = resolve_no_prompt(cli.no_prompt);
     match cli.command {
         Commands::Encrypt {
             file,
             recipients,
             fields,
             value_only,
-        } => cmd_encrypt(
-            file,
-            recipients,
-            fields,
-            value_only,
-            cli.json,
-            cli.no_prompt,
-        ),
+        } => {
+            cmd_encrypt(
+                file,
+                recipients,
+                fields,
+                value_only,
+                cli.json,
+                cli.no_prompt,
+            )?;
+            Ok(CommandOutcome::Success)
+        }
         Commands::Decrypt {
             file,
             identity,
             output,
             fields,
             reveal,
-        } => cmd_decrypt(
-            file,
-            identity,
-            output,
-            fields,
-            reveal,
-            cli.json,
-            cli.no_prompt,
-        ),
+        } => {
+            cmd_decrypt(
+                file,
+                identity,
+                output,
+                fields,
+                reveal,
+                cli.json,
+                cli.no_prompt,
+            )?;
+            Ok(CommandOutcome::Success)
+        }
         Commands::Materialize {
             env,
             identity,
             prod,
-        } => cmd_materialize(env, identity, prod, cli.json, cli.no_prompt),
-        Commands::Status { fail_if_dirty } => cmd_status(cli.json, fail_if_dirty),
-        Commands::Harden => cmd_harden(cli.json),
+        } => {
+            cmd_materialize(env, identity, prod, cli.json, cli.no_prompt)?;
+            Ok(CommandOutcome::Success)
+        }
+        Commands::Status { fail_if_dirty } => {
+            cmd_status(cli.json, fail_if_dirty)?;
+            Ok(CommandOutcome::Success)
+        }
+        Commands::Harden => {
+            cmd_harden(cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
         Commands::Run {
             env,
             identity,
@@ -89,13 +109,36 @@ fn run(mut cli: Cli) -> Result<(), GitvaultError> {
             cli.json,
             cli.no_prompt,
         ),
-        Commands::AllowProd { ttl } => cmd_allow_prod(ttl, cli.json),
+        Commands::AllowProd { ttl } => {
+            cmd_allow_prod(ttl, cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
         Commands::MergeDriver { base, ours, theirs } => cmd_merge_driver(base, ours, theirs),
-        Commands::Recipient { action } => cmd_recipient(action, cli.json),
-        Commands::Rotate { identity } => cmd_rotate(identity, cli.json),
-        Commands::Keyring { action } => cmd_keyring(action, cli.json),
-        Commands::Check { env, identity } => cmd_check(env, identity, cli.json),
+        Commands::Recipient { action } => {
+            cmd_recipient(action, cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
+        Commands::Rotate { identity } => {
+            cmd_rotate(identity, cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
+        Commands::Keyring { action } => {
+            cmd_keyring(action, cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
+        Commands::Check { env, identity } => {
+            cmd_check(env, identity, cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
     }
+}
+
+fn resolve_no_prompt(no_prompt: bool) -> bool {
+    no_prompt || ci_is_non_interactive()
+}
+
+fn ci_is_non_interactive() -> bool {
+    std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false)
 }
 
 /// Find the repository root by walking up from cwd looking for .git
@@ -243,9 +286,10 @@ fn cmd_encrypt(
         .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
         .to_string_lossy();
     let out_name = format!("{filename}.age");
+    let active_env = env::resolve_env(&repo_root);
 
-    repo::ensure_dirs(&repo_root, "dev")?;
-    let out_path = repo::get_encrypted_path(&repo_root, &out_name);
+    repo::ensure_dirs(&repo_root, &active_env)?;
+    let out_path = repo::get_env_encrypted_path(&repo_root, &active_env, &out_name);
 
     // REQ-42: prevent path traversal
     repo::validate_write_path(&repo_root, &out_path)?;
@@ -369,28 +413,22 @@ fn cmd_materialize(
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
 
-    let secrets_dir = repo_root.join(repo::SECRETS_DIR);
     let mut secrets: Vec<(String, String)> = Vec::new();
 
-    if secrets_dir.exists() {
-        for entry in std::fs::read_dir(&secrets_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("age") {
-                let ciphertext = std::fs::read(&path)?;
-                match crypto::decrypt(&identity, &ciphertext) {
-                    Ok(plaintext) => {
-                        let text = String::from_utf8_lossy(&plaintext);
-                        secrets.extend(parse_env_pairs(&text)?);
-                    }
-                    // REQ-40: fail closed on any decryption error
-                    Err(e) => {
-                        return Err(GitvaultError::Decryption(format!(
-                            "Failed to decrypt {}: {e}",
-                            path.display()
-                        )));
-                    }
-                }
+    let encrypted_files = repo::list_encrypted_files_for_env(&repo_root, &env)?;
+    for path in encrypted_files {
+        let ciphertext = std::fs::read(&path)?;
+        match crypto::decrypt(&identity, &ciphertext) {
+            Ok(plaintext) => {
+                let text = String::from_utf8_lossy(&plaintext);
+                secrets.extend(parse_env_pairs(&text)?);
+            }
+            // REQ-40: fail closed on any decryption error
+            Err(e) => {
+                return Err(GitvaultError::Decryption(format!(
+                    "Failed to decrypt {}: {e}",
+                    path.display()
+                )));
             }
         }
     }
@@ -462,7 +500,7 @@ fn cmd_run(
     command: Vec<String>,
     _json: bool,
     no_prompt: bool,
-) -> Result<(), GitvaultError> {
+) -> Result<CommandOutcome, GitvaultError> {
     if command.is_empty() {
         return Err(GitvaultError::Usage(
             "No command specified after --".to_string(),
@@ -479,28 +517,22 @@ fn cmd_run(
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
 
-    let secrets_dir = repo_root.join(repo::SECRETS_DIR);
     let mut secrets: Vec<(String, String)> = Vec::new();
 
-    if secrets_dir.exists() {
-        for entry in std::fs::read_dir(&secrets_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("age") {
-                let ciphertext = std::fs::read(&path)?;
-                match crypto::decrypt(&identity, &ciphertext) {
-                    Ok(plaintext) => {
-                        let text = String::from_utf8_lossy(&plaintext);
-                        secrets.extend(parse_env_pairs(&text)?);
-                    }
-                    // REQ-40: fail closed on any decryption error
-                    Err(e) => {
-                        return Err(GitvaultError::Decryption(format!(
-                            "Failed to decrypt {}: {e}",
-                            path.display()
-                        )));
-                    }
-                }
+    let encrypted_files = repo::list_encrypted_files_for_env(&repo_root, &env)?;
+    for path in encrypted_files {
+        let ciphertext = std::fs::read(&path)?;
+        match crypto::decrypt(&identity, &ciphertext) {
+            Ok(plaintext) => {
+                let text = String::from_utf8_lossy(&plaintext);
+                secrets.extend(parse_env_pairs(&text)?);
+            }
+            // REQ-40: fail closed on any decryption error
+            Err(e) => {
+                return Err(GitvaultError::Decryption(format!(
+                    "Failed to decrypt {}: {e}",
+                    path.display()
+                )));
             }
         }
     }
@@ -516,7 +548,7 @@ fn cmd_run(
 
     // REQ-22, REQ-23: inject and run
     let exit_code = run::run_command(&secrets, cmd, args, clear_env, &pass_vars)?;
-    std::process::exit(exit_code);
+    Ok(CommandOutcome::Exit(exit_code))
 }
 
 /// Write a timed production allow token (REQ-14)
@@ -531,7 +563,11 @@ fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
 }
 
 /// Run as git merge driver for .env files (REQ-34)
-fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), GitvaultError> {
+fn cmd_merge_driver(
+    base: String,
+    ours: String,
+    theirs: String,
+) -> Result<CommandOutcome, GitvaultError> {
     fn parse_env(
         content: &str,
     ) -> Result<std::collections::HashMap<String, String>, GitvaultError> {
@@ -633,13 +669,18 @@ fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), Gi
     }
 
     let merged_content = output_lines.join("\n") + "\n";
-    std::fs::write(&ours, &merged_content)?;
+    let ours_path = std::path::PathBuf::from(&ours);
+    let tmp =
+        tempfile::NamedTempFile::new_in(ours_path.parent().unwrap_or(std::path::Path::new(".")))?;
+    std::fs::write(tmp.path(), &merged_content)?;
+    tmp.persist(&ours_path)
+        .map_err(|e| GitvaultError::Io(e.error))?;
 
     if has_conflict {
-        process::exit(1);
+        return Ok(CommandOutcome::Exit(1));
     }
 
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 /// Manage persistent recipients (REQ-37)
@@ -694,30 +735,22 @@ fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<(), GitvaultE
     let identity = crypto::parse_identity(&identity_str)?;
 
     let recipient_keys = resolve_recipient_keys(&repo_root, vec![])?;
-    let secrets_dir = repo_root.join(repo::SECRETS_DIR);
     let mut rotated = 0usize;
 
-    if secrets_dir.exists() {
-        for entry in std::fs::read_dir(&secrets_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("age") {
-                let ciphertext = std::fs::read(&path)?;
-                let plaintext = crypto::decrypt(&identity, &ciphertext)?;
-                // Re-parse recipients fresh for each file (Recipient is not Clone)
-                let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
-                    .iter()
-                    .map(|k| {
-                        Ok(Box::new(crypto::parse_recipient(k)?) as Box<dyn age::Recipient + Send>)
-                    })
-                    .collect::<Result<Vec<_>, GitvaultError>>()?;
-                let new_ciphertext = crypto::encrypt(recipients, &plaintext)?;
-                let tmp = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-                std::fs::write(tmp.path(), &new_ciphertext)?;
-                tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
-                rotated += 1;
-            }
-        }
+    let encrypted_files = repo::list_all_encrypted_files(&repo_root)?;
+    for path in encrypted_files {
+        let ciphertext = std::fs::read(&path)?;
+        let plaintext = crypto::decrypt(&identity, &ciphertext)?;
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
+            .iter()
+            .map(|k| Ok(Box::new(crypto::parse_recipient(k)?) as Box<dyn age::Recipient + Send>))
+            .collect::<Result<Vec<_>, GitvaultError>>()?;
+        let new_ciphertext = crypto::encrypt(recipients, &plaintext)?;
+        let tmp =
+            tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
+        std::fs::write(tmp.path(), &new_ciphertext)?;
+        tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
+        rotated += 1;
     }
     output_success(
         &format!(
@@ -731,15 +764,36 @@ fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<(), GitvaultE
 
 /// Manage identity key in OS keyring (REQ-39)
 fn cmd_keyring(action: KeyringAction, json: bool) -> Result<(), GitvaultError> {
+    cmd_keyring_with_ops(
+        action,
+        json,
+        keyring_store::keyring_set,
+        keyring_store::keyring_get,
+        keyring_store::keyring_delete,
+    )
+}
+
+fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
+    action: KeyringAction,
+    json: bool,
+    keyring_set_fn: SetFn,
+    keyring_get_fn: GetFn,
+    keyring_delete_fn: DeleteFn,
+) -> Result<(), GitvaultError>
+where
+    SetFn: Fn(&str) -> Result<(), String>,
+    GetFn: Fn() -> Result<String, String>,
+    DeleteFn: Fn() -> Result<(), String>,
+{
     match action {
         KeyringAction::Set { identity } => {
             let key = load_identity(identity)?;
-            keyring_store::keyring_set(&key)
+            keyring_set_fn(&key)
                 .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
             output_success("Identity stored in OS keyring.", json);
         }
         KeyringAction::Get => {
-            let key = keyring_store::keyring_get()
+            let key = keyring_get_fn()
                 .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
             let identity = crypto::parse_identity(&key)?;
             let pubkey = identity.to_public().to_string();
@@ -750,8 +804,7 @@ fn cmd_keyring(action: KeyringAction, json: bool) -> Result<(), GitvaultError> {
             }
         }
         KeyringAction::Delete => {
-            keyring_store::keyring_delete()
-                .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
+            keyring_delete_fn().map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
             output_success("Identity removed from OS keyring.", json);
         }
     }
@@ -784,16 +837,8 @@ fn cmd_check(
         })?;
     }
 
-    // Check 4: secrets dir exists (warning only)
-    let secrets_dir = repo_root.join(repo::SECRETS_DIR);
-    let secrets_count = if secrets_dir.exists() {
-        std::fs::read_dir(&secrets_dir)?
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("age"))
-            .count()
-    } else {
-        0
-    };
+    // Check 4: secrets count for active env (with legacy fallback)
+    let secrets_count = repo::list_encrypted_files_for_env(&repo_root, &env)?.len();
 
     if json {
         println!(
@@ -819,6 +864,13 @@ fn cmd_check(
 
 /// Load identity key string from file path or GITVAULT_IDENTITY env var
 fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
+    load_identity_with(path, keyring_store::keyring_get)
+}
+
+fn load_identity_with<F>(path: Option<String>, keyring_get_fn: F) -> Result<String, GitvaultError>
+where
+    F: Fn() -> Result<String, String>,
+{
     if let Some(p) = path {
         return load_identity_source(&p, "--identity");
     }
@@ -827,8 +879,7 @@ fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
     }
     // REQ-39: load from OS keyring if GITVAULT_KEYRING=1
     if std::env::var("GITVAULT_KEYRING").as_deref() == Ok("1") {
-        return keyring_store::keyring_get()
-            .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")));
+        return keyring_get_fn().map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")));
     }
     Err(GitvaultError::Usage(
         "No identity provided. Use --identity <file>, set GITVAULT_IDENTITY, or use GITVAULT_KEYRING=1".to_string(),
@@ -872,11 +923,108 @@ mod tests {
     use super::*;
     use age::secrecy::ExposeSecret;
     use age::x25519;
+    use std::process::Command;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::NamedTempFile;
     use tempfile::TempDir;
 
+    fn global_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct CwdGuard {
+        previous: std::path::PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter(path: &Path) -> Self {
+            let previous = std::env::current_dir().expect("current dir should be readable");
+            std::env::set_current_dir(path).expect("should switch cwd");
+            Self { previous }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.previous);
+        }
+    }
+
+    fn init_git_repo(path: &Path) {
+        let status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .expect("git init should run");
+        assert!(status.success());
+    }
+
+    fn setup_identity_file() -> (NamedTempFile, x25519::Identity) {
+        let identity = x25519::Identity::generate();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+        std::fs::write(identity_file.path(), identity.to_string().expose_secret())
+            .expect("identity should be written");
+        (identity_file, identity)
+    }
+
+    fn with_identity_env<T>(identity_path: &Path, f: impl FnOnce() -> T) -> T {
+        with_env_var(
+            "GITVAULT_IDENTITY",
+            Some(identity_path.to_string_lossy().as_ref()),
+            f,
+        )
+    }
+
+    fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let previous = std::env::var(name).ok();
+        match value {
+            Some(v) => unsafe {
+                std::env::set_var(name, v);
+            },
+            None => unsafe {
+                std::env::remove_var(name);
+            },
+        }
+
+        let out = f();
+
+        match previous {
+            Some(v) => unsafe {
+                std::env::set_var(name, v);
+            },
+            None => unsafe {
+                std::env::remove_var(name);
+            },
+        }
+
+        out
+    }
+
+    fn write_encrypted_env_file(
+        repo_root: &Path,
+        env_name: &str,
+        file_name: &str,
+        identity: &x25519::Identity,
+        plaintext: &str,
+    ) {
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext =
+            crypto::encrypt(recipients, plaintext.as_bytes()).expect("encryption should succeed");
+        let out_path = repo::get_env_encrypted_path(repo_root, env_name, file_name);
+        std::fs::create_dir_all(
+            out_path
+                .parent()
+                .expect("encrypted output should have parent directory"),
+        )
+        .expect("env secrets directory should be created");
+        std::fs::write(out_path, ciphertext).expect("ciphertext should be written");
+    }
+
     #[test]
     fn test_resolve_recipient_keys_defaults_to_local_identity_public_key() {
+        let _lock = global_test_lock().lock().unwrap();
         let identity = x25519::Identity::generate();
         let identity_secret = identity.to_string();
         let expected_recipient = identity.to_public().to_string();
@@ -904,6 +1052,7 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_defaults_from_identity_file_path() {
+        let _lock = global_test_lock().lock().unwrap();
         let identity = x25519::Identity::generate();
         let identity_secret = identity.to_string();
         let expected_recipient = identity.to_public().to_string();
@@ -938,6 +1087,7 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_fails_without_identity_source() {
+        let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         let previous = std::env::var("GITVAULT_IDENTITY").ok();
         let previous_keyring = std::env::var("GITVAULT_KEYRING").ok();
@@ -975,6 +1125,7 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_fails_with_malformed_identity_key() {
+        let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         let previous = std::env::var("GITVAULT_IDENTITY").ok();
         unsafe {
@@ -1145,26 +1296,794 @@ mod tests {
 
     #[test]
     fn test_ci_env_sets_no_prompt() {
-        // The CI=1 logic is: if !cli.no_prompt && CI is non-empty, set no_prompt = true
-        let ci_is_set = std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false);
-        // Simulate what run() does
-        let mut no_prompt = false;
-        if !no_prompt && ci_is_set {
-            no_prompt = true;
+        with_env_var("CI", Some("1"), || {
+            assert!(resolve_no_prompt(false));
+            assert!(resolve_no_prompt(true));
+            assert!(ci_is_non_interactive());
+        });
+
+        with_env_var("CI", None, || {
+            assert!(!resolve_no_prompt(false));
+            assert!(resolve_no_prompt(true));
+            assert!(!ci_is_non_interactive());
+        });
+    }
+
+    #[test]
+    fn test_parse_env_pairs_reports_invalid_content() {
+        let result = parse_env_pairs("NOT VALID\n=A");
+        assert!(matches!(result, Err(GitvaultError::Usage(_))));
+    }
+
+    #[test]
+    fn test_cmd_harden_and_status_in_git_repo() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        cmd_harden(false).expect("harden should succeed");
+        cmd_status(false, false).expect("status should succeed in clean repo");
+
+        let gitignore = std::fs::read_to_string(dir.path().join(".gitignore"))
+            .expect("gitignore should exist after harden");
+        assert!(gitignore.contains(".env"));
+        assert!(gitignore.contains(".secrets/plain/"));
+
+        let pre_push = std::fs::read_to_string(dir.path().join(".git/hooks/pre-push"))
+            .expect("pre-push hook should be created");
+        assert!(pre_push.contains("--fail-if-dirty"));
+    }
+
+    #[test]
+    fn test_cmd_allow_prod_and_check() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_allow_prod(30, false).expect("allow-prod should succeed");
+            cmd_check(None, None, true).expect("check should succeed with identity and clean repo");
+        });
+    }
+
+    #[test]
+    fn test_cmd_materialize_and_rotate_env_scoped() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        write_encrypted_env_file(
+            dir.path(),
+            "dev",
+            "app.env.age",
+            &identity,
+            "API_KEY=abc123\n",
+        );
+
+        with_identity_env(identity_file.path(), || {
+            cmd_materialize(None, None, false, false, true)
+                .expect("materialize should decrypt env-scoped secrets");
+            cmd_rotate(None, true).expect("rotate should process env-scoped files");
+        });
+
+        let materialized =
+            std::fs::read_to_string(dir.path().join(".env")).expect(".env should be created");
+        assert!(materialized.contains("API_KEY=\"abc123\""));
+    }
+
+    #[test]
+    fn test_cmd_recipient_add_list_remove() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let pubkey = x25519::Identity::generate().to_public().to_string();
+        cmd_recipient(
+            RecipientAction::Add {
+                pubkey: pubkey.clone(),
+            },
+            true,
+        )
+        .expect("add recipient should succeed");
+
+        cmd_recipient(RecipientAction::List, false).expect("list recipient should succeed");
+
+        cmd_recipient(
+            RecipientAction::Remove {
+                pubkey: pubkey.clone(),
+            },
+            false,
+        )
+        .expect("remove recipient should succeed");
+
+        let recipients = repo::read_recipients(dir.path()).expect("recipients should be readable");
+        assert!(recipients.is_empty());
+    }
+
+    #[test]
+    fn test_run_dispatch_check_and_status() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            let check_cli = Cli {
+                json: true,
+                no_prompt: true,
+                aws_profile: None,
+                aws_role_arn: None,
+                command: Commands::Check {
+                    env: None,
+                    identity: None,
+                },
+            };
+            let outcome = run(check_cli).expect("dispatch check should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+
+            let status_cli = Cli {
+                json: false,
+                no_prompt: true,
+                aws_profile: None,
+                aws_role_arn: None,
+                command: Commands::Status {
+                    fail_if_dirty: false,
+                },
+            };
+            let outcome = run(status_cli).expect("dispatch status should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
+
+    #[test]
+    fn test_run_dispatch_run_returns_exit_outcome() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        write_encrypted_env_file(dir.path(), "dev", "run.env.age", &identity, "X=1\n");
+
+        with_identity_env(identity_file.path(), || {
+            let cli = Cli {
+                json: false,
+                no_prompt: true,
+                aws_profile: None,
+                aws_role_arn: None,
+                command: Commands::Run {
+                    env: Some("dev".to_string()),
+                    identity: Some(identity_file.path().to_string_lossy().to_string()),
+                    prod: false,
+                    clear_env: false,
+                    pass: None,
+                    command: vec!["sh".to_string(), "-c".to_string(), "exit 7".to_string()],
+                },
+            };
+
+            let outcome = run(cli).expect("run dispatch should succeed");
+            assert_eq!(outcome, CommandOutcome::Exit(7));
+        });
+    }
+
+    #[test]
+    fn test_merge_driver_conflict_returns_exit_outcome() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().join("base.env");
+        let ours = dir.path().join("ours.env");
+        let theirs = dir.path().join("theirs.env");
+
+        std::fs::write(&base, "A=1\n").unwrap();
+        std::fs::write(&ours, "A=2\n").unwrap();
+        std::fs::write(&theirs, "A=3\n").unwrap();
+
+        let outcome = cmd_merge_driver(
+            base.to_string_lossy().to_string(),
+            ours.to_string_lossy().to_string(),
+            theirs.to_string_lossy().to_string(),
+        )
+        .expect("merge driver should return outcome");
+
+        assert_eq!(outcome, CommandOutcome::Exit(1));
+    }
+
+    #[test]
+    fn test_cmd_encrypt_rejects_age_input_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let in_path = dir.path().join("already.age");
+        std::fs::write(&in_path, b"x").unwrap();
+
+        let err = cmd_encrypt(
+            in_path.to_string_lossy().to_string(),
+            vec![],
+            None,
+            false,
+            true,
+            true,
+        )
+        .expect_err("encrypting .age input should fail");
+
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn test_cmd_encrypt_value_only_writes_in_place() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let recipient = identity.to_public().to_string();
+
+        let env_file = dir.path().join(".env.local");
+        std::fs::write(&env_file, "API_KEY=secret\n").unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_encrypt(
+                env_file.to_string_lossy().to_string(),
+                vec![recipient],
+                None,
+                true,
+                true,
+                true,
+            )
+            .expect("value-only encryption should succeed");
+        });
+
+        let updated = std::fs::read_to_string(&env_file).unwrap();
+        assert!(updated.contains("API_KEY=age:"));
+    }
+
+    #[test]
+    fn test_cmd_encrypt_then_decrypt_fields_roundtrip() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let recipient = identity.to_public().to_string();
+
+        let json_file = dir.path().join("config.json");
+        std::fs::write(&json_file, r#"{"secret":"abc","name":"demo"}"#).unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_encrypt(
+                json_file.to_string_lossy().to_string(),
+                vec![recipient.clone()],
+                Some("secret".to_string()),
+                false,
+                true,
+                true,
+            )
+            .expect("field encryption should succeed");
+
+            cmd_decrypt(
+                json_file.to_string_lossy().to_string(),
+                None,
+                None,
+                Some("secret".to_string()),
+                false,
+                true,
+                true,
+            )
+            .expect("field decryption should succeed");
+        });
+
+        let content = std::fs::read_to_string(&json_file).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(value["secret"], "abc");
+        assert_eq!(value["name"], "demo");
+    }
+
+    #[test]
+    fn test_cmd_run_empty_command_is_usage_error() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let err = cmd_run(None, None, false, false, None, vec![], false, true)
+            .expect_err("empty command should fail");
+
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn test_cmd_decrypt_reveal_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crypto::encrypt(recipients, b"TOP_SECRET=1\n").unwrap();
+        let encrypted_file = dir.path().join("secret.env.age");
+        std::fs::write(&encrypted_file, ciphertext).unwrap();
+
+        cmd_decrypt(
+            encrypted_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            None,
+            None,
+            true,
+            true,
+            true,
+        )
+        .expect("reveal mode should decrypt to stdout without error");
+    }
+
+    #[test]
+    fn test_cmd_decrypt_default_output_path_writes_plaintext() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crypto::encrypt(recipients, b"X=42\n").unwrap();
+        let encrypted_file = dir.path().join("app.env.age");
+        std::fs::write(&encrypted_file, ciphertext).unwrap();
+
+        cmd_decrypt(
+            encrypted_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            None,
+            None,
+            false,
+            true,
+            true,
+        )
+        .expect("default output decrypt should succeed");
+
+        let plain = std::fs::read_to_string(dir.path().join("app.env")).unwrap();
+        assert!(plain.contains("X=42"));
+    }
+
+    #[test]
+    fn test_cmd_materialize_fail_closed_on_invalid_ciphertext() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        let env_dir = dir.path().join("secrets/dev");
+        std::fs::create_dir_all(&env_dir).unwrap();
+        let bad_file = env_dir.join("broken.env.age");
+        std::fs::write(&bad_file, b"not-age-data").unwrap();
+
+        let err = cmd_materialize(
+            Some("dev".to_string()),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            false,
+            true,
+            true,
+        )
+        .expect_err("invalid ciphertext must fail closed");
+
+        match err {
+            GitvaultError::Decryption(message) => {
+                assert!(message.contains("Failed to decrypt"));
+            }
+            other => panic!("expected decryption error, got: {other:?}"),
         }
-        // If CI is set, no_prompt should be true; otherwise it stays false — either way no panic
-        if ci_is_set {
-            assert!(no_prompt, "CI env var should enable no_prompt");
-        } else {
-            assert!(!no_prompt, "no_prompt should stay false when CI is unset");
+    }
+
+    #[test]
+    fn test_cmd_run_fail_closed_on_invalid_ciphertext() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        let env_dir = dir.path().join("secrets/dev");
+        std::fs::create_dir_all(&env_dir).unwrap();
+        std::fs::write(env_dir.join("broken.env.age"), b"not-age-data").unwrap();
+
+        let err = cmd_run(
+            Some("dev".to_string()),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            false,
+            false,
+            None,
+            vec!["sh".to_string(), "-c".to_string(), "exit 0".to_string()],
+            true,
+            true,
+        )
+        .expect_err("run should fail closed on decrypt error");
+
+        assert!(matches!(err, GitvaultError::Decryption(_)));
+    }
+
+    #[test]
+    fn test_run_dispatch_encrypt_then_decrypt_arms() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let plain_file = dir.path().join("dispatch.txt");
+        std::fs::write(&plain_file, "DISPATCH=1\n").unwrap();
+
+        let encrypt_cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::Encrypt {
+                file: plain_file.to_string_lossy().to_string(),
+                recipients: vec![identity.to_public().to_string()],
+                fields: None,
+                value_only: false,
+            },
+        };
+        let encrypt_outcome = run(encrypt_cli).expect("encrypt dispatch should succeed");
+        assert_eq!(encrypt_outcome, CommandOutcome::Success);
+
+        let encrypted_path = dir.path().join("secrets/dev/dispatch.txt.age");
+        assert!(encrypted_path.exists());
+
+        let decrypt_cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::Decrypt {
+                file: encrypted_path.to_string_lossy().to_string(),
+                identity: Some(identity_file.path().to_string_lossy().to_string()),
+                output: Some(
+                    dir.path()
+                        .join("dispatch.out")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+                fields: None,
+                reveal: false,
+            },
+        };
+        let decrypt_outcome = run(decrypt_cli).expect("decrypt dispatch should succeed");
+        assert_eq!(decrypt_outcome, CommandOutcome::Success);
+
+        let decrypted = std::fs::read_to_string(dir.path().join("dispatch.out")).unwrap();
+        assert!(decrypted.contains("DISPATCH=1"));
+    }
+
+    #[test]
+    fn test_cmd_recipient_duplicate_add_fails() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let pubkey = x25519::Identity::generate().to_public().to_string();
+
+        cmd_recipient(
+            RecipientAction::Add {
+                pubkey: pubkey.clone(),
+            },
+            true,
+        )
+        .unwrap();
+
+        let err = cmd_recipient(RecipientAction::Add { pubkey }, true).unwrap_err();
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn test_cmd_recipient_remove_missing_fails() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let missing = x25519::Identity::generate().to_public().to_string();
+        let err = cmd_recipient(RecipientAction::Remove { pubkey: missing }, true).unwrap_err();
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn test_cmd_status_fail_if_dirty_returns_plaintext_leak() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        std::fs::create_dir_all(dir.path().join("secrets/dev")).unwrap();
+        std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
+
+        let err = cmd_status(true, true).unwrap_err();
+        assert!(matches!(err, GitvaultError::PlaintextLeak(_)));
+    }
+
+    #[test]
+    fn test_cmd_keyring_with_ops_success_paths() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let key = identity.to_string().expose_secret().to_string();
+
+        cmd_keyring_with_ops(
+            KeyringAction::Set {
+                identity: Some(identity_file.path().to_string_lossy().to_string()),
+            },
+            true,
+            |_value| Ok(()),
+            || Ok(key.clone()),
+            || Ok(()),
+        )
+        .unwrap();
+
+        cmd_keyring_with_ops(
+            KeyringAction::Get,
+            true,
+            |_value| Ok(()),
+            || Ok(key.clone()),
+            || Ok(()),
+        )
+        .unwrap();
+
+        cmd_keyring_with_ops(
+            KeyringAction::Delete,
+            true,
+            |_value| Ok(()),
+            || Ok(key.clone()),
+            || Ok(()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_cmd_keyring_with_ops_error_paths() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        let set_err = cmd_keyring_with_ops(
+            KeyringAction::Set {
+                identity: Some(identity_file.path().to_string_lossy().to_string()),
+            },
+            true,
+            |_value| Err("set-failed".to_string()),
+            || Ok("unused".to_string()),
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert!(matches!(set_err, GitvaultError::Other(_)));
+
+        let get_err = cmd_keyring_with_ops(
+            KeyringAction::Get,
+            true,
+            |_value| Ok(()),
+            || Err("get-failed".to_string()),
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert!(matches!(get_err, GitvaultError::Other(_)));
+
+        let delete_err = cmd_keyring_with_ops(
+            KeyringAction::Delete,
+            true,
+            |_value| Ok(()),
+            || Ok("unused".to_string()),
+            || Err("delete-failed".to_string()),
+        )
+        .unwrap_err();
+        assert!(matches!(delete_err, GitvaultError::Other(_)));
+    }
+
+    #[test]
+    fn test_with_env_var_restores_existing_value() {
+        let _lock = global_test_lock().lock().unwrap();
+        unsafe {
+            std::env::set_var("GITVAULT_TEST_VAR", "before");
+        }
+        let _ = with_env_var("GITVAULT_TEST_VAR", Some("during"), || {
+            std::env::var("GITVAULT_TEST_VAR").unwrap()
+        });
+        assert_eq!(
+            std::env::var("GITVAULT_TEST_VAR").unwrap(),
+            "before".to_string()
+        );
+        unsafe {
+            std::env::remove_var("GITVAULT_TEST_VAR");
+        }
+    }
+
+    #[test]
+    fn test_load_identity_with_uses_keyring_when_enabled() {
+        let _lock = global_test_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var("GITVAULT_IDENTITY");
+            std::env::set_var("GITVAULT_KEYRING", "1");
         }
 
-        // Also verify the logic directly with a forced value
-        let mut no_prompt2 = false;
-        let ci_forced = true;
-        if !no_prompt2 && ci_forced {
-            no_prompt2 = true;
+        let value = load_identity_with(None, || Ok("AGE-SECRET-KEY-TEST".to_string())).unwrap();
+
+        unsafe {
+            std::env::remove_var("GITVAULT_KEYRING");
         }
-        assert!(no_prompt2, "CI auto-detect logic should set no_prompt");
+        assert_eq!(value, "AGE-SECRET-KEY-TEST");
+    }
+
+    #[test]
+    fn test_load_identity_with_maps_keyring_error() {
+        let _lock = global_test_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var("GITVAULT_IDENTITY");
+            std::env::set_var("GITVAULT_KEYRING", "1");
+        }
+
+        let err = load_identity_with(None, || Err("no key".to_string())).unwrap_err();
+
+        unsafe {
+            std::env::remove_var("GITVAULT_KEYRING");
+        }
+        assert!(matches!(err, GitvaultError::Other(_)));
+    }
+
+    #[test]
+    fn test_cmd_check_plain_output_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_check(None, None, false).expect("plain check should succeed");
+        });
+    }
+
+    #[test]
+    fn test_cmd_check_invalid_recipient_fails() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        let recipients_path = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(recipients_path.parent().unwrap()).unwrap();
+        std::fs::write(&recipients_path, "not-a-valid-recipient\n").unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_check(None, None, true).unwrap_err();
+            assert!(matches!(err, GitvaultError::Usage(_)));
+        });
+    }
+
+    #[test]
+    fn test_run_dispatch_allow_prod_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::AllowProd { ttl: 60 },
+        };
+
+        let outcome = run(cli).expect("allow-prod dispatch should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+        assert!(dir.path().join(".secrets/.prod-token").exists());
+    }
+
+    #[test]
+    fn test_run_dispatch_rotate_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        write_encrypted_env_file(dir.path(), "dev", "rotate.env.age", &identity, "A=1\n");
+
+        with_identity_env(identity_file.path(), || {
+            let cli = Cli {
+                json: true,
+                no_prompt: true,
+                aws_profile: None,
+                aws_role_arn: None,
+                command: Commands::Rotate { identity: None },
+            };
+
+            let outcome = run(cli).expect("rotate dispatch should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
+
+    #[test]
+    fn test_run_dispatch_merge_driver_outcomes() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+
+        let base = dir.path().join("base.env");
+        let ours = dir.path().join("ours.env");
+        let theirs = dir.path().join("theirs.env");
+
+        std::fs::write(&base, "A=1\n").unwrap();
+        std::fs::write(&ours, "A=1\n").unwrap();
+        std::fs::write(&theirs, "A=2\n").unwrap();
+
+        let clean_cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::MergeDriver {
+                base: base.to_string_lossy().to_string(),
+                ours: ours.to_string_lossy().to_string(),
+                theirs: theirs.to_string_lossy().to_string(),
+            },
+        };
+        let clean_outcome = run(clean_cli).expect("merge-driver clean dispatch should succeed");
+        assert_eq!(clean_outcome, CommandOutcome::Success);
+
+        std::fs::write(&base, "A=1\n").unwrap();
+        std::fs::write(&ours, "A=2\n").unwrap();
+        std::fs::write(&theirs, "A=3\n").unwrap();
+
+        let conflict_cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::MergeDriver {
+                base: base.to_string_lossy().to_string(),
+                ours: ours.to_string_lossy().to_string(),
+                theirs: theirs.to_string_lossy().to_string(),
+            },
+        };
+        let conflict_outcome =
+            run(conflict_cli).expect("merge-driver conflict dispatch should return outcome");
+        assert_eq!(conflict_outcome, CommandOutcome::Exit(1));
+    }
+
+    #[test]
+    fn test_run_dispatch_keyring_set_invalid_identity_errors() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            command: Commands::Keyring {
+                action: KeyringAction::Set {
+                    identity: Some("/path/that/does/not/exist".to_string()),
+                },
+            },
+        };
+
+        let err = run(cli).expect_err("invalid identity source should fail keyring set");
+        assert!(matches!(err, GitvaultError::Usage(_)));
     }
 }

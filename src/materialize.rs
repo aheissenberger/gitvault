@@ -4,6 +4,7 @@ use std::path::Path;
 use tempfile::NamedTempFile;
 
 use crate::error::GitvaultError;
+use crate::permissions;
 
 /// Entries that must be in .gitignore for safety
 pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[".env", ".secrets/plain/"];
@@ -37,21 +38,18 @@ pub fn materialize_env_file(
     tmp.write_all(content.as_bytes())
         .map_err(GitvaultError::Io)?;
 
-    // REQ-18: set 0600 permissions before persisting
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let file = tmp.as_file();
-        let mut perms = file.metadata().map_err(GitvaultError::Io)?.permissions();
-        perms.set_mode(0o600);
-        file.set_permissions(perms).map_err(GitvaultError::Io)?;
-    }
-
     // REQ-17: atomically rename to target (persist moves the temp file)
     tmp.persist(&env_path)
         .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
 
+    // REQ-18: restrict permissions on final .env path
+    enforce_restricted_env_permissions(&env_path)?;
+
     Ok(())
+}
+
+fn enforce_restricted_env_permissions(path: &Path) -> Result<(), GitvaultError> {
+    permissions::enforce_owner_rw(path, ".env")
 }
 
 /// Format key=value pairs as canonical .env content.
@@ -95,7 +93,19 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
         String::new()
     };
 
-    let mut content = existing.clone();
+    if let Some(content) = merge_gitignore_entries(&existing, entries) {
+        let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
+        tmp.write_all(content.as_bytes())
+            .map_err(GitvaultError::Io)?;
+        tmp.persist(&gitignore_path)
+            .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
+    }
+
+    Ok(())
+}
+
+fn merge_gitignore_entries(existing: &str, entries: &[&str]) -> Option<String> {
+    let mut content = existing.to_string();
     let mut changed = false;
 
     for entry in entries {
@@ -110,15 +120,7 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
         }
     }
 
-    if changed {
-        let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
-        tmp.write_all(content.as_bytes())
-            .map_err(GitvaultError::Io)?;
-        tmp.persist(&gitignore_path)
-            .map_err(|e| GitvaultError::Io(std::io::Error::other(e.to_string())))?;
-    }
-
-    Ok(())
+    if changed { Some(content) } else { None }
 }
 
 #[cfg(test)]
@@ -254,5 +256,23 @@ mod tests {
         assert!(dir.path().join(".gitignore").exists());
         let content = fs::read_to_string(dir.path().join(".gitignore")).unwrap();
         assert!(content.contains(".env"));
+    }
+
+    #[test]
+    fn test_merge_gitignore_entries_adds_newline_before_append() {
+        let merged = merge_gitignore_entries("target", &[".env"]).unwrap();
+        assert_eq!(merged, "target\n.env\n");
+    }
+
+    #[test]
+    fn test_merge_gitignore_entries_returns_none_when_unchanged() {
+        let merged = merge_gitignore_entries(".env\n", &[".env"]);
+        assert!(merged.is_none());
+    }
+
+    #[test]
+    fn test_escape_env_value_escapes_control_and_dollar() {
+        let escaped = escape_env_value("a$b\nc\rd");
+        assert_eq!(escaped, "a\\$b\\nc\\rd");
     }
 }

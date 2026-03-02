@@ -10,7 +10,7 @@ scope:
   avoid: ["target/**"]
 acceptance:
   - id: "AC1"
-    text: "Defines execution order with dependencies for REQ-1..REQ-57."
+    text: "Defines execution order with dependencies for REQ-1..REQ-58."
   - id: "AC2"
     text: "Provides per-REQ effort estimates and parallelization guidance for multi-agent delivery."
 verification:
@@ -63,7 +63,7 @@ Provide a practical assignment and sequencing plan for implementing [00-index.md
 - Depends on: Waves 3-5
 
 ### Wave 7 (Release integrity)
-- REQ-54 (M), REQ-55 (S), REQ-56 (S)
+- REQ-54 (M), REQ-55 (S), REQ-56 (S), REQ-58 (S)
 - Depends on: Waves 0-6
 
 ## Suggested 6-Agent Split
@@ -89,7 +89,7 @@ Provide a practical assignment and sequencing plan for implementing [00-index.md
 - Owns diff quality, merge mechanics, and key lifecycle.
 
 ### Agent F: Security and Automation Contracts
-- REQ-40..REQ-48, REQ-50, REQ-54, REQ-55, REQ-56, REQ-57
+- REQ-40..REQ-48, REQ-50, REQ-54, REQ-55, REQ-56, REQ-57, REQ-58
 - Owns fail-closed semantics, CLI contracts, CI behavior, and release integrity.
 
 ## Merge Strategy

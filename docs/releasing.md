@@ -71,14 +71,30 @@ After tag push or manual dispatch, verify this workflow:
 - **Unified release workflow**: [build.yml](../.github/workflows/build.yml)
   - Triggers only on tag pushes matching `v*` and manual dispatch.
   - Runs `cargo fmt`, `clippy`, tests, and tag consistency checks.
+  - Enforces 100% Rust line coverage with `cargo llvm-cov --workspace --all-features --fail-under-lines 100`.
   - Builds release binaries for Linux, Windows, and macOS (arm64 + x86_64).
+  - Signs each release artifact with Sigstore Cosign (keyless) and verifies signatures in CI.
   - Uploads binaries as workflow artifacts.
+  - Publishes binaries plus `.sig` and `.pem` signature metadata to GitHub Releases.
   - Publishes release assets automatically on tag runs.
   - On manual runs, publishes release assets only when `publish_release=true`.
 
 ### Required secrets
 
-No repository secrets are required for the current unified workflow.
+- No signing key secret is required (Cosign keyless uses GitHub OIDC).
+- Homebrew tap automation still requires `HOMEBREW_TAP_TOKEN`.
+
+## Signature verification
+
+Example verification for a published artifact:
+
+```bash
+cosign verify-blob gitvault-linux-x86_64 \
+  --signature gitvault-linux-x86_64.sig \
+  --certificate gitvault-linux-x86_64.pem \
+  --certificate-identity-regexp "https://github.com/aheissenberger/gitvault/.github/workflows/build.yml@.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
 
 ## 6) Validate published binary version output
 

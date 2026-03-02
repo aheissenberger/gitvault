@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-011"
 title: "Security failure modes and write guarantees"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

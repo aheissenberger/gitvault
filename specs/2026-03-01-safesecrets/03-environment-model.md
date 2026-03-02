@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-003"
 title: "Environment resolution and worktree isolation"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

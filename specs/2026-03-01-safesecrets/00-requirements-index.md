@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**"]
 acceptance:
   - id: "AC1"
-    text: "Each REQ identifier from REQ-1 to REQ-57 maps to exactly one individual spec file."
+    text: "Each REQ identifier from REQ-1 to REQ-58 maps to exactly one individual spec file."
   - id: "AC2"
     text: "All individual spec files contain valid frontmatter accepted by spec verifier."
 verification:
@@ -53,7 +53,7 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-48..REQ-50 -> `13-cicd-compatibility.md`
 - REQ-51..REQ-53 -> `14-performance.md`
 - Testing matrix section + Rust full-coverage requirement for `*.rs` -> `15-testing-matrix.md`
-- REQ-54..REQ-55 -> `16-release-integrity.md`
+- REQ-54..REQ-55, REQ-58 -> `16-release-integrity.md`
 - REQ-56 -> `18-requirement-governance.md`
 
 ## Acceptance Criteria

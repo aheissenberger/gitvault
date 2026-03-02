@@ -458,6 +458,7 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use age::secrecy::SecretString;
     use age::x25519;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -673,5 +674,191 @@ mod tests {
             decrypted.contains("DB_HOST=localhost"),
             "other assignment formatting should remain stable"
         );
+    }
+
+    #[test]
+    fn test_parse_env_pair_from_line_invalid_returns_none() {
+        assert!(parse_env_pair_from_line("not-an-assignment").is_none());
+    }
+
+    #[test]
+    fn test_rewrite_env_assignment_line_without_equals_is_unchanged() {
+        let line = "just-text";
+        assert_eq!(rewrite_env_assignment_line(line, "new"), line);
+    }
+
+    #[test]
+    fn test_encrypt_fields_unsupported_extension_errors() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        let mut tmp = NamedTempFile::with_suffix(".txt").unwrap();
+        writeln!(tmp, "secret=value").unwrap();
+
+        let err = encrypt_fields(tmp.path(), &["secret"], &identity, &keys).unwrap_err();
+        assert!(err.to_string().contains("Unsupported file format"));
+    }
+
+    #[test]
+    fn test_decrypt_fields_unsupported_extension_errors() {
+        let identity = gen_identity();
+
+        let mut tmp = NamedTempFile::with_suffix(".txt").unwrap();
+        writeln!(tmp, "secret=value").unwrap();
+
+        let err = decrypt_fields(tmp.path(), &["secret"], &identity).unwrap_err();
+        assert!(err.to_string().contains("Unsupported file format"));
+    }
+
+    #[test]
+    fn test_encrypt_env_values_keeps_invalid_assignment_lines() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let content = "# header\nINVALID LINE\nKEY=value\n";
+
+        let encrypted = encrypt_env_values(content, &identity, &keys).unwrap();
+
+        assert!(encrypted.contains("INVALID LINE"));
+        assert!(encrypted.contains("KEY=age:"));
+    }
+
+    #[test]
+    fn test_encrypt_env_values_reencrypts_invalid_prefixed_payload() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let content = "KEY=age:not-base64\n";
+
+        let encrypted = encrypt_env_values(content, &identity, &keys).unwrap();
+
+        assert_ne!(encrypted, content);
+        assert!(encrypted.starts_with("KEY=age:"));
+        assert!(!encrypted.contains("not-base64"));
+    }
+
+    #[test]
+    fn test_decrypt_env_values_preserves_unencrypted_assignments() {
+        let identity = gen_identity();
+        let content = "KEY=plain\n";
+
+        let decrypted = decrypt_env_values(content, &identity).unwrap();
+
+        assert_eq!(decrypted, content);
+    }
+
+    #[test]
+    fn test_encrypt_env_values_is_idempotent_for_existing_ciphertext() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let content = "KEY=plain\n";
+
+        let first = encrypt_env_values(content, &identity, &keys).unwrap();
+        let second = encrypt_env_values(&first, &identity, &keys).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    fn encrypt_passphrase_armor(plaintext: &[u8]) -> String {
+        let encryptor = age::Encryptor::with_user_passphrase(SecretString::from("pw".to_string()));
+        let mut output = Vec::new();
+        let armor =
+            age::armor::ArmoredWriter::wrap_output(&mut output, age::armor::Format::AsciiArmor)
+                .unwrap();
+        let mut writer = encryptor.wrap_output(armor).unwrap();
+        writer.write_all(plaintext).unwrap();
+        let armor = writer.finish().unwrap();
+        armor.finish().unwrap();
+        String::from_utf8(output).unwrap()
+    }
+
+    fn encrypt_passphrase_binary_b64(plaintext: &[u8]) -> String {
+        let encryptor = age::Encryptor::with_user_passphrase(SecretString::from("pw".to_string()));
+        let mut output = Vec::new();
+        let mut writer = encryptor.wrap_output(&mut output).unwrap();
+        writer.write_all(plaintext).unwrap();
+        writer.finish().unwrap();
+        base64::engine::general_purpose::STANDARD.encode(output)
+    }
+
+    #[test]
+    fn test_decrypt_armor_rejects_passphrase_ciphertext() {
+        let identity = gen_identity();
+        let armored = encrypt_passphrase_armor(b"secret");
+
+        let err = decrypt_armor(&armored, &identity).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Passphrase-encrypted files not supported")
+        );
+    }
+
+    #[test]
+    fn test_decrypt_binary_b64_rejects_passphrase_ciphertext() {
+        let identity = gen_identity();
+        let encoded = encrypt_passphrase_binary_b64(b"secret");
+
+        let err = decrypt_binary_b64(&encoded, &identity).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Passphrase-encrypted not supported")
+        );
+    }
+
+    #[test]
+    fn test_field_mut_helpers_return_none_for_scalar_roots() {
+        let mut json_value = serde_json::Value::String("x".to_string());
+        assert!(json_field_mut(&mut json_value, &["a"]).is_none());
+
+        let mut yaml_value = serde_yaml::Value::String("x".to_string());
+        assert!(yaml_field_mut(&mut yaml_value, &["a"]).is_none());
+
+        let mut toml_value = toml::Value::String("x".to_string());
+        assert!(toml_field_mut(&mut toml_value, &["a"]).is_none());
+    }
+
+    #[test]
+    fn test_encrypt_field_helpers_ignore_missing_paths() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        let json = r#"{"outer":{"present":"x"}}"#;
+        let out_json = encrypt_fields_json(json, &["outer.missing"], &keys).unwrap();
+        assert!(out_json.contains("\"present\": \"x\""));
+
+        let yaml = "outer:\n  present: x\n";
+        let out_yaml = encrypt_fields_yaml(yaml, &["outer.missing"], &keys).unwrap();
+        assert!(out_yaml.contains("present: x"));
+
+        let toml = "[outer]\npresent = \"x\"\n";
+        let out_toml = encrypt_fields_toml(toml, &["outer.missing"], &keys).unwrap();
+        assert!(out_toml.contains("present = \"x\""));
+    }
+
+    #[test]
+    fn test_decrypt_field_helpers_ignore_non_armored_values() {
+        let identity = gen_identity();
+
+        let json = r#"{"secret":"plain"}"#;
+        let out_json = decrypt_fields_json(json, &["secret"], &identity).unwrap();
+        assert!(out_json.contains("\"secret\": \"plain\""));
+
+        let yaml = "secret: plain\n";
+        let out_yaml = decrypt_fields_yaml(yaml, &["secret"], &identity).unwrap();
+        assert!(out_yaml.contains("secret: plain"));
+
+        let toml = "secret = \"plain\"\n";
+        let out_toml = decrypt_fields_toml(toml, &["secret"], &identity).unwrap();
+        assert!(out_toml.contains("secret = \"plain\""));
+    }
+
+    #[test]
+    fn test_decrypt_env_values_preserves_comments_and_invalid_lines() {
+        let identity = gen_identity();
+        let content = "# comment\nINVALID LINE\nKEY=plain\n";
+
+        let out = decrypt_env_values(content, &identity).unwrap();
+
+        assert!(out.contains("# comment"));
+        assert!(out.contains("INVALID LINE"));
+        assert!(out.contains("KEY=plain"));
     }
 }

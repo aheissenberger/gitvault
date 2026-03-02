@@ -33,33 +33,39 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           fetch-tags: true
       - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
           components: clippy,rustfmt
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Enforce Rust line coverage
+        run: cargo llvm-cov --workspace --all-features --fail-under-lines 100
 
       - name: Release tag consistency check
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           git fetch --force --tags
-          cargo run --manifest-path xtask/Cargo.toml -- release-check
+          cargo run --locked --manifest-path xtask/Cargo.toml -- release-check
 
   build:
     needs: verify
@@ -88,19 +94,19 @@ jobs:
             artifact: gitvault-macos-x86_64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
 
       - name: Rename artifact (Unix)
         if: matrix.os != 'windows-latest'
@@ -111,7 +117,7 @@ jobs:
         run: cp target/${{ matrix.target }}/release/gitvault.exe ${{ matrix.artifact }}
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
@@ -122,21 +128,87 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
     steps:
       - name: Download all workflow artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
-      - name: Publish GitHub release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          {
+            find artifacts -type f -name 'gitvault-*' -print0 \
+              | while IFS= read -r -d '' file; do
+                  name="$(basename "$file")"
+                  sum="$(sha256sum "$file" | awk '{print $1}')"
+                  printf '%s  %s\n' "$sum" "$name"
+                done
+          } | sort > SHA256SUMS
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign and verify release assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          assets=(
             artifacts/**/gitvault-linux-x86_64
             artifacts/**/gitvault-windows-x86_64.exe
             artifacts/**/gitvault-macos-aarch64
             artifacts/**/gitvault-macos-x86_64
+            SHA256SUMS
+          )
+
+          identity_regex="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build.yml@.*"
+          issuer="https://token.actions.githubusercontent.com"
+
+          for asset in "${assets[@]}"; do
+            cosign sign-blob --yes "$asset" \
+              --output-signature "${asset}.sig" \
+              --output-certificate "${asset}.pem"
+
+            cosign verify-blob "$asset" \
+              --signature "${asset}.sig" \
+              --certificate "${asset}.pem" \
+              --certificate-identity-regexp "$identity_regex" \
+              --certificate-oidc-issuer "$issuer"
+          done
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: |
+            artifacts/**/gitvault-linux-x86_64
+            artifacts/**/gitvault-windows-x86_64.exe
+            artifacts/**/gitvault-macos-aarch64
+            artifacts/**/gitvault-macos-x86_64
+            SHA256SUMS
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          files: |
+            artifacts/**/gitvault-linux-x86_64
+            artifacts/**/gitvault-linux-x86_64.sig
+            artifacts/**/gitvault-linux-x86_64.pem
+            artifacts/**/gitvault-windows-x86_64.exe
+            artifacts/**/gitvault-windows-x86_64.exe.sig
+            artifacts/**/gitvault-windows-x86_64.exe.pem
+            artifacts/**/gitvault-macos-aarch64
+            artifacts/**/gitvault-macos-aarch64.sig
+            artifacts/**/gitvault-macos-aarch64.pem
+            artifacts/**/gitvault-macos-x86_64
+            artifacts/**/gitvault-macos-x86_64.sig
+            artifacts/**/gitvault-macos-x86_64.pem
+            SHA256SUMS
+            SHA256SUMS.sig
+            SHA256SUMS.pem
 
   homebrew:
     name: Update Homebrew tap
@@ -147,12 +219,11 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
-    env:
-      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - name: Resolve metadata
         id: meta
         env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           INPUT_TAP_REPO: ${{ github.event.inputs.tap_repo }}
           INPUT_FORMULA_PATH: ${{ github.event.inputs.tap_formula_path }}
           DEFAULT_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
@@ -178,25 +249,26 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "url_aarch64=${release_base}/gitvault-macos-aarch64" >> "$GITHUB_OUTPUT"
           echo "url_x86_64=${release_base}/gitvault-macos-x86_64" >> "$GITHUB_OUTPUT"
+          echo "url_sums=${release_base}/SHA256SUMS" >> "$GITHUB_OUTPUT"
 
       - name: Compute asset checksums
         id: sums
         env:
-          URL_AARCH64: ${{ steps.meta.outputs.url_aarch64 }}
-          URL_X86_64: ${{ steps.meta.outputs.url_x86_64 }}
+          URL_SUMS: ${{ steps.meta.outputs.url_sums }}
         run: |
           set -euo pipefail
-          curl -fsSL "$URL_AARCH64" -o macos-aarch64.bin
-          curl -fsSL "$URL_X86_64" -o macos-x86_64.bin
+          curl -fsSL "$URL_SUMS" -o SHA256SUMS
 
-          sha_aarch64="$(sha256sum macos-aarch64.bin | awk '{print $1}')"
-          sha_x86_64="$(sha256sum macos-x86_64.bin | awk '{print $1}')"
+          sha_aarch64="$(awk '$2 == "gitvault-macos-aarch64" {print $1}' SHA256SUMS)"
+          sha_x86_64="$(awk '$2 == "gitvault-macos-x86_64" {print $1}' SHA256SUMS)"
+          [[ -n "$sha_aarch64" ]] || { echo "Missing SHA for gitvault-macos-aarch64" >&2; exit 1; }
+          [[ -n "$sha_x86_64" ]] || { echo "Missing SHA for gitvault-macos-x86_64" >&2; exit 1; }
 
           echo "sha_aarch64=${sha_aarch64}" >> "$GITHUB_OUTPUT"
           echo "sha_x86_64=${sha_x86_64}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: ${{ steps.meta.outputs.tap_repo }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -256,7 +328,7 @@ jobs:
           } > "$file"
 
       - name: Create pull request in tap repo
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap

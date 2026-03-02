@@ -29,7 +29,12 @@ cargo verify-clippy
 cargo verify-test
 cargo verify-build
 cargo spec-verify     # validate spec frontmatter
+cargo llvm-cov --workspace --all-features --fail-under-lines 100
+cargo llvm-cov --workspace --all-features --summary-only
 ```
+
+When coverage gate work is in progress, use the summary command to inspect current line coverage
+before re-running the strict `--fail-under-lines 100` command.
 
 ## All xtask commands
 

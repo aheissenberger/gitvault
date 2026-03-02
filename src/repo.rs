@@ -107,8 +107,82 @@ pub fn write_recipients(repo_root: &Path, recipients: &[String]) -> Result<(), G
 }
 
 /// Get the path for an encrypted artifact under secrets/. REQ-7
+#[allow(dead_code)]
 pub fn get_encrypted_path(repo_root: &Path, name: &str) -> PathBuf {
     repo_root.join(SECRETS_DIR).join(name)
+}
+
+/// Get the directory for env-scoped encrypted artifacts under `secrets/<env>/`.
+pub fn get_env_encrypted_dir(repo_root: &Path, env: &str) -> PathBuf {
+    repo_root.join(SECRETS_DIR).join(env)
+}
+
+/// Get the path for an encrypted artifact under `secrets/<env>/`.
+pub fn get_env_encrypted_path(repo_root: &Path, env: &str, name: &str) -> PathBuf {
+    get_env_encrypted_dir(repo_root, env).join(name)
+}
+
+/// List encrypted files for an environment.
+///
+/// Prefers env-scoped layout `secrets/<env>/*.age` and falls back to legacy
+/// layout `secrets/*.age` when no env-scoped files exist.
+pub fn list_encrypted_files_for_env(
+    repo_root: &Path,
+    env: &str,
+) -> Result<Vec<PathBuf>, GitvaultError> {
+    let env_dir = get_env_encrypted_dir(repo_root, env);
+    let mut env_files = list_age_files_in_dir(&env_dir)?;
+    if !env_files.is_empty() {
+        env_files.sort();
+        return Ok(env_files);
+    }
+
+    let mut legacy_files = list_age_files_in_dir(&repo_root.join(SECRETS_DIR))?;
+    legacy_files.sort();
+    Ok(legacy_files)
+}
+
+/// List all encrypted files under `secrets/**` recursively.
+pub fn list_all_encrypted_files(repo_root: &Path) -> Result<Vec<PathBuf>, GitvaultError> {
+    let mut out = Vec::new();
+    collect_age_files(&repo_root.join(SECRETS_DIR), &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+fn list_age_files_in_dir(dir: &Path) -> Result<Vec<PathBuf>, GitvaultError> {
+    if !dir.exists() || !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("age") {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+fn collect_age_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), GitvaultError> {
+    if !dir.exists() || !dir.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_age_files(&path, out)?;
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) == Some("age") {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 /// Get the path for a plaintext artifact under .secrets/plain/<env>/. REQ-8
@@ -120,6 +194,7 @@ pub fn get_plain_path(repo_root: &Path, env: &str, name: &str) -> PathBuf {
 /// Ensure all required directories exist.
 pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
     fs::create_dir_all(repo_root.join(SECRETS_DIR))?;
+    fs::create_dir_all(get_env_encrypted_dir(repo_root, env))?;
     fs::create_dir_all(repo_root.join(PLAIN_BASE_DIR).join(env))?;
     Ok(())
 }
@@ -157,7 +232,7 @@ const PRE_PUSH_HOOK: &str = r#"#!/usr/bin/env sh
 # gitvault: run safety check before push
 set -e
 if command -v gitvault >/dev/null 2>&1; then
-  gitvault status --no-prompt
+    gitvault status --no-prompt --fail-if-dirty
 fi
 "#;
 
@@ -239,6 +314,15 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn init_git_repo(path: &Path) {
+        let status = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .expect("git init should run");
+        assert!(status.success());
+    }
+
     #[test]
     fn test_get_encrypted_path() {
         let root = Path::new("/repo");
@@ -272,6 +356,10 @@ mod tests {
         assert!(
             dir.path().join(".secrets/plain/dev").exists(),
             ".secrets/plain/dev/ should be created"
+        );
+        assert!(
+            dir.path().join("secrets/dev").exists(),
+            "secrets/dev/ should be created"
         );
     }
 
@@ -316,6 +404,12 @@ mod tests {
         assert!(
             content.contains("gitvault"),
             "hook should reference gitvault"
+        );
+
+        let pre_push_content = std::fs::read_to_string(&pre_push).unwrap();
+        assert!(
+            pre_push_content.contains("--fail-if-dirty"),
+            "pre-push hook should enforce drift checks"
         );
     }
 
@@ -448,5 +542,101 @@ mod tests {
             "original content preserved"
         );
         assert!(content.contains("gitvault"), "gitvault block appended");
+    }
+
+    #[test]
+    fn test_get_env_encrypted_path() {
+        let root = Path::new("/repo");
+        let path = get_env_encrypted_path(root, "staging", "app.env.age");
+        assert_eq!(path, PathBuf::from("/repo/secrets/staging/app.env.age"));
+    }
+
+    #[test]
+    fn test_list_encrypted_files_for_env_prefers_env_dir() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("secrets/dev")).unwrap();
+        std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
+        std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
+        std::fs::write(dir.path().join("secrets/legacy.env.age"), b"x").unwrap();
+
+        let files = list_encrypted_files_for_env(dir.path(), "dev").unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with(Path::new("secrets/dev/app.env.age")));
+    }
+
+    #[test]
+    fn test_list_encrypted_files_for_env_falls_back_to_legacy() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
+        std::fs::write(dir.path().join("secrets/app.env.age"), b"x").unwrap();
+
+        let files = list_encrypted_files_for_env(dir.path(), "dev").unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with(Path::new("secrets/app.env.age")));
+    }
+
+    #[test]
+    fn test_list_all_encrypted_files_recurses() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("secrets/dev")).unwrap();
+        std::fs::create_dir_all(dir.path().join("secrets/prod")).unwrap();
+        std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
+        std::fs::write(dir.path().join("secrets/prod/app.env.age"), b"x").unwrap();
+
+        let files = list_all_encrypted_files(dir.path()).unwrap();
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn test_list_all_encrypted_files_missing_dir_is_empty() {
+        let dir = TempDir::new().unwrap();
+        let files = list_all_encrypted_files(dir.path()).unwrap();
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_validate_write_path_handles_curdir_and_parentless_target() {
+        let base = Path::new("./nonexistent/base");
+        let target = Path::new("file.txt");
+        let result = validate_write_path(base, target);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_has_secrets_drift_nonexistent_repo_root_returns_clean() {
+        let dir = TempDir::new().unwrap();
+        let missing_root = dir.path().join("missing");
+        let drift = has_secrets_drift(&missing_root).unwrap();
+        assert!(!drift);
+    }
+
+    #[test]
+    fn test_check_no_tracked_plaintext_git_invocation_failure() {
+        let dir = TempDir::new().unwrap();
+        let missing_root = dir.path().join("missing");
+        let err = check_no_tracked_plaintext(&missing_root).unwrap_err();
+        assert!(matches!(err, GitvaultError::Other(_)));
+    }
+
+    #[test]
+    fn test_check_no_tracked_plaintext_detects_tracked_files() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        std::fs::write(dir.path().join(".env"), "A=1\n").unwrap();
+        let add_status = Command::new("git")
+            .args(["add", ".env"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git add should run");
+        assert!(add_status.success());
+
+        let err = check_no_tracked_plaintext(dir.path()).unwrap_err();
+        match err {
+            GitvaultError::PlaintextLeak(files) => {
+                assert!(files.contains(".env"));
+            }
+            other => panic!("expected plaintext leak error, got: {other:?}"),
+        }
     }
 }

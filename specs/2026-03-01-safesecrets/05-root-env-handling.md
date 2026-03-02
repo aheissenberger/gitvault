@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-005"
 title: "Root-level .env generation and safety"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
