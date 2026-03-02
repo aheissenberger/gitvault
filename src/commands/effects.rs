@@ -158,7 +158,7 @@ pub(crate) fn execute_effects_with(
 
 /// Execute an ordered list of FHSM [`fhsm::Effect`]s using the real I/O functions.
 pub(crate) fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
-    let repo_root = crate::find_repo_root()?;
+    let repo_root = crate::repo::find_repo_root()?;
     execute_effects_with(effects, &repo_root, &DefaultRunner)
 }
 

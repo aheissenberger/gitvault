@@ -12,6 +12,7 @@ mod keyring_store;
 mod materialize;
 mod merge;
 mod permissions;
+mod output;
 mod repo;
 mod run;
 mod structured;
@@ -20,7 +21,6 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use commands::CommandOutcome;
 use error::GitvaultError;
-use std::path::{Path, PathBuf};
 use std::process;
 
 fn main() {
@@ -38,7 +38,7 @@ fn main() {
 }
 
 fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
-    cli.no_prompt = resolve_no_prompt(cli.no_prompt);
+    cli.no_prompt = output::resolve_no_prompt(cli.no_prompt);
     match cli.command {
         Commands::Encrypt {
             file,
@@ -130,74 +130,25 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
     }
 }
 
-fn resolve_no_prompt(no_prompt: bool) -> bool {
-    no_prompt || ci_is_non_interactive()
-}
-
-fn ci_is_non_interactive() -> bool {
-    std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false)
-}
-
-/// Walk up from `start` until a `.git` directory is found, returning that directory.
-/// Falls back to `start` itself when no `.git` is found (e.g. outside any repository).
-pub(crate) fn find_repo_root_from(start: &Path) -> Result<PathBuf, GitvaultError> {
-    let mut dir = start.to_path_buf();
-    loop {
-        if dir.join(".git").exists() {
-            return Ok(dir);
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => {
-                return Err(GitvaultError::Usage(
-                    "not inside a git repository (no .git directory found)".to_string(),
-                ));
-            }
-        }
-    }
-}
-
-/// Find the repository root by walking up from cwd looking for .git
-pub(crate) fn find_repo_root() -> Result<PathBuf, GitvaultError> {
-    find_repo_root_from(&std::env::current_dir()?)
-}
-
-/// Output a success result, optionally as JSON
-pub(crate) fn output_success(message: &str, json: bool) {
-    if json {
-        println!(
-            "{}",
-            serde_json::json!({"status": "ok", "message": message})
-        );
-    } else {
-        println!("{message}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::test_helpers::*;
-    use crate::fhsm;
-    use crate::identity::{load_identity_from_source, load_identity_source, load_identity_with};
-    use age::secrecy::ExposeSecret;
-    use age::x25519;
     use cli::{Commands, KeyringAction};
-    use tempfile::NamedTempFile;
     use tempfile::TempDir;
 
     #[test]
     fn test_ci_env_sets_no_prompt() {
         with_env_var("CI", Some("1"), || {
-            assert!(resolve_no_prompt(false));
-            assert!(resolve_no_prompt(true));
-            assert!(ci_is_non_interactive());
+            assert!(output::resolve_no_prompt(false));
+            assert!(output::resolve_no_prompt(true));
+            assert!(output::ci_is_non_interactive());
         });
 
         with_env_var("CI", None, || {
-            assert!(!resolve_no_prompt(false));
-            assert!(resolve_no_prompt(true));
-            assert!(!ci_is_non_interactive());
+            assert!(!output::resolve_no_prompt(false));
+            assert!(output::resolve_no_prompt(true));
+            assert!(!output::ci_is_non_interactive());
         });
     }
 
@@ -436,110 +387,6 @@ mod tests {
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
-    // ─── load_identity_from_source ────────────────────────────────────────────
-
-    #[test]
-    fn load_identity_from_source_file_path_valid() {
-        let (tmp_file, _) = setup_identity_file();
-        let source = fhsm::IdentitySource::FilePath(tmp_file.path().to_string_lossy().to_string());
-        assert!(load_identity_from_source(&source).is_ok());
-    }
-
-    #[test]
-    fn load_identity_from_source_file_path_nonexistent_errors() {
-        let source =
-            fhsm::IdentitySource::FilePath("/nonexistent/path/to/identity.age".to_string());
-        assert!(load_identity_from_source(&source).is_err());
-    }
-
-    #[test]
-    fn load_identity_from_source_env_var_with_file_path() {
-        // EnvVar(v) passes `v` as the value to load_identity_source, so a file path works.
-        let (tmp_file, _) = setup_identity_file();
-        let source = fhsm::IdentitySource::EnvVar(tmp_file.path().to_string_lossy().to_string());
-        assert!(load_identity_from_source(&source).is_ok());
-    }
-
-    #[test]
-    fn load_identity_from_source_inline_nonempty_returns_ok() {
-        let (_, identity) = setup_identity_file();
-        let key_str = identity.to_string().expose_secret().to_string();
-        let source = fhsm::IdentitySource::Inline(key_str);
-        assert!(load_identity_from_source(&source).is_ok());
-    }
-
-    #[test]
-    fn load_identity_from_source_unresolved_falls_back_to_env_var() {
-        let _lock = global_test_lock().lock().unwrap();
-        let (tmp_file, _) = setup_identity_file();
-        let source = fhsm::IdentitySource::Unresolved;
-        // Provide GITVAULT_IDENTITY so load_identity(None) can resolve it.
-        let result = with_env_var(
-            "GITVAULT_IDENTITY",
-            Some(tmp_file.path().to_string_lossy().as_ref()),
-            || {
-                with_env_var("GITVAULT_KEYRING", None, || {
-                    load_identity_from_source(&source)
-                })
-            },
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn load_identity_from_source_keyring_without_setup_errors() {
-        let source = fhsm::IdentitySource::Keyring;
-        // Without the OS keyring configured this call returns an error.
-        assert!(load_identity_from_source(&source).is_err());
-    }
-
-    // ─── output_success ───────────────────────────────────────────────────────
-
-    #[test]
-    fn output_success_plain_does_not_panic() {
-        output_success("hello", false);
-    }
-
-    #[test]
-    fn output_success_json_does_not_panic() {
-        output_success("hello", true);
-    }
-
-    // ─── find_repo_root_from tests ───────────────────────────────────────────
-
-    #[test]
-    fn find_repo_root_from_finds_git_dir() {
-        let tmp = TempDir::new().unwrap();
-        std::fs::create_dir(tmp.path().join(".git")).unwrap();
-        let found = find_repo_root_from(tmp.path()).unwrap();
-        assert_eq!(found, tmp.path());
-    }
-
-    #[test]
-    fn find_repo_root_from_walks_up() {
-        let tmp = TempDir::new().unwrap();
-        std::fs::create_dir(tmp.path().join(".git")).unwrap();
-        let sub = tmp.path().join("a/b/c");
-        std::fs::create_dir_all(&sub).unwrap();
-        let found = find_repo_root_from(&sub).unwrap();
-        assert_eq!(found, tmp.path());
-    }
-
-    #[test]
-    fn find_repo_root_from_returns_start_when_no_git() {
-        let tmp = TempDir::new().unwrap();
-        // No .git dir — should now return an error
-        let result = find_repo_root_from(tmp.path());
-        assert!(
-            result.is_err(),
-            "expected error when no .git directory found"
-        );
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("not inside a git repository"),
-            "unexpected error message: {err_msg}"
-        );
-    }
 
     #[test]
     fn test_with_env_var_restores_existing_value() {
@@ -557,108 +404,5 @@ mod tests {
         unsafe {
             std::env::remove_var("GITVAULT_TEST_VAR");
         }
-    }
-
-    #[test]
-    fn test_load_identity_with_uses_keyring_when_enabled() {
-        let _lock = global_test_lock().lock().unwrap();
-        unsafe {
-            std::env::remove_var("GITVAULT_IDENTITY");
-            std::env::set_var("GITVAULT_KEYRING", "1");
-        }
-
-        let value = load_identity_with(None, || Ok("AGE-SECRET-KEY-TEST".to_string())).unwrap();
-
-        unsafe {
-            std::env::remove_var("GITVAULT_KEYRING");
-        }
-        assert_eq!(value, "AGE-SECRET-KEY-TEST");
-    }
-
-    #[test]
-    fn test_load_identity_with_maps_keyring_error() {
-        let _lock = global_test_lock().lock().unwrap();
-        unsafe {
-            std::env::remove_var("GITVAULT_IDENTITY");
-            std::env::set_var("GITVAULT_KEYRING", "1");
-        }
-
-        let err = load_identity_with(None, || Err("no key".to_string())).unwrap_err();
-
-        unsafe {
-            std::env::remove_var("GITVAULT_KEYRING");
-        }
-        assert!(matches!(err, GitvaultError::Other(_)));
-    }
-
-    #[test]
-    fn test_load_identity_source_accepts_key_file_with_newline() {
-        let identity = x25519::Identity::generate();
-        let identity_secret = identity.to_string();
-        let identity_file = NamedTempFile::new().expect("temp file should be created");
-
-        std::fs::write(
-            identity_file.path(),
-            format!("{}\n", identity_secret.expose_secret()),
-        )
-        .expect("identity should be written to temp file");
-
-        let loaded =
-            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
-                .expect("identity file with newline should parse");
-
-        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
-    }
-
-    #[test]
-    fn test_load_identity_source_accepts_age_keygen_style_file() {
-        let identity = x25519::Identity::generate();
-        let identity_secret = identity.to_string();
-        let identity_file = NamedTempFile::new().expect("temp file should be created");
-
-        let key_file_content = format!(
-            "# created: 2026-03-01T00:00:00Z\n# public key: {}\n{}\n",
-            identity.to_public(),
-            identity_secret.expose_secret()
-        );
-        std::fs::write(identity_file.path(), key_file_content)
-            .expect("identity should be written to temp file");
-
-        let loaded =
-            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
-                .expect("age-keygen style identity file should parse");
-
-        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
-    }
-
-    #[test]
-    fn test_load_identity_source_accepts_inline_comment_after_key() {
-        let identity = x25519::Identity::generate();
-        let identity_secret = identity.to_string();
-        let identity_file = NamedTempFile::new().expect("temp file should be created");
-
-        std::fs::write(
-            identity_file.path(),
-            format!("{} # local-dev\n", identity_secret.expose_secret()),
-        )
-        .expect("identity should be written to temp file");
-
-        let loaded =
-            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
-                .expect("identity file with inline comment should parse");
-
-        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
-    }
-
-    // ─── load_identity_source: file without AGE key ───────────────────────────
-
-    #[test]
-    fn test_load_identity_source_file_without_age_key_errors() {
-        let tmp = NamedTempFile::new().expect("temp file should be created");
-        std::fs::write(tmp.path(), "not-an-age-key\nsome: yaml: content\n")
-            .expect("write should succeed");
-        // Lines 1065-1069: extract_identity_key returns None → Usage error.
-        let result = load_identity_source(tmp.path().to_str().unwrap(), "test-source");
-        assert!(matches!(result, Err(GitvaultError::Usage(_))));
     }
 }

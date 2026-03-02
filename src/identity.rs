@@ -104,3 +104,177 @@ pub(crate) fn resolve_recipient_keys(
     let identity = crypto::parse_identity(&identity_str)?;
     Ok(vec![identity.to_public().to_string()])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_helpers::{
+        global_test_lock, setup_identity_file, with_env_var,
+    };
+    use crate::error::GitvaultError;
+    use crate::fhsm;
+    use age::secrecy::ExposeSecret;
+    use age::x25519;
+    use tempfile::NamedTempFile;
+
+    // ─── load_identity_from_source ────────────────────────────────────────────
+
+    #[test]
+    fn load_identity_from_source_file_path_valid() {
+        let (tmp_file, _) = setup_identity_file();
+        let source = fhsm::IdentitySource::FilePath(tmp_file.path().to_string_lossy().to_string());
+        assert!(load_identity_from_source(&source).is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_file_path_nonexistent_errors() {
+        let source =
+            fhsm::IdentitySource::FilePath("/nonexistent/path/to/identity.age".to_string());
+        assert!(load_identity_from_source(&source).is_err());
+    }
+
+    #[test]
+    fn load_identity_from_source_env_var_with_file_path() {
+        // EnvVar(v) passes `v` as the value to load_identity_source, so a file path works.
+        let (tmp_file, _) = setup_identity_file();
+        let source = fhsm::IdentitySource::EnvVar(tmp_file.path().to_string_lossy().to_string());
+        assert!(load_identity_from_source(&source).is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_inline_nonempty_returns_ok() {
+        let (_, identity) = setup_identity_file();
+        let key_str = identity.to_string().expose_secret().to_string();
+        let source = fhsm::IdentitySource::Inline(key_str);
+        assert!(load_identity_from_source(&source).is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_inline_empty_falls_back_to_env_var() {
+        let _lock = global_test_lock().lock().unwrap();
+        let (tmp_file, _) = setup_identity_file();
+        let source = fhsm::IdentitySource::Inline(String::new());
+        // Provide GITVAULT_IDENTITY so load_identity(None) can resolve it.
+        let result = with_env_var(
+            "GITVAULT_IDENTITY",
+            Some(tmp_file.path().to_string_lossy().as_ref()),
+            || {
+                with_env_var("GITVAULT_KEYRING", None, || {
+                    load_identity_from_source(&source)
+                })
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn load_identity_from_source_keyring_without_setup_errors() {
+        let source = fhsm::IdentitySource::Keyring;
+        // Without the OS keyring configured this call returns an error.
+        assert!(load_identity_from_source(&source).is_err());
+    }
+
+    // ─── load_identity_with ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_load_identity_with_uses_keyring_when_enabled() {
+        let _lock = global_test_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var("GITVAULT_IDENTITY");
+            std::env::set_var("GITVAULT_KEYRING", "1");
+        }
+
+        let value = load_identity_with(None, || Ok("AGE-SECRET-KEY-TEST".to_string())).unwrap();
+
+        unsafe {
+            std::env::remove_var("GITVAULT_KEYRING");
+        }
+        assert_eq!(value, "AGE-SECRET-KEY-TEST");
+    }
+
+    #[test]
+    fn test_load_identity_with_maps_keyring_error() {
+        let _lock = global_test_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var("GITVAULT_IDENTITY");
+            std::env::set_var("GITVAULT_KEYRING", "1");
+        }
+
+        let err = load_identity_with(None, || Err("no key".to_string())).unwrap_err();
+
+        unsafe {
+            std::env::remove_var("GITVAULT_KEYRING");
+        }
+        assert!(matches!(err, GitvaultError::Other(_)));
+    }
+
+    // ─── load_identity_source ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_load_identity_source_accepts_key_file_with_newline() {
+        let identity = x25519::Identity::generate();
+        let identity_secret = identity.to_string();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+
+        std::fs::write(
+            identity_file.path(),
+            format!("{}\n", identity_secret.expose_secret()),
+        )
+        .expect("identity should be written to temp file");
+
+        let loaded =
+            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
+                .expect("identity file with newline should parse");
+
+        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
+    }
+
+    #[test]
+    fn test_load_identity_source_accepts_age_keygen_style_file() {
+        let identity = x25519::Identity::generate();
+        let identity_secret = identity.to_string();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+
+        let key_file_content = format!(
+            "# created: 2026-03-01T00:00:00Z\n# public key: {}\n{}\n",
+            identity.to_public(),
+            identity_secret.expose_secret()
+        );
+        std::fs::write(identity_file.path(), key_file_content)
+            .expect("identity should be written to temp file");
+
+        let loaded =
+            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
+                .expect("age-keygen style identity file should parse");
+
+        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
+    }
+
+    #[test]
+    fn test_load_identity_source_accepts_inline_comment_after_key() {
+        let identity = x25519::Identity::generate();
+        let identity_secret = identity.to_string();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+
+        std::fs::write(
+            identity_file.path(),
+            format!("{} # local-dev\n", identity_secret.expose_secret()),
+        )
+        .expect("identity should be written to temp file");
+
+        let loaded =
+            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
+                .expect("identity file with inline comment should parse");
+
+        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
+    }
+
+    #[test]
+    fn test_load_identity_source_file_without_age_key_errors() {
+        let tmp = NamedTempFile::new().expect("temp file should be created");
+        std::fs::write(tmp.path(), "not-an-age-key\nsome: yaml: content\n")
+            .expect("write should succeed");
+        let result = load_identity_source(tmp.path().to_str().unwrap(), "test-source");
+        assert!(matches!(result, Err(GitvaultError::Usage(_))));
+    }
+}

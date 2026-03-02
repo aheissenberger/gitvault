@@ -356,6 +356,33 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
     Ok(())
 }
 
+/// Walk up from `start` to find the directory containing `.git`.
+///
+/// Returns [`crate::error::GitvaultError::Usage`] if no `.git` is found — the caller is
+/// not inside a git repository.
+pub fn find_repo_root_from(start: &std::path::Path) -> Result<std::path::PathBuf, crate::error::GitvaultError> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join(".git").exists() {
+            return Ok(dir);
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => {
+                return Err(crate::error::GitvaultError::Usage(
+                    "not inside a git repository (no .git directory found)".to_string(),
+                ));
+            }
+        }
+    }
+}
+
+/// Find the repository root starting from `std::env::current_dir()`.
+pub fn find_repo_root() -> Result<std::path::PathBuf, crate::error::GitvaultError> {
+    let cwd = std::env::current_dir()?;
+    find_repo_root_from(&cwd)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,5 +712,41 @@ mod tests {
             }
             other => panic!("expected plaintext leak error, got: {other:?}"),
         }
+    }
+
+    // ─── find_repo_root_from tests ───────────────────────────────────────────
+
+    #[test]
+    fn find_repo_root_from_finds_git_dir() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let found = find_repo_root_from(tmp.path()).unwrap();
+        assert_eq!(found, tmp.path());
+    }
+
+    #[test]
+    fn find_repo_root_from_walks_up() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let sub = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&sub).unwrap();
+        let found = find_repo_root_from(&sub).unwrap();
+        assert_eq!(found, tmp.path());
+    }
+
+    #[test]
+    fn find_repo_root_from_returns_start_when_no_git() {
+        let tmp = TempDir::new().unwrap();
+        // No .git dir — should now return an error
+        let result = find_repo_root_from(tmp.path());
+        assert!(
+            result.is_err(),
+            "expected error when no .git directory found"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not inside a git repository"),
+            "unexpected error message: {err_msg}"
+        );
     }
 }

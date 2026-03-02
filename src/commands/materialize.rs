@@ -20,7 +20,7 @@ pub(crate) fn cmd_materialize(
     };
     let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
     execute_effects(effects)?;
-    crate::output_success("Materialized secrets to .env", json);
+    crate::output::output_success("Materialized secrets to .env", json);
     Ok(())
 }
 
