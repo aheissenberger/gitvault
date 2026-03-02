@@ -18,3 +18,6 @@
 - Reference spec/AC ids in commits (e.g., `S-... / AC1`).
 - Link the spec path in PRs.
 - Treat `.cargo-home/` as local cache (untracked).
+
+## Skills
+- Deploy/release workflow: `.copilot/skills/deploy-semver.md`
