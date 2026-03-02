@@ -553,4 +553,109 @@ mod tests {
         let err = run(cli).expect_err("decrypt of nonexistent file should fail");
         assert!(matches!(err, GitvaultError::Io(_)));
     }
+
+    #[test]
+    fn test_run_dispatch_harden_exercises_arm() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let cli = Cli {
+            json: false,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            identity_selector: None,
+            command: Commands::Harden,
+        };
+        // No adapter configured, so harden should succeed with built-in hooks.
+        let outcome = run(cli).expect("harden dispatch should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    #[test]
+    fn test_run_dispatch_recipient_list_exercises_arm() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            identity_selector: None,
+            command: Commands::Recipient {
+                action: crate::cli::RecipientAction::List,
+            },
+        };
+        let outcome = run(cli).expect("recipient list dispatch should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    #[test]
+    fn test_run_dispatch_identity_create_exercises_arm() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let out_file = dir.path().join("test_identity.age");
+        let cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            identity_selector: None,
+            command: Commands::Identity {
+                action: crate::cli::IdentityAction::Create {
+                    profile: crate::cli::IdentityProfile::Classic,
+                    out: Some(out_file.to_string_lossy().to_string()),
+                },
+            },
+        };
+        // Identity create with --out should succeed regardless of keyring availability.
+        match run(cli) {
+            Ok(outcome) => assert_eq!(outcome, CommandOutcome::Success),
+            Err(GitvaultError::Keyring(_)) => {}
+            Err(other) => panic!("Unexpected error from identity create dispatch: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_run_dispatch_materialize_no_secrets_succeeds() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            let cli = Cli {
+                json: false,
+                no_prompt: true,
+                aws_profile: None,
+                aws_role_arn: None,
+                identity_selector: None,
+                command: Commands::Materialize {
+                    env: Some("dev".to_string()),
+                    identity: Some(identity_file.path().to_string_lossy().to_string()),
+                    prod: false,
+                },
+            };
+            // A repo with no secrets materializes nothing — should succeed.
+            let outcome = run(cli).expect("materialize dispatch should succeed with no secrets");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
 }

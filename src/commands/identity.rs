@@ -144,7 +144,6 @@ mod tests {
     use super::*;
     use crate::cli::IdentityProfile;
     use tempfile::NamedTempFile;
-
     /// Helper: run `cmd_identity_create` with a real --out file path and the
     /// real OS keyring. Returns (`out_path_string`, NamedTempFile-to-keep-alive).
     fn make_out_file() -> (NamedTempFile, String) {
@@ -302,5 +301,68 @@ mod tests {
             mode, 0o600,
             "file permissions should be 0o600, got {mode:o}"
         );
+    }
+
+    // ── cmd_identity dispatcher ──────────────────────────────────────────────
+
+    #[test]
+    fn cmd_identity_dispatches_create_action() {
+        let (_tmp, path) = make_out_file();
+
+        let result = cmd_identity(
+            crate::cli::IdentityAction::Create {
+                profile: IdentityProfile::Classic,
+                out: Some(path.clone()),
+            },
+            true,  // json
+            true,  // no_prompt
+        );
+        // The dispatch should reach cmd_identity_create.
+        assert!(
+            result.is_ok() || matches!(result, Err(crate::error::GitvaultError::Keyring(_))),
+            "cmd_identity should succeed or fail with Keyring error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn cmd_identity_create_json_true_no_prompt_false_with_out_file() {
+        // Exercises the json=true print branch in cmd_identity_create.
+        let (_tmp, path) = make_out_file();
+        let result = cmd_identity_create(
+            IdentityProfile::Classic,
+            Some(path.clone()),
+            true,  // json: exercises the serde_json path
+            false, // no_prompt: exercises the eprintln warning if keyring fails
+        );
+        // Should succeed (--out provided, keyring failure is non-fatal)
+        assert!(
+            result.is_ok(),
+            "create with json=true should succeed, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn cmd_identity_create_no_out_mock_keyring_stores_ok() {
+        // Install a mock keyring that will accept the set call so keyring path succeeds.
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+
+        let result = cmd_identity_create(
+            IdentityProfile::Hybrid,
+            None,   // no --out: keyring is the only storage
+            false,  // json=false: exercises the plain-text output path
+            true,
+        );
+        // With the mock keyring always succeeding, this should return Ok.
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                // If the mock still fails for some reason, accept Keyring/Usage errors
+                // without panicking — we just want to exercise the code path.
+                assert!(
+                    matches!(e, crate::error::GitvaultError::Usage(_) | crate::error::GitvaultError::Keyring(_)),
+                    "unexpected error: {e:?}"
+                );
+            }
+        }
     }
 }

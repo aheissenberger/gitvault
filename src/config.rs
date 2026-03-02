@@ -272,6 +272,7 @@ pub fn effective_config(repo_root: &Path) -> Result<GitvaultConfig, GitvaultErro
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use crate::commands::test_helpers::global_test_lock;
 
     fn make_config_file(dir: &TempDir, content: &str) {
         let gitvault_dir = dir.path().join(".gitvault");
@@ -490,6 +491,72 @@ mod tests {
         assert!(
             config.hooks.adapter.is_none(),
             "with no config files at all, adapter should be None"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional coverage: load_global_config public fn + error paths
+    // -----------------------------------------------------------------------
+
+    /// Covers the public `load_global_config()` function (lines 242-244).
+    #[test]
+    fn test_load_global_config_public_function_uses_home() {
+        let _lock = global_test_lock().lock().unwrap();
+        // Point HOME to an empty temp dir → no global config file → returns default.
+        let home = TempDir::new().unwrap();
+        let original_home = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", home.path()) };
+        let result = load_global_config();
+        match original_home {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        let config = result.expect("load_global_config with no global config should succeed");
+        assert!(config.hooks.adapter.is_none());
+    }
+
+    /// Covers line 148: HOME is empty → load_global_config_impl returns default without reading.
+    #[test]
+    fn test_load_global_config_empty_home_returns_default() {
+        let _lock = global_test_lock().lock().unwrap();
+        let original_home = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", "") };
+        let result = load_global_config_impl(None);
+        match original_home {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        let config = result.expect("empty HOME should yield default config");
+        assert!(config.hooks.adapter.is_none());
+    }
+
+    /// Covers lines 162-166: non-NotFound IO error reading global config.
+    /// We create a directory at the config.toml path so reading it yields EISDIR.
+    #[test]
+    fn test_load_global_config_io_error_returns_usage_error() {
+        let home = TempDir::new().unwrap();
+        // Create a *directory* at the config.toml path → read_to_string fails with EISDIR.
+        let config_toml_path = home.path().join(".config").join("gitvault").join("config.toml");
+        std::fs::create_dir_all(&config_toml_path).unwrap();
+        let err = load_global_config_impl(Some(home.path()))
+            .expect_err("reading a dir as config should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error, got: {err}"
+        );
+    }
+
+    /// Covers lines 214-218: non-NotFound IO error reading repo config.
+    #[test]
+    fn test_load_config_io_error_returns_usage_error() {
+        let dir = TempDir::new().unwrap();
+        // Create a *directory* at .gitvault/config.toml → read_to_string fails with EISDIR.
+        let config_toml_path = dir.path().join(".gitvault").join("config.toml");
+        std::fs::create_dir_all(&config_toml_path).unwrap();
+        let err = load_config(dir.path()).expect_err("reading a dir as config should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error, got: {err}"
         );
     }
 }

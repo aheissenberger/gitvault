@@ -363,6 +363,44 @@ mod tests {
     }
 
     #[test]
+    fn test_cmd_encrypt_keep_path_outside_repo_errors() {
+        // When --keep-path is used with an input file outside the repo root,
+        // strip_prefix fails and we get a Usage error.
+        // Covers lines 28-32 (the strip_prefix error branch in compute_output_path).
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Create a file outside the repo root (in a sibling temp dir)
+        let outside_dir = TempDir::new().unwrap();
+        let outside_file = outside_dir.path().join("secret.env");
+        std::fs::write(&outside_file, "TOKEN=abc\n").unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_encrypt(
+                outside_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                true, // --keep-path
+                None,
+                false,
+                false,
+            )
+            .expect_err("input outside repo with --keep-path should fail");
+            assert!(
+                matches!(err, GitvaultError::Usage(_)),
+                "expected Usage error for file outside repo, got: {err:?}"
+            );
+            let msg = err.to_string();
+            assert!(
+                msg.contains("repository root"),
+                "error should mention repository root: {msg}"
+            );
+        });
+    }
+
+    #[test]
     fn test_cmd_encrypt_keep_path_writes_nested_output() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();

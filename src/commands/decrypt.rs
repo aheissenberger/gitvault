@@ -525,4 +525,123 @@ mod tests {
             std::fs::read_to_string(dir.path().join("service/api/v1/config/app.env")).unwrap();
         assert!(restored.contains("KEY=VALUE"));
     }
+
+    /// Covers lines 170-174: strip_prefix error when encrypted file is outside the repo.
+    #[test]
+    fn test_resolve_output_path_sentinel_outside_repo_errors() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Encrypt a file that's outside the repo root (use absolute path of /tmp/...)
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crate::crypto::encrypt(recipients, b"secret\n").unwrap();
+        std::fs::write(outside.path(), ciphertext).unwrap();
+
+        // --output without value (sentinel) requires input to be under repo root → error.
+        let err = cmd_decrypt(DecryptOptions {
+            file: outside.path().to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL.to_string()),
+            fields: None,
+            reveal: false,
+            value_only: false,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect_err("decrypt with sentinel outside repo should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error for out-of-repo input, got: {err:?}"
+        );
+    }
+
+    /// Covers lines 186-189: first component != "secrets" with sentinel output.
+    #[test]
+    fn test_resolve_output_path_sentinel_not_under_secrets_errors() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Put an encrypted file directly under the repo root (not under secrets/).
+        let enc_file = dir.path().join("myfile.age");
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crate::crypto::encrypt(recipients, b"data\n").unwrap();
+        std::fs::write(&enc_file, ciphertext).unwrap();
+
+        // --output without value with input NOT under secrets/<env>/ → error
+        let err = cmd_decrypt(DecryptOptions {
+            file: enc_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL.to_string()),
+            fields: None,
+            reveal: false,
+            value_only: false,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect_err("decrypt with sentinel outside secrets/ should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error for non-secrets input path, got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("secrets"),
+            "error should mention secrets/<env>/: {msg}"
+        );
+    }
+
+    /// Covers line 84: `create_dir_all(parent)` when value_only output path parent doesn't exist.
+    #[test]
+    fn test_cmd_decrypt_value_only_output_creates_missing_parent_dir() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Create and value-only-encrypt the source file
+        let env_file = dir.path().join("values.env");
+        std::fs::write(&env_file, "SECRET=abc\n").unwrap();
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                env_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                false,
+                None,
+                true, // value_only
+                false,
+            )
+            .expect("value-only encrypt should succeed");
+        });
+
+        // Output to a non-existent subdirectory; cmd_decrypt must create it
+        let out_file = dir.path().join("newsubdir/decrypted.env");
+        cmd_decrypt(DecryptOptions {
+            file: env_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: Some(out_file.to_string_lossy().to_string()),
+            fields: None,
+            reveal: false,
+            value_only: true,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect("value_only decrypt to new subdir should succeed");
+
+        assert!(out_file.exists(), "output file should be created");
+        let content = std::fs::read_to_string(&out_file).unwrap();
+        assert_eq!(content, "SECRET=abc\n");
+    }
 }

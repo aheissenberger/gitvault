@@ -181,7 +181,7 @@ pub fn decrypt_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use age::secrecy::SecretString;
+    use age::secrecy::{ExposeSecret, SecretString};
     use std::io::Write;
 
     fn gen_identity() -> x25519::Identity {
@@ -414,5 +414,35 @@ mod tests {
         decrypt_stream(&identity, std::io::Cursor::new(&ciphertext), &mut decrypted)
             .expect("decrypt_stream empty failed");
         assert_eq!(decrypted, b"");
+    }
+
+    #[test]
+    fn parse_identity_any_unknown_format_returns_decryption_error() {
+        let result = parse_identity_any("not-an-age-key-and-not-ssh");
+        assert!(
+            result.is_err(),
+            "unknown format should return Decryption error"
+        );
+        let err_msg = result.err().unwrap().to_string();
+        assert!(
+            err_msg.contains("Unknown identity format"),
+            "error message should mention unknown format: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn parse_identity_any_age_key_returns_x25519() {
+        // parse_identity_any should parse a valid AGE-SECRET-KEY- value as X25519
+        let identity = gen_identity();
+        let secret_key = identity.to_string();
+        let any_identity = parse_identity_any(secret_key.expose_secret())
+            .expect("valid AGE-SECRET-KEY should parse");
+        // The underlying identity should decrypt correctly.
+        let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
+        let ciphertext = encrypt(vec![recipient], b"test")
+            .expect("encrypt should succeed");
+        let decrypted = decrypt(any_identity.as_identity(), &ciphertext)
+            .expect("decrypt with parsed identity should succeed");
+        assert_eq!(decrypted, b"test");
     }
 }

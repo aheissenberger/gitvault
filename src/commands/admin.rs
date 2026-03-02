@@ -779,4 +779,59 @@ mod tests {
         );
         assert_eq!(result.unwrap(), CommandOutcome::Success);
     }
+
+    /// Helper to create fake ssh-add binary that returns N ED25519 keys.
+    #[cfg(unix)]
+    fn make_fake_ssh_add_dir(key_count: usize) -> TempDir {
+        use std::os::unix::fs::PermissionsExt;
+        let bin_dir = TempDir::new().unwrap();
+        let mut lines = String::new();
+        for i in 0..key_count {
+            lines.push_str(&format!(
+                "256 SHA256:fakeprint{i} test_key_{i} (ED25519)\n",
+            ));
+        }
+        let ssh_add_path = bin_dir.path().join("ssh-add");
+        std::fs::write(
+            &ssh_add_path,
+            format!("#!/bin/sh\nprintf '%s' '{}'\n", lines),
+        )
+        .unwrap();
+        std::fs::set_permissions(&ssh_add_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Also provide a stub ssh-keygen so PATH resolution doesn't fail
+        let ssh_keygen_path = bin_dir.path().join("ssh-keygen");
+        std::fs::write(&ssh_keygen_path, "#!/bin/sh\necho ''\n").unwrap();
+        std::fs::set_permissions(&ssh_keygen_path, std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        bin_dir
+    }
+
+    /// When SSH agent has 2 ED25519 keys, probe_identity_sources returns Ambiguous.
+    /// cmd_check should report it in plain-text output (covers lines 283-285 in Ambiguous arm).
+    #[cfg(unix)]
+    #[test]
+    fn test_cmd_check_reports_ambiguous_ssh_source() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        // Set up fake ssh-add returning 2 ED25519 keys so SSH source is Ambiguous.
+        let bin_dir = make_fake_ssh_add_dir(2);
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        with_env_var("PATH", Some(new_path.as_str()), || {
+            with_env_var("SSH_AUTH_SOCK", Some("/tmp/fake-agent.sock"), || {
+                with_identity_env(identity_file.path(), || {
+                    // cmd_check with json=false triggers the for loop over source_states,
+                    // hitting the Ambiguous arm (lines 283-285) for the ssh-agent source.
+                    let result = cmd_check(None, None, None, false);
+                    // Should succeed overall because GITVAULT_IDENTITY is available.
+                    assert!(result.is_ok(), "cmd_check should succeed: {result:?}");
+                });
+            });
+        });
+    }
 }

@@ -312,4 +312,30 @@ mod tests {
         let mode = std::fs::metadata(&hook_path).unwrap().permissions().mode();
         assert_ne!(mode & 0o111, 0, "hook should be executable");
     }
+
+    #[test]
+    fn test_upsert_managed_block_preserves_content_after_block() {
+        // When existing content has a managed block followed by extra content,
+        // upsert_managed_block must preserve that trailing content.
+        // Covers lines 61-64 (the !tail.is_empty() branch).
+        let existing = format!(
+            "#!/usr/bin/env sh\n{MANAGED_BLOCK_BEGIN}\nold body\n{MANAGED_BLOCK_END}\nextra trailing line\n"
+        );
+        let result = upsert_managed_block(&existing, "new body");
+
+        assert!(
+            result.contains("new body"),
+            "replaced block should contain new body"
+        );
+        assert!(
+            !result.contains("old body"),
+            "old body should be replaced"
+        );
+        assert!(
+            result.contains("extra trailing line"),
+            "trailing content after block should be preserved"
+        );
+        // Should end with a newline
+        assert!(result.ends_with('\n'));
+    }
 }

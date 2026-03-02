@@ -113,10 +113,12 @@ pub fn invoke_adapter_harden(adapter_path: &Path, repo_root: &Path) -> Result<()
 mod tests {
     use super::*;
     use crate::config::HookAdapter;
+    use crate::commands::test_helpers::global_test_lock;
     use std::str::FromStr;
 
     #[test]
     fn test_find_adapter_binary_not_on_path() {
+        let _lock = global_test_lock().lock().unwrap();
         // Use a name that is guaranteed not to be on PATH.
         let fake = HookAdapter::from_str("husky").unwrap();
         // Override PATH so the real gitvault-husky (if any) won't be found.
@@ -157,5 +159,78 @@ mod tests {
             None => unsafe { std::env::remove_var("PATH") },
         }
         assert!(result.is_err());
+    }
+
+    // ── invoke_adapter_harden ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_invoke_adapter_harden_success_with_true_command() {
+        // /usr/bin/true always exits 0 regardless of arguments.
+        let true_path = std::path::Path::new("/usr/bin/true");
+        if !true_path.exists() {
+            return; // Skip on platforms without /usr/bin/true
+        }
+        let result = invoke_adapter_harden(true_path, std::path::Path::new("/tmp"));
+        assert!(result.is_ok(), "invoke_adapter_harden with /usr/bin/true should succeed");
+    }
+
+    #[test]
+    fn test_invoke_adapter_harden_failure_with_false_command() {
+        // /usr/bin/false always exits 1 regardless of arguments.
+        let false_path = std::path::Path::new("/usr/bin/false");
+        if !false_path.exists() {
+            return; // Skip on platforms without /usr/bin/false
+        }
+        let result = invoke_adapter_harden(false_path, std::path::Path::new("/tmp"));
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "invoke_adapter_harden with /usr/bin/false should return Usage error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_invoke_adapter_harden_nonexistent_binary_fails() {
+        let result = invoke_adapter_harden(
+            std::path::Path::new("/no/such/binary/gitvault-adapter"),
+            std::path::Path::new("/tmp"),
+        );
+        assert!(
+            matches!(result, Err(GitvaultError::Other(_))),
+            "nonexistent binary should return Other error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_find_adapter_binary_found_when_on_path() {
+        // Create a temp directory with a fake gitvault-husky script, then prepend
+        // that directory to PATH so find_adapter_binary returns Found.
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let binary_path = tmp.path().join("gitvault-husky");
+        std::fs::write(&binary_path, "#!/bin/sh\nexit 0\n").expect("write script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&binary_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&binary_path, perms).unwrap();
+        }
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let new_path = format!(
+            "{}:{}",
+            tmp.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        unsafe { std::env::set_var("PATH", &new_path); }
+
+        let adapter = HookAdapter::from_str("husky").unwrap();
+        let result = find_adapter_binary(&adapter);
+
+        unsafe { std::env::set_var("PATH", original_path); }
+
+        assert!(
+            matches!(result, AdapterLookup::Found(_)),
+            "find_adapter_binary should find the binary when it's on PATH"
+        );
     }
 }
