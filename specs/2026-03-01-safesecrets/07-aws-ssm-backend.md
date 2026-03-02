@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-007"
 title: "Optional AWS SSM backend"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -47,3 +47,7 @@ Implement optional SSM synchronization workflows with secure diff and write cont
 
 ## Notes
 Authentication should support profile and role assumptions through shared config.
+
+## Current Verification Status
+- AC1: done — cmd_ssm_pull/diff/set/push implemented in src/ssm.rs with SsmBackend trait and MockSsmBackend for tests. References-only storage enforced when backend is ssm. cargo test --features ssm passes.
+- AC2: done — diffs redact values by default; --reveal flag exposes plaintext values. SSM writes (set/push) require production barrier (REQ-29). cargo test --features ssm passes.
