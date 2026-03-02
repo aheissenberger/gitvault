@@ -92,6 +92,9 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             crate::commands::admin::cmd_check(env, identity, cli.json)
         }
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
+        Commands::Identity { action } => {
+            crate::commands::identity::cmd_identity(action, cli.json, cli.no_prompt)
+        }
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
             dispatch_ssm(action, cli.aws_profile, cli.aws_role_arn, cli.json)
