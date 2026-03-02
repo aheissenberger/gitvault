@@ -117,7 +117,7 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cmd_allow_prod(ttl, cli.json)?;
             Ok(CommandOutcome::Success)
         }
-        Commands::MergeDriver { base, ours, theirs } => cmd_merge_driver(base, ours, theirs),
+        Commands::MergeDriver { base, ours, theirs } => cmd_merge_driver(base, ours, theirs, cli.json),
         Commands::Recipient { action } => {
             cmd_recipient(action, cli.json)?;
             Ok(CommandOutcome::Success)
@@ -642,11 +642,12 @@ fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
     Ok(())
 }
 
-/// Run as git merge driver for .env files (REQ-34)
+/// Run as git merge driver for .env files (REQ-34, REQ-48)
 fn cmd_merge_driver(
     base: String,
     ours: String,
     theirs: String,
+    json: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     let base_content = std::fs::read_to_string(&base)?;
     let ours_content = std::fs::read_to_string(&ours)?;
@@ -663,6 +664,12 @@ fn cmd_merge_driver(
         .map_err(|e| GitvaultError::Io(e.error))?;
 
     if has_conflict {
+        if json {
+            eprintln!(
+                "{}",
+                serde_json::json!({"status": "conflict", "message": "Merge conflict in .env file"})
+            );
+        }
         return Ok(CommandOutcome::Exit(1));
     }
 
@@ -1159,6 +1166,7 @@ mod tests {
             base.to_string_lossy().to_string(),
             ours.to_string_lossy().to_string(),
             theirs.to_string_lossy().to_string(),
+            false,
         )
         .unwrap();
 
@@ -1189,6 +1197,7 @@ mod tests {
             base.to_string_lossy().to_string(),
             ours.to_string_lossy().to_string(),
             theirs.to_string_lossy().to_string(),
+            false,
         )
         .unwrap();
 
@@ -1214,6 +1223,7 @@ mod tests {
             base.to_string_lossy().to_string(),
             ours.to_string_lossy().to_string(),
             theirs.to_string_lossy().to_string(),
+            false,
         )
         .unwrap();
 
@@ -1413,6 +1423,7 @@ mod tests {
             base.to_string_lossy().to_string(),
             ours.to_string_lossy().to_string(),
             theirs.to_string_lossy().to_string(),
+            false,
         )
         .expect("merge driver should return outcome");
 
