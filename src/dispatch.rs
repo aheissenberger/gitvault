@@ -29,16 +29,16 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             fields,
             reveal,
             value_only,
-        } => crate::commands::decrypt::cmd_decrypt(
+        } => crate::commands::decrypt::cmd_decrypt(crate::commands::decrypt::DecryptOptions {
             file,
             identity,
             output,
             fields,
             reveal,
             value_only,
-            cli.json,
-            cli.no_prompt,
-        ),
+            json: cli.json,
+            no_prompt: cli.no_prompt,
+        }),
         Commands::Materialize {
             env,
             identity,
@@ -61,16 +61,15 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             clear_env,
             pass,
             command,
-        } => crate::commands::run_cmd::cmd_run(
+        } => crate::commands::run_cmd::cmd_run(crate::commands::run_cmd::RunOptions {
             env,
             identity,
             prod,
             clear_env,
-            pass,
+            pass_raw: pass,
             command,
-            cli.json,
-            cli.no_prompt,
-        ),
+            no_prompt: cli.no_prompt,
+        }),
         Commands::AllowProd { ttl } => crate::commands::admin::cmd_allow_prod(ttl, cli.json),
         Commands::MergeDriver { base, ours, theirs } => {
             crate::commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
