@@ -6,6 +6,7 @@ use crate::error::GitvaultError;
 use crate::identity::load_identity_from_source;
 use crate::repo::decrypt_env_secrets;
 use crate::{barrier, crypto, fhsm, materialize, run};
+use zeroize::Zeroizing;
 
 /// Outcome returned by the top-level command dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +28,7 @@ pub trait EffectRunner {
         no_prompt: bool,
     ) -> Result<(), GitvaultError>;
 
-    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<String, GitvaultError>;
+    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<Zeroizing<String>, GitvaultError>;
 
     fn decrypt_secrets(
         &self,
@@ -66,7 +67,7 @@ impl EffectRunner for DefaultRunner {
         barrier::check_prod_barrier(repo_root, env, prod, no_prompt)
     }
 
-    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<String, GitvaultError> {
+    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<Zeroizing<String>, GitvaultError> {
         load_identity_from_source(source)
     }
 
@@ -228,9 +229,10 @@ mod tests {
         fn load_identity_str(
             &self,
             _source: &fhsm::IdentitySource,
-        ) -> Result<String, GitvaultError> {
+        ) -> Result<Zeroizing<String>, GitvaultError> {
             self.identity_str
                 .clone()
+                .map(Zeroizing::new)
                 .map_err(|e| GitvaultError::Other(e.clone()))
         }
 

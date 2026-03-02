@@ -3,6 +3,7 @@ use crate::{crypto, fhsm, keyring_store, repo};
 use regex::Regex;
 use std::path::Path;
 use std::sync::OnceLock;
+use zeroize::Zeroizing;
 
 pub fn extract_identity_key(content: &str) -> Option<String> {
     static IDENTITY_LINE_RE: OnceLock<Regex> = OnceLock::new();
@@ -16,11 +17,11 @@ pub fn extract_identity_key(content: &str) -> Option<String> {
         .map(|captures| captures[1].to_string())
 }
 
-pub fn load_identity_source(source: &str, source_name: &str) -> Result<String, GitvaultError> {
+pub fn load_identity_source(source: &str, source_name: &str) -> Result<Zeroizing<String>, GitvaultError> {
     let value = source.trim();
 
     if value.starts_with("AGE-SECRET-KEY-") {
-        return Ok(value.to_string());
+        return Ok(Zeroizing::new(value.to_string()));
     }
 
     let file_content = std::fs::read_to_string(value).map_err(|e| {
@@ -29,24 +30,26 @@ pub fn load_identity_source(source: &str, source_name: &str) -> Result<String, G
         ))
     })?;
 
-    extract_identity_key(&file_content).ok_or_else(|| {
-        GitvaultError::Usage(format!(
-            "{source_name} file does not contain a valid AGE-SECRET-KEY line"
-        ))
-    })
+    extract_identity_key(&file_content)
+        .map(Zeroizing::new)
+        .ok_or_else(|| {
+            GitvaultError::Usage(format!(
+                "{source_name} file does not contain a valid AGE-SECRET-KEY line"
+            ))
+        })
 }
 
 /// Load identity key string from file path or GITVAULT_IDENTITY env var
-pub fn load_identity(path: Option<String>) -> Result<String, GitvaultError> {
+pub fn load_identity(path: Option<String>) -> Result<Zeroizing<String>, GitvaultError> {
     load_identity_with(path, keyring_store::keyring_get)
 }
 
 pub fn load_identity_with<F>(
     path: Option<String>,
     keyring_get_fn: F,
-) -> Result<String, GitvaultError>
+) -> Result<Zeroizing<String>, GitvaultError>
 where
-    F: Fn() -> Result<String, GitvaultError>,
+    F: Fn() -> Result<Zeroizing<String>, GitvaultError>,
 {
     if let Some(p) = path {
         return load_identity_source(&p, "--identity");
@@ -67,12 +70,12 @@ where
 ///
 /// The `Unresolved` variant (emitted by the FHSM when no path was supplied)
 /// triggers the standard env-var / keyring fallback via [`load_identity`].
-pub fn load_identity_from_source(source: &fhsm::IdentitySource) -> Result<String, GitvaultError> {
+pub fn load_identity_from_source(source: &fhsm::IdentitySource) -> Result<Zeroizing<String>, GitvaultError> {
     match source {
         fhsm::IdentitySource::FilePath(p) => load_identity_source(p, "--identity"),
         fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),
         fhsm::IdentitySource::Keyring => keyring_store::keyring_get(),
-        fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(s.clone()),
+        fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(Zeroizing::new(s.clone())),
         fhsm::IdentitySource::Inline(_) => load_identity(None),
         // Unresolved: executor must run the full priority chain at runtime
         fhsm::IdentitySource::Unresolved => load_identity(None),
@@ -176,12 +179,12 @@ mod tests {
             std::env::set_var("GITVAULT_KEYRING", "1");
         }
 
-        let value = load_identity_with(None, || Ok("AGE-SECRET-KEY-TEST".to_string())).unwrap();
+        let value = load_identity_with(None, || Ok(Zeroizing::new("AGE-SECRET-KEY-TEST".to_string()))).unwrap();
 
         unsafe {
             std::env::remove_var("GITVAULT_KEYRING");
         }
-        assert_eq!(value, "AGE-SECRET-KEY-TEST");
+        assert_eq!(*value, "AGE-SECRET-KEY-TEST");
     }
 
     #[test]

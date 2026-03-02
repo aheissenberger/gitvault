@@ -121,9 +121,12 @@ pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError>
     let token_parent = token_path.parent().unwrap_or(repo_root);
     let tmp = tempfile::NamedTempFile::new_in(token_parent)?;
     fs::write(tmp.path(), expiry.to_string())?;
+    // REQ-18: restrict permissions BEFORE persist so the rename carries the ACL.
+    // This eliminates the TOCTOU window on Windows where icacls would otherwise
+    // run after the token file is already world-accessible at its final path.
+    enforce_restricted_token_permissions(tmp.path())?;
     tmp.persist(&token_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
-    enforce_restricted_token_permissions(&token_path)?;
 
     Ok(expiry)
 }
@@ -432,6 +435,48 @@ mod tests {
         assert!(
             result.is_err(),
             "revoke_prod should fail when token path is a directory"
+        );
+    }
+
+    /// REQ-18 / C7: permissions must be set on the temp file BEFORE persist()
+    /// so that the rename carries the restricted ACL — no TOCTOU window.
+    ///
+    /// We mimic `allow_prod`'s logic: create a NamedTempFile, apply
+    /// `enforce_restricted_token_permissions` on `tmp.path()`, verify the
+    /// mode is 0600, then persist.  The final file should inherit the ACL.
+    #[test]
+    #[cfg(unix)]
+    fn test_token_permissions_applied_before_persist_no_toctou() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = root();
+        let secrets = dir.path().join(".secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+
+        let tmp = tempfile::NamedTempFile::new_in(&secrets).unwrap();
+        std::fs::write(tmp.path(), "9999999999").unwrap();
+
+        // Permissions must be set on tmp.path() BEFORE the rename.
+        let tmp_path = tmp.path().to_path_buf();
+        enforce_restricted_token_permissions(&tmp_path).unwrap();
+
+        let meta = std::fs::metadata(&tmp_path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "temp token file must have 0600 BEFORE persist — got {:o}",
+            mode
+        );
+
+        // Now persist — final token file should inherit restricted permissions.
+        let final_path = secrets.join(".prod-token");
+        tmp.persist(&final_path).unwrap();
+        let final_meta = std::fs::metadata(&final_path).unwrap();
+        let final_mode = final_meta.permissions().mode() & 0o777;
+        assert_eq!(
+            final_mode, 0o600,
+            "final token file must have 0600 after persist — got {:o}",
+            final_mode
         );
     }
 }

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use tokio::process::Command;
 
 use aws_sdk_ssm::types::ParameterType;
 
@@ -28,11 +28,12 @@ pub fn refs_file_path(repo_root: &Path, env: &str) -> PathBuf {
 
 /// Derive the application name from the git remote URL, falling back to the
 /// repository directory name.
-fn get_app_name(repo_root: &Path) -> String {
+async fn get_app_name(repo_root: &Path) -> String {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(repo_root)
-        .output();
+        .output()
+        .await;
 
     if let Ok(out) = output
         && out.status.success()
@@ -139,7 +140,7 @@ pub async fn cmd_ssm_pull(
     aws: &AwsConfig,
     json: bool,
 ) -> Result<(), GitvaultError> {
-    let app = get_app_name(repo_root);
+    let app = get_app_name(repo_root).await;
     let client = aws.build_client().await?;
     let prefix = format!("/{app}/{env}/");
 
@@ -182,7 +183,7 @@ pub async fn cmd_ssm_diff(
     reveal: bool,
     json: bool,
 ) -> Result<(), GitvaultError> {
-    let app = get_app_name(repo_root);
+    let app = get_app_name(repo_root).await;
     let client = aws.build_client().await?;
     let prefix = format!("/{app}/{env}/");
 
@@ -275,7 +276,7 @@ pub async fn cmd_ssm_set(
     // REQ-29: prod barrier
     crate::barrier::check_prod_barrier(repo_root, env, true, false)?;
 
-    let app = get_app_name(repo_root);
+    let app = get_app_name(repo_root).await;
     let path = ssm_path(&app, env, key);
     let client = aws.build_client().await?;
 
@@ -351,6 +352,12 @@ pub async fn cmd_ssm_push(
         }
     }
 
+    if skipped > 0 {
+        return Err(GitvaultError::Other(format!(
+            "{skipped} parameter(s) not pushed because the corresponding env var(s) were not set. Set them or use --allow-partial (not yet implemented)."
+        )));
+    }
+
     if json {
         println!(
             "{}",
@@ -362,8 +369,6 @@ pub async fn cmd_ssm_push(
 
     Ok(())
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

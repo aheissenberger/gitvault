@@ -40,7 +40,7 @@ pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, Git
     Ok(CommandOutcome::Success)
 }
 
-/// Harden the repository: update .gitignore, install git hooks
+/// Harden the repository: update .gitignore, install git hooks, register merge driver in .gitattributes
 pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     crate::materialize::ensure_gitignored(
@@ -48,8 +48,12 @@ pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
         crate::materialize::REQUIRED_GITIGNORE_ENTRIES,
     )?;
     repo::install_git_hooks(&repo_root)?;
+    crate::materialize::ensure_gitattributes(
+        &repo_root,
+        &[crate::materialize::GITATTRIBUTES_MERGE_DRIVER_ENTRY],
+    )?;
     crate::output::output_success(
-        "Repository hardened: .gitignore updated, git hooks installed.",
+        "Repository hardened: .gitignore updated, git hooks installed, .gitattributes updated.",
         json,
     );
     Ok(CommandOutcome::Success)
@@ -168,6 +172,43 @@ mod tests {
     use super::*;
     use crate::commands::test_helpers::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_cmd_harden_writes_gitattributes() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        cmd_harden(false).expect("harden should succeed");
+
+        let gitattributes = std::fs::read_to_string(dir.path().join(".gitattributes"))
+            .expect(".gitattributes should exist after harden");
+        assert!(
+            gitattributes.contains("*.env merge=gitvault-env"),
+            ".gitattributes should register the gitvault-env merge driver"
+        );
+    }
+
+    #[test]
+    fn test_cmd_harden_gitattributes_idempotent() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Run harden twice — entry must appear exactly once.
+        cmd_harden(false).expect("first harden should succeed");
+        cmd_harden(false).expect("second harden should succeed");
+
+        let gitattributes = std::fs::read_to_string(dir.path().join(".gitattributes"))
+            .expect(".gitattributes should exist after harden");
+        assert_eq!(
+            gitattributes.matches("*.env merge=gitvault-env").count(),
+            1,
+            "merge driver entry should appear exactly once even after running harden twice"
+        );
+    }
 
     #[test]
     fn test_cmd_harden_and_status_in_git_repo() {

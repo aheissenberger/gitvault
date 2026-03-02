@@ -7,6 +7,7 @@
 //! - Windows: Credential Manager (windows-native feature)
 
 use crate::error::GitvaultError;
+use zeroize::Zeroizing;
 
 const SERVICE: &str = "gitvault";
 const USERNAME: &str = "age-identity";
@@ -23,12 +24,13 @@ pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
 }
 
 /// Retrieve the age identity key from the OS keyring (REQ-39).
-pub fn keyring_get() -> Result<String, GitvaultError> {
+pub fn keyring_get() -> Result<Zeroizing<String>, GitvaultError> {
     keyring_get_with(|service, username| {
         let entry = keyring::Entry::new(service, username)
             .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
         entry
             .get_password()
+            .map(Zeroizing::new)
             .map_err(|e| GitvaultError::Keyring(e.to_string()))
     })
 }
@@ -53,9 +55,9 @@ where
     set_password(SERVICE, USERNAME, key)
 }
 
-pub fn keyring_get_with<F>(get_password: F) -> Result<String, GitvaultError>
+pub fn keyring_get_with<F>(get_password: F) -> Result<Zeroizing<String>, GitvaultError>
 where
-    F: FnOnce(&str, &str) -> Result<String, GitvaultError>,
+    F: FnOnce(&str, &str) -> Result<Zeroizing<String>, GitvaultError>,
 {
     get_password(SERVICE, USERNAME)
 }
@@ -136,10 +138,10 @@ mod tests {
         let mut captured: Option<(String, String)> = None;
         let value = keyring_get_with(|service, username| {
             captured = Some((service.to_string(), username.to_string()));
-            Ok("secret".to_string())
+            Ok(Zeroizing::new("secret".to_string()))
         })
         .unwrap();
-        assert_eq!(value, "secret");
+        assert_eq!(*value, "secret");
         assert_eq!(captured, Some((SERVICE.to_string(), USERNAME.to_string())));
     }
 

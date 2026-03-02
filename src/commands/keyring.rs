@@ -5,6 +5,7 @@ use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::load_identity;
 use crate::{crypto, keyring_store};
+use zeroize::Zeroizing;
 
 /// Manage identity key in OS keyring (REQ-39)
 pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
@@ -26,7 +27,7 @@ pub fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
 ) -> Result<CommandOutcome, GitvaultError>
 where
     SetFn: Fn(&str) -> Result<(), GitvaultError>,
-    GetFn: Fn() -> Result<String, GitvaultError>,
+    GetFn: Fn() -> Result<Zeroizing<String>, GitvaultError>,
     DeleteFn: Fn() -> Result<(), GitvaultError>,
 {
     match action {
@@ -78,12 +79,14 @@ mod tests {
     /// Generates a fresh age identity string – used as a stand-in get_fn in
     /// Set / Delete tests, and as the real get_fn in Get tests (so the body
     /// is actually executed and covered during Get-action tests).
-    fn gen_get() -> Result<String, GitvaultError> {
+    fn gen_get() -> Result<Zeroizing<String>, GitvaultError> {
         use age::secrecy::ExposeSecret;
-        Ok(age::x25519::Identity::generate()
-            .to_string()
-            .expose_secret()
-            .to_string())
+        Ok(Zeroizing::new(
+            age::x25519::Identity::generate()
+                .to_string()
+                .expose_secret()
+                .to_string(),
+        ))
     }
 
     /// Returns an error – used as the active set_fn in Set-error tests.
@@ -92,7 +95,7 @@ mod tests {
     }
 
     /// Returns an error – used as the active get_fn in Get-error tests.
-    fn get_err() -> Result<String, GitvaultError> {
+    fn get_err() -> Result<Zeroizing<String>, GitvaultError> {
         Err(GitvaultError::Keyring("get-failed".to_string()))
     }
 
@@ -199,7 +202,7 @@ mod tests {
             KeyringAction::Get,
             false,
             set_ok,
-            move || Ok(key_str.clone()),
+            move || Ok(Zeroizing::new(key_str.clone())),
             delete_ok,
         );
         assert!(result.is_ok());
@@ -243,7 +246,7 @@ mod tests {
             KeyringAction::Get,
             false,
             set_ok,
-            || Ok("not-a-valid-age-secret-key".to_string()),
+            || Ok(Zeroizing::new("not-a-valid-age-secret-key".to_string())),
             delete_ok,
         );
         assert!(result.is_err());
@@ -275,7 +278,7 @@ mod tests {
             KeyringAction::Get,
             true,
             set_ok,
-            move || Ok(key_str.clone()),
+            move || Ok(Zeroizing::new(key_str.clone())),
             delete_ok,
         );
         assert!(result.is_ok());

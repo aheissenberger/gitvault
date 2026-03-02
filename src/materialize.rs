@@ -38,12 +38,14 @@ pub fn materialize_env_file(
     tmp.write_all(content.as_bytes())
         .map_err(GitvaultError::Io)?;
 
+    // REQ-18: restrict permissions BEFORE persist so the rename carries the ACL.
+    // This eliminates the TOCTOU window on Windows where icacls would otherwise
+    // run after the file is already world-accessible at its final path.
+    enforce_restricted_env_permissions(tmp.path())?;
+
     // REQ-17: atomically rename to target (persist moves the temp file)
     tmp.persist(&env_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
-
-    // REQ-18: restrict permissions on final .env path
-    enforce_restricted_env_permissions(&env_path)?;
 
     Ok(())
 }
@@ -81,6 +83,49 @@ fn escape_env_value(value: &str) -> String {
         }
     }
     result
+}
+
+/// The merge driver attribute line that `harden` registers. REQ-34
+pub const GITATTRIBUTES_MERGE_DRIVER_ENTRY: &str = "*.env merge=gitvault-env";
+
+/// Ensure the `.gitattributes` file at `repo_root` contains the given lines. REQ-34
+pub fn ensure_gitattributes(repo_root: &Path, entries: &[&str]) -> Result<(), GitvaultError> {
+    let gitattributes_path = repo_root.join(".gitattributes");
+
+    let existing = if gitattributes_path.exists() {
+        fs::read_to_string(&gitattributes_path)?
+    } else {
+        String::new()
+    };
+
+    if let Some(content) = merge_gitattributes_entries(&existing, entries) {
+        let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
+        tmp.write_all(content.as_bytes())
+            .map_err(GitvaultError::Io)?;
+        tmp.persist(&gitattributes_path)
+            .map_err(|e| GitvaultError::Io(e.error))?;
+    }
+
+    Ok(())
+}
+
+fn merge_gitattributes_entries(existing: &str, entries: &[&str]) -> Option<String> {
+    let mut content = existing.to_string();
+    let mut changed = false;
+
+    for entry in entries {
+        let already_present = existing.lines().any(|line| line.trim() == *entry);
+        if !already_present {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(entry);
+            content.push('\n');
+            changed = true;
+        }
+    }
+
+    if changed { Some(content) } else { None }
 }
 
 /// Ensure the given entries exist in `.gitignore`. REQ-9, REQ-20
@@ -271,8 +316,96 @@ mod tests {
     }
 
     #[test]
+    fn test_ensure_gitattributes_adds_merge_driver() {
+        let dir = TempDir::new().unwrap();
+
+        ensure_gitattributes(dir.path(), &[GITATTRIBUTES_MERGE_DRIVER_ENTRY]).unwrap();
+
+        let content = fs::read_to_string(dir.path().join(".gitattributes")).unwrap();
+        assert!(
+            content.contains("*.env merge=gitvault-env"),
+            ".gitattributes should contain the merge driver entry"
+        );
+    }
+
+    #[test]
+    fn test_ensure_gitattributes_idempotent() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join(".gitattributes"),
+            "*.env merge=gitvault-env\n",
+        )
+        .unwrap();
+
+        ensure_gitattributes(dir.path(), &[GITATTRIBUTES_MERGE_DRIVER_ENTRY]).unwrap();
+
+        let content = fs::read_to_string(dir.path().join(".gitattributes")).unwrap();
+        assert_eq!(
+            content.matches("*.env merge=gitvault-env").count(),
+            1,
+            "merge driver entry should appear exactly once"
+        );
+    }
+
+    #[test]
+    fn test_ensure_gitattributes_creates_file_if_missing() {
+        let dir = TempDir::new().unwrap();
+
+        ensure_gitattributes(dir.path(), &["*.env merge=gitvault-env"]).unwrap();
+
+        assert!(dir.path().join(".gitattributes").exists());
+    }
+
+    #[test]
+    fn test_merge_gitattributes_entries_returns_none_when_unchanged() {
+        let merged =
+            merge_gitattributes_entries("*.env merge=gitvault-env\n", &["*.env merge=gitvault-env"]);
+        assert!(merged.is_none());
+    }
+
+    #[test]
     fn test_escape_env_value_escapes_control_and_dollar() {
         let escaped = escape_env_value("a$b\nc\rd");
         assert_eq!(escaped, "a\\$b\\nc\\rd");
+    }
+
+    /// REQ-18 / C7: permissions must be set on the temp file BEFORE persist()
+    /// so that the rename carries the restricted ACL — no TOCTOU window.
+    ///
+    /// We intercept by calling `enforce_restricted_env_permissions` on a fresh
+    /// temp file (mimicking what `materialize_env_file` does) and confirm the
+    /// permissions are applied before the file is moved to its final location.
+    #[test]
+    #[cfg(unix)]
+    fn test_permissions_applied_before_persist_no_toctou() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let mut tmp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        tmp.write_all(b"SECRET=value\n").unwrap();
+
+        // Permissions must be set on tmp.path() (before rename), not on the final path.
+        let tmp_path = tmp.path().to_path_buf();
+        enforce_restricted_env_permissions(&tmp_path).unwrap();
+
+        // Verify the temp file already has 0600 before persist
+        let meta = fs::metadata(&tmp_path).unwrap();
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "temp file must have 0600 BEFORE persist — got {:o}",
+            mode
+        );
+
+        // Now persist — the final file should inherit the restricted permissions.
+        let final_path = dir.path().join(".env");
+        tmp.persist(&final_path).unwrap();
+        let final_meta = fs::metadata(&final_path).unwrap();
+        let final_mode = final_meta.permissions().mode() & 0o777;
+        assert_eq!(
+            final_mode, 0o600,
+            "final .env must have 0600 after persist — got {:o}",
+            final_mode
+        );
     }
 }

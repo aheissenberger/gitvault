@@ -494,6 +494,205 @@ fn allow_and_revoke_prod_round_trip() {
     );
 }
 
+/// REQ-36: A removed recipient can no longer decrypt after a rotate.
+///
+/// Workflow:
+///  1. Encrypt a secret using the *old* keypair as the only recipient.
+///  2. Add a *new* keypair as a persistent recipient.
+///  3. Remove the *old* keypair from the persistent recipients list.
+///  4. Rotate — re-encrypts all secrets to the current (new-only) recipient set.
+///  5. Decryption attempt with the old identity must fail.
+///  6. Decryption with the new identity must succeed.
+#[test]
+fn removed_recipient_cannot_decrypt_after_rotate() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+
+    // Old keypair — used to encrypt the secret initially.
+    let (_old_id_tmp, old_identity_path, old_pubkey) = write_identity_file();
+    // New keypair — will become the sole recipient after rotation.
+    let (_new_id_tmp, new_identity_path, new_pubkey) = write_identity_file();
+
+    // Write and encrypt a secret file using the old public key as recipient.
+    let env_file = repo.path().join("app.env");
+    std::fs::write(&env_file, "SECRET=rotate_secret\n").unwrap();
+
+    let enc = bin()
+        .args(["encrypt", "app.env", "--recipient", &old_pubkey])
+        .env("GITVAULT_IDENTITY", &old_identity_path)
+        .env("SECRETS_ENV", "dev")
+        .current_dir(repo.path())
+        .output()
+        .expect("encrypt should run");
+    assert!(
+        enc.status.success(),
+        "initial encrypt failed: {}",
+        String::from_utf8_lossy(&enc.stderr)
+    );
+
+    let age_file = repo.path().join("secrets/dev/app.env.age");
+    assert!(age_file.exists(), "encrypted file should exist after encrypt");
+
+    // Register the new public key as a persistent recipient.
+    let add_new = bin()
+        .args(["recipient", "add", &new_pubkey])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient add (new) should run");
+    assert!(add_new.status.success(), "recipient add (new) failed");
+
+    // Register old key too so we can remove it cleanly.
+    let add_old = bin()
+        .args(["recipient", "add", &old_pubkey])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient add (old) should run");
+    assert!(add_old.status.success(), "recipient add (old) failed");
+
+    // Remove the old public key from persistent recipients.
+    let remove_old = bin()
+        .args(["recipient", "remove", &old_pubkey])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient remove should run");
+    assert!(
+        remove_old.status.success(),
+        "recipient remove failed: {}",
+        String::from_utf8_lossy(&remove_old.stderr)
+    );
+
+    // Rotate: the old identity can still decrypt the current ciphertext, and
+    // the rotate command re-encrypts everything to the current recipient list
+    // (new key only).
+    let rotate = bin()
+        .args(["rotate"])
+        .env("GITVAULT_IDENTITY", &old_identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("rotate should run");
+    assert!(
+        rotate.status.success(),
+        "rotate failed: {}",
+        String::from_utf8_lossy(&rotate.stderr)
+    );
+
+    // After rotation the old key must NOT be able to decrypt.
+    let dec_old = bin()
+        .args([
+            "decrypt",
+            "secrets/dev/app.env.age",
+            "--identity",
+            &old_identity_path,
+            "--reveal",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .expect("decrypt (old identity) should run");
+    assert!(
+        !dec_old.status.success(),
+        "old identity should NOT decrypt after rotation (exit code was {:?}); stdout: {}",
+        dec_old.status.code(),
+        String::from_utf8_lossy(&dec_old.stdout)
+    );
+
+    // The new key MUST still be able to decrypt and recover the plaintext.
+    let dec_new = bin()
+        .args([
+            "decrypt",
+            "secrets/dev/app.env.age",
+            "--identity",
+            &new_identity_path,
+            "--reveal",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .expect("decrypt (new identity) should run");
+    assert!(
+        dec_new.status.success(),
+        "new identity should decrypt successfully after rotation; stderr: {}",
+        String::from_utf8_lossy(&dec_new.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&dec_new.stdout).contains("SECRET=rotate_secret"),
+        "expected 'SECRET=rotate_secret' in decrypted output, got: {}",
+        String::from_utf8_lossy(&dec_new.stdout)
+    );
+}
+
+/// REQ-6: gitvault can encrypt and decrypt a `.env` file as a whole file
+/// (not `--value-only` mode, which encrypts individual values in-place).
+///
+/// Workflow:
+///  1. Create a `.env` file with several key=value pairs.
+///  2. Run `gitvault encrypt .env --recipient <pubkey>` (whole-file mode).
+///  3. Verify the `.age` artifact exists and does not expose plaintext.
+///  4. Run `gitvault decrypt secrets/dev/.env.age --reveal`.
+///  5. Verify that every original key=value pair is present in the output.
+#[test]
+fn encrypt_decrypt_dotenv_whole_file() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_id_tmp, identity_path, pubkey) = write_identity_file();
+
+    // Create a .env file with multiple key=value pairs.
+    let dotenv_content = "DATABASE_URL=postgres://localhost/mydb\nAPI_KEY=supersecret\nDEBUG=false\n";
+    let dotenv_path = repo.path().join(".env");
+    std::fs::write(&dotenv_path, dotenv_content).unwrap();
+
+    // Whole-file encrypt (no --value-only flag).
+    let enc = bin()
+        .args(["encrypt", ".env", "--recipient", &pubkey])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .env("SECRETS_ENV", "dev")
+        .current_dir(repo.path())
+        .output()
+        .expect("encrypt should run");
+    assert!(
+        enc.status.success(),
+        "encrypt .env failed: {}",
+        String::from_utf8_lossy(&enc.stderr)
+    );
+
+    // The encrypted artifact must exist at secrets/dev/.env.age.
+    let age_path = repo.path().join("secrets/dev/.env.age");
+    assert!(
+        age_path.exists(),
+        "expected secrets/dev/.env.age to exist after whole-file encrypt"
+    );
+
+    // The encrypted file must NOT expose the original plaintext.
+    let age_bytes = std::fs::read(&age_path).unwrap();
+    assert!(
+        !age_bytes.windows(dotenv_content.len()).any(|w| w == dotenv_content.as_bytes()),
+        "encrypted file must not contain plaintext content"
+    );
+
+    // Decrypt with --reveal; output must contain every original key=value pair.
+    let dec = bin()
+        .args(["decrypt", "secrets/dev/.env.age", "--identity", &identity_path, "--reveal"])
+        .current_dir(repo.path())
+        .output()
+        .expect("decrypt should run");
+    assert!(
+        dec.status.success(),
+        "decrypt .env.age failed: {}",
+        String::from_utf8_lossy(&dec.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&dec.stdout);
+    assert!(
+        stdout.contains("DATABASE_URL=postgres://localhost/mydb"),
+        "expected DATABASE_URL in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("API_KEY=supersecret"),
+        "expected API_KEY in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("DEBUG=false"),
+        "expected DEBUG in output, got: {stdout}"
+    );
+}
+
 /// Integration: gitvault decrypt --reveal prints plaintext to stdout.
 #[test]
 fn decrypt_reveal_prints_plaintext() {
