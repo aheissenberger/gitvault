@@ -161,26 +161,26 @@ async fn get_app_name(repo_root: &Path) -> Result<String, GitvaultError> {
 
 /// Load the refs map from disk.  Returns an empty map when the file does not
 /// exist yet.
-fn load_refs(repo_root: &Path, env: &str) -> Result<HashMap<String, String>, GitvaultError> {
+async fn load_refs(repo_root: &Path, env: &str) -> Result<HashMap<String, String>, GitvaultError> {
     let path = refs_file_path(repo_root, env);
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let text = std::fs::read_to_string(&path)?;
+    let text = tokio::fs::read_to_string(&path).await?;
     let map: HashMap<String, String> =
         serde_json::from_str(&text).map_err(|e| GitvaultError::Other(e.to_string()))?;
     Ok(map)
 }
 
 /// Persist the refs map to disk, creating parent directories as needed.
-fn save_refs(
+async fn save_refs(
     repo_root: &Path,
     env: &str,
     refs: &HashMap<String, String>,
 ) -> Result<(), GitvaultError> {
     let path = refs_file_path(repo_root, env);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
     let text =
         serde_json::to_string_pretty(refs).map_err(|e| GitvaultError::Other(e.to_string()))?;
@@ -216,7 +216,7 @@ async fn cmd_ssm_pull_with<B: SsmBackend>(
         refs.insert(key, name.clone());
     }
 
-    save_refs(repo_root, env, &refs)?;
+    save_refs(repo_root, env, &refs).await?;
 
     if json {
         let mut keys: Vec<&String> = refs.keys().collect();
@@ -256,7 +256,7 @@ async fn cmd_ssm_diff_with<B: SsmBackend>(
         })
         .collect();
 
-    let local_refs = load_refs(repo_root, env)?;
+    let local_refs = load_refs(repo_root, env).await?;
 
     let mut all_keys: Vec<String> = {
         let mut s: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -329,9 +329,9 @@ async fn cmd_ssm_set_with<B: SsmBackend>(
     let path = ssm_path(app, env, key);
     backend.put_param(&path, value).await?;
 
-    let mut refs = load_refs(repo_root, env)?;
+    let mut refs = load_refs(repo_root, env).await?;
     refs.insert(key.to_string(), path.clone());
-    save_refs(repo_root, env, &refs)?;
+    save_refs(repo_root, env, &refs).await?;
 
     if json {
         println!(
@@ -353,7 +353,7 @@ async fn cmd_ssm_push_with<B: SsmBackend>(
     _app: &str,
     json: bool,
 ) -> Result<(), GitvaultError> {
-    let refs = load_refs(repo_root, env)?;
+    let refs = load_refs(repo_root, env).await?;
     if refs.is_empty() {
         return Err(GitvaultError::Other(
             "No local SSM references found. Run `ssm pull` first or use `ssm set`.".to_string(),
@@ -437,9 +437,10 @@ pub async fn cmd_ssm_set(
     value: &str,
     aws: &AwsConfig,
     json: bool,
+    prod: bool,
 ) -> Result<(), GitvaultError> {
-    // REQ-29: prod barrier
-    crate::barrier::check_prod_barrier(repo_root, env, true, false)?;
+    // REQ-13: prod barrier — only passes when --prod flag is explicitly provided
+    crate::barrier::check_prod_barrier(repo_root, env, prod, false)?;
 
     let app = get_app_name(repo_root).await?;
     let client = aws.build_client().await?;
@@ -464,9 +465,10 @@ pub async fn cmd_ssm_push(
     env: &str,
     aws: &AwsConfig,
     json: bool,
+    prod: bool,
 ) -> Result<(), GitvaultError> {
-    // REQ-29: prod barrier
-    crate::barrier::check_prod_barrier(repo_root, env, true, false)?;
+    // REQ-13: prod barrier — only passes when --prod flag is explicitly provided
+    crate::barrier::check_prod_barrier(repo_root, env, prod, false)?;
 
     let app = get_app_name(repo_root).await?;
     let client = aws.build_client().await?;
@@ -503,14 +505,18 @@ mod tests {
         assert_eq!(refs_file_path(dir.path(), "prod"), expected);
     }
 
-    #[test]
-    fn test_serde_refs() {
+    #[tokio::test]
+    async fn test_serde_refs() {
         let dir = TempDir::new().unwrap();
         let mut refs: HashMap<String, String> = HashMap::new();
         refs.insert("DB_PASS".to_string(), "/myapp/staging/DB_PASS".to_string());
         refs.insert("API_KEY".to_string(), "/myapp/staging/API_KEY".to_string());
-        save_refs(dir.path(), "staging", &refs).expect("save_refs should succeed");
-        let loaded = load_refs(dir.path(), "staging").expect("load_refs should succeed");
+        save_refs(dir.path(), "staging", &refs)
+            .await
+            .expect("save_refs should succeed");
+        let loaded = load_refs(dir.path(), "staging")
+            .await
+            .expect("load_refs should succeed");
         assert_eq!(
             loaded.get("DB_PASS").map(String::as_str),
             Some("/myapp/staging/DB_PASS")
@@ -522,10 +528,12 @@ mod tests {
         assert_eq!(loaded.len(), 2);
     }
 
-    #[test]
-    fn test_load_refs_missing_file_returns_empty() {
+    #[tokio::test]
+    async fn test_load_refs_missing_file_returns_empty() {
         let dir = TempDir::new().unwrap();
-        let refs = load_refs(dir.path(), "dev").expect("should return empty map");
+        let refs = load_refs(dir.path(), "dev")
+            .await
+            .expect("should return empty map");
         assert!(refs.is_empty());
     }
 
@@ -598,7 +606,7 @@ mod tests {
             .await
             .expect("pull should succeed");
 
-        let refs = load_refs(dir.path(), "dev").unwrap();
+        let refs = load_refs(dir.path(), "dev").await.unwrap();
         assert_eq!(
             refs.get("DB_PASS").map(String::as_str),
             Some("/myapp/dev/DB_PASS")
@@ -622,7 +630,7 @@ mod tests {
             .await
             .expect("pull should succeed with empty SSM");
 
-        let refs = load_refs(dir.path(), "dev").unwrap();
+        let refs = load_refs(dir.path(), "dev").await.unwrap();
         assert!(refs.is_empty());
     }
 
@@ -646,15 +654,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut refs = HashMap::new();
         refs.insert("DB_PASS".to_string(), "/myapp/dev/DB_PASS".to_string());
-        save_refs(dir.path(), "dev", &refs).unwrap();
-
-        let mut mock = MockSsmBackend::new();
-        mock.expect_fetch_params().times(1).returning(|_| {
-            Ok(vec![(
-                "/myapp/dev/DB_PASS".to_string(),
-                "secret".to_string(),
-            )])
-        });
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, false)
             .await
@@ -669,7 +669,7 @@ mod tests {
             "MISSING_KEY".to_string(),
             "/myapp/dev/MISSING_KEY".to_string(),
         );
-        save_refs(dir.path(), "dev", &refs).unwrap();
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         let mut mock = MockSsmBackend::new();
         mock.expect_fetch_params()
@@ -706,7 +706,7 @@ mod tests {
             "/myapp/dev/LOCAL_ONLY".to_string(),
         );
         refs.insert("IN_SYNC".to_string(), "/myapp/dev/IN_SYNC".to_string());
-        save_refs(dir.path(), "dev", &refs).unwrap();
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         let mut mock = MockSsmBackend::new();
         mock.expect_fetch_params().times(1).returning(|_| {
@@ -763,7 +763,7 @@ mod tests {
         .await
         .expect("set should succeed");
 
-        let refs = load_refs(dir.path(), "dev").unwrap();
+        let refs = load_refs(dir.path(), "dev").await.unwrap();
         assert_eq!(
             refs.get("DB_PASS").map(String::as_str),
             Some("/myapp/dev/DB_PASS")
@@ -808,7 +808,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut refs = HashMap::new();
         refs.insert("MY_VAR".to_string(), "/myapp/dev/MY_VAR".to_string());
-        save_refs(dir.path(), "dev", &refs).unwrap();
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         let mut mock = MockSsmBackend::new();
         mock.expect_put_param()
@@ -828,7 +828,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut refs = HashMap::new();
         refs.insert("PUSH_VAR".to_string(), "/myapp/dev/PUSH_VAR".to_string());
-        save_refs(dir.path(), "dev", &refs).unwrap();
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         let mut mock = MockSsmBackend::new();
         mock.expect_put_param().times(1).returning(|_, _| Ok(()));
@@ -849,7 +849,7 @@ mod tests {
             "ABSENT_VAR".to_string(),
             "/myapp/dev/ABSENT_VAR".to_string(),
         );
-        save_refs(dir.path(), "dev", &refs).unwrap();
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         // `put_param` must NOT be called — mockall panics if it is.
         let mock = MockSsmBackend::new();
@@ -877,7 +877,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut refs = HashMap::new();
         refs.insert("VAR".to_string(), "/myapp/dev/VAR".to_string());
-        save_refs(dir.path(), "dev", &refs).unwrap();
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
 
         let mut mock = MockSsmBackend::new();
         mock.expect_put_param()

@@ -100,14 +100,21 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
                             let env = env.unwrap_or_else(|| "dev".to_string());
                             crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal, cli.json).await
                         }
-                        SsmAction::Set { key, value, env } => {
+                        SsmAction::Set {
+                            key,
+                            value,
+                            env,
+                            prod,
+                        } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json)
-                                .await
+                            crate::ssm::cmd_ssm_set(
+                                &repo_root, &env, &key, &value, &aws, cli.json, prod,
+                            )
+                            .await
                         }
-                        SsmAction::Push { env } => {
+                        SsmAction::Push { env, prod } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_push(&repo_root, &env, &aws, cli.json).await
+                            crate::ssm::cmd_ssm_push(&repo_root, &env, &aws, cli.json, prod).await
                         }
                     }
                 })

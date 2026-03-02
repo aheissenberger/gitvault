@@ -213,10 +213,16 @@ pub enum SsmAction {
         value: String,
         #[arg(short, long)]
         env: Option<String>,
+        /// Require production barrier (required when env=prod) (REQ-13)
+        #[arg(long)]
+        prod: bool,
     },
     /// Push all local SSM references to Parameter Store
     Push {
         #[arg(short, long)]
         env: Option<String>,
+        /// Require production barrier (required when env=prod) (REQ-13)
+        #[arg(long)]
+        prod: bool,
     },
 }
