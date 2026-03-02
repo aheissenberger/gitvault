@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::error::GitvaultError;
 
+/// Restrict `path` to owner-read/write only (mode `0600` on Unix, restricted ACL on Windows).
 pub fn enforce_owner_rw(path: &Path, resource: &str) -> Result<(), GitvaultError> {
     #[cfg(unix)]
     {

@@ -9,20 +9,33 @@ pub const EXIT_BARRIER: i32 = 5;
 
 #[derive(Error, Debug)]
 pub enum GitvaultError {
+    /// Wraps a standard I/O error.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// An error occurred during encryption of secret material.
     #[error("Encryption error: {0}")]
     Encryption(String),
+    /// An error occurred during decryption of secret material.
     #[error("Decryption error: {0}")]
     Decryption(String),
+    /// A plaintext secret was detected in a git-tracked file.
     #[error("Plaintext secret detected in tracked files: {0}")]
     PlaintextLeak(String),
+    /// The caller supplied an invalid argument or flag combination.
     #[error("Invalid argument: {0}")]
     Usage(String),
+    /// A catch-all error variant for miscellaneous failures.
     #[error("{0}")]
     Other(String),
+    /// The production barrier condition was not met.
     #[error("Production barrier not satisfied: {0}")]
     BarrierNotSatisfied(String),
+    /// An error occurred while accessing the system keyring.
+    #[error("Keyring error: {0}")]
+    Keyring(String),
+    /// A drift between encrypted and plaintext secrets was detected.
+    #[error("Drift detected: {0}")]
+    Drift(String),
 }
 
 impl GitvaultError {
@@ -35,6 +48,8 @@ impl GitvaultError {
             GitvaultError::Usage(_) => EXIT_USAGE,
             GitvaultError::Other(_) => EXIT_ERROR,
             GitvaultError::BarrierNotSatisfied(_) => EXIT_BARRIER,
+            GitvaultError::Keyring(_) => EXIT_ERROR,
+            GitvaultError::Drift(_) => EXIT_PLAINTEXT_LEAK,
         }
     }
 }

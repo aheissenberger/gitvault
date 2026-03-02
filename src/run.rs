@@ -53,15 +53,6 @@ pub fn run_command(
     Ok(status.code().unwrap_or(crate::error::EXIT_ERROR))
 }
 
-/// Parse a comma-separated list of variable names (used for --pass).
-#[allow(dead_code)]
-pub fn parse_pass_vars(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {
@@ -198,17 +189,6 @@ mod tests {
             std::env::remove_var("GITVAULT_OVERRIDE_TEST");
         }
         assert_eq!(code, 0, "secret should override inherited env var");
-    }
-
-    #[test]
-    fn test_parse_pass_vars() {
-        assert_eq!(
-            parse_pass_vars("HOME,PATH,USER"),
-            vec!["HOME", "PATH", "USER"]
-        );
-        assert_eq!(parse_pass_vars("  A , B "), vec!["A", "B"]);
-        assert_eq!(parse_pass_vars(""), Vec::<String>::new());
-        assert_eq!(parse_pass_vars("SINGLE"), vec!["SINGLE"]);
     }
 
     #[test]
