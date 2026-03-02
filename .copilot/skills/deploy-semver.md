@@ -2,6 +2,8 @@
 
 Use this skill when the user asks to deploy or release.
 
+Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../../.github/instructions/rust.instructions.md).
+
 ## Required first question
 
 Ask exactly this before doing any release mutation:
