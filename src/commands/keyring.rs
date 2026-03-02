@@ -18,6 +18,31 @@ pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, 
     )
 }
 
+/// Dependency-injected variant of [`cmd_keyring`] that accepts explicit keyring
+/// operation functions instead of calling the real OS keyring backend.
+///
+/// This is the core implementation; [`cmd_keyring`] is a thin wrapper that
+/// forwards the three real [`keyring_store`](crate::keyring_store) functions.
+///
+/// # Parameters
+///
+/// - `action` – the keyring sub-command to execute ([`KeyringAction::Set`],
+///   [`KeyringAction::Get`], or [`KeyringAction::Delete`]).
+/// - `json` – when `true`, successful output is emitted as JSON; otherwise
+///   human-readable text is printed.
+/// - `keyring_set_fn` (`SetFn`) – called with the raw age secret-key string
+///   when `action` is `Set`.  Signature: `Fn(&str) -> Result<(), GitvaultError>`.
+/// - `keyring_get_fn` (`GetFn`) – called with no arguments when `action` is
+///   `Get`; must return the stored age secret-key string wrapped in
+///   [`Zeroizing`].  Signature: `Fn() -> Result<Zeroizing<String>, GitvaultError>`.
+/// - `keyring_delete_fn` (`DeleteFn`) – called with no arguments when `action`
+///   is `Delete`.  Signature: `Fn() -> Result<(), GitvaultError>`.
+///
+/// # When to use
+///
+/// Prefer this function in tests so you can inject lightweight mock closures
+/// (or named helper functions) in place of the real OS keyring, keeping tests
+/// hermetic and fast.  Production callers should use [`cmd_keyring`] instead.
 pub fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
     action: KeyringAction,
     json: bool,
