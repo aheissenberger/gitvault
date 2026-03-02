@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-022"
 title: "Plan: Husky hook manager plugin integration"
-status: "draft"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:

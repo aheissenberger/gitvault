@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-025"
 title: "Plan: .gitvault/config.toml — canonical project config and hook-adapter selection"
-status: "draft"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:
