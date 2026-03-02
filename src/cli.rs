@@ -68,6 +68,9 @@ pub enum Commands {
         /// Print decrypted content to stdout instead of writing to file (REQ-41)
         #[arg(long)]
         reveal: bool,
+        /// Decrypt .env values individually (reverse of --value-only encrypt; REQ-6)
+        #[arg(long)]
+        value_only: bool,
     },
     /// Materialize secrets to root .env
     Materialize {

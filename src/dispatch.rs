@@ -28,12 +28,14 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             output,
             fields,
             reveal,
+            value_only,
         } => crate::commands::decrypt::cmd_decrypt(
             file,
             identity,
             output,
             fields,
             reveal,
+            value_only,
             cli.json,
             cli.no_prompt,
         ),
@@ -252,6 +254,7 @@ mod tests {
                 ),
                 fields: None,
                 reveal: false,
+                value_only: false,
             },
         };
         let decrypt_outcome = run(decrypt_cli).expect("decrypt dispatch should succeed");
@@ -474,6 +477,7 @@ mod tests {
                 output: None,
                 fields: None,
                 reveal: false,
+                value_only: false,
             },
         };
         // Decrypting a nonexistent file should propagate the error.

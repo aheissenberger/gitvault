@@ -199,6 +199,7 @@ mod tests {
                 None,
                 Some("secret".to_string()),
                 false,
+                false,
                 true,
                 true,
             )

@@ -8,12 +8,14 @@ use crate::identity::{load_identity, load_identity_from_source};
 use crate::{crypto, fhsm, repo, structured};
 
 /// Decrypt a .age file and write plaintext
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_decrypt(
     file: String,
     identity_path: Option<String>,
     output: Option<String>,
     fields: Option<String>,
     reveal: bool,
+    value_only: bool,
     json: bool,
     no_prompt: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
@@ -39,6 +41,31 @@ pub fn cmd_decrypt(
     let input_path = PathBuf::from(&file);
     let identity = crypto::parse_identity(&identity_str)?;
     let repo_root = crate::repo::find_repo_root()?;
+
+    // REQ-6: value-only mode: decrypt each VALUE in a .env file individually
+    if value_only {
+        use crate::structured::decrypt_env_values;
+        let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
+        let decrypted = decrypt_env_values(&content, &identity)?;
+        if reveal {
+            print!("{decrypted}");
+            return Ok(CommandOutcome::Success);
+        }
+        let out_path = match &output {
+            Some(p) => std::path::PathBuf::from(p),
+            None => input_path.clone(),
+        };
+        repo::validate_write_path(&repo_root, &out_path)?;
+        let mut tmp = tempfile::Builder::new()
+            .prefix(".gitvault-tmp-")
+            .tempfile_in(out_path.parent().unwrap_or(std::path::Path::new(".")))?;
+        use std::io::Write;
+        tmp.write_all(decrypted.as_bytes())?;
+        tmp.persist(&out_path)
+            .map_err(|e| GitvaultError::Io(e.error))?;
+        crate::output::output_success(&format!("Decrypted values in {}", out_path.display()), json);
+        return Ok(CommandOutcome::Success);
+    }
 
     // REQ-4: field-level decryption for JSON/YAML/TOML
     if let Some(fields_str) = &fields {
@@ -125,6 +152,7 @@ mod tests {
             None,
             None,
             true,
+            false,
             true,
             true,
         )
@@ -150,6 +178,7 @@ mod tests {
             Some(identity_file.path().to_string_lossy().to_string()),
             None,
             None,
+            false,
             false,
             true,
             true,
@@ -193,6 +222,7 @@ mod tests {
                 Some("secret".to_string()),
                 false,
                 false,
+                false,
                 true,
             )
         })
@@ -201,6 +231,62 @@ mod tests {
         assert!(
             matches!(err, GitvaultError::Decryption(_)),
             "expected Decryption error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_decrypt_value_only_roundtrip() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Create a plain .env file
+        let env_file = dir.path().join("app.env");
+        std::fs::write(&env_file, "API_KEY=mysecret\nDB_HOST=localhost\n").unwrap();
+
+        // Encrypt with --value-only
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                env_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                None,
+                true, // value_only
+                false,
+            )
+            .expect("value-only encrypt should succeed");
+        });
+
+        // Verify values are encrypted in-place
+        let encrypted_content = std::fs::read_to_string(&env_file).unwrap();
+        assert!(
+            encrypted_content.contains("API_KEY=age:"),
+            "API_KEY value should be encrypted"
+        );
+        assert!(
+            encrypted_content.contains("DB_HOST=age:"),
+            "DB_HOST value should be encrypted"
+        );
+
+        // Decrypt with --value-only
+        cmd_decrypt(
+            env_file.to_string_lossy().to_string(),
+            Some(identity_file.path().to_string_lossy().to_string()),
+            None,
+            None,
+            false,
+            true, // value_only
+            false,
+            true,
+        )
+        .expect("value-only decrypt should succeed");
+
+        // Verify values are restored
+        let decrypted_content = std::fs::read_to_string(&env_file).unwrap();
+        assert_eq!(
+            decrypted_content, "API_KEY=mysecret\nDB_HOST=localhost\n",
+            "decrypted content should match original"
         );
     }
 }
