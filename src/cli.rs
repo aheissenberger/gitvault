@@ -167,6 +167,12 @@ pub enum Commands {
     /// Revoke the production allow token immediately [REQ-14].
     RevokeProd,
 
+    /// Manage local identity keys (REQ-61..63)
+    Identity {
+        #[command(subcommand)]
+        action: IdentityAction,
+    },
+
     /// AWS SSM Parameter Store backend (REQ-26 to REQ-30)
     #[cfg(feature = "ssm")]
     Ssm {
@@ -203,6 +209,35 @@ pub enum KeyringAction {
     Get,
     /// Remove stored identity from OS keyring
     Delete,
+}
+
+#[derive(Subcommand)]
+pub enum IdentityAction {
+    /// Create a new identity key (REQ-61, REQ-62)
+    Create {
+        /// Identity profile: classic (age X25519) or hybrid (age X25519 + future PQ-ready label)
+        #[arg(long, value_enum, default_value = "classic")]
+        profile: IdentityProfile,
+        /// Export identity to file (optional; default: store in OS keyring)
+        #[arg(long, value_name = "PATH")]
+        out: Option<String>,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IdentityProfile {
+    Classic,
+    Hybrid,
+}
+
+impl std::fmt::Display for IdentityProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentityProfile::Classic => write!(f, "classic"),
+            IdentityProfile::Hybrid => write!(f, "hybrid"),
+        }
+    }
 }
 
 #[cfg(test)]
