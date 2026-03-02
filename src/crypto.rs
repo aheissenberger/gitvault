@@ -273,4 +273,66 @@ mod tests {
         let result = encrypt_stream(vec![recipient], &mut reader, &mut writer);
         assert!(matches!(result, Err(GitvaultError::Encryption(_))));
     }
+
+    #[test]
+    fn failing_writer_flush_returns_ok() {
+        // Exercises the `flush` impl of FailingWriter (lines 261-263).
+        use std::io::Write;
+        let mut w = FailingWriter;
+        assert!(w.flush().is_ok());
+    }
+
+    #[test]
+    fn encrypt_empty_plaintext_roundtrip() {
+        let identity = gen_identity();
+        let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
+        let ciphertext = encrypt(vec![recipient], b"").expect("encrypt empty failed");
+        let decrypted = decrypt(&identity, &ciphertext).expect("decrypt empty failed");
+        assert_eq!(decrypted, b"");
+    }
+
+    #[test]
+    fn parse_recipient_invalid_key_returns_encryption_error() {
+        let result = parse_recipient("not-a-valid-age-key");
+        assert!(matches!(result, Err(GitvaultError::Encryption(_))));
+    }
+
+    #[test]
+    fn parse_identity_invalid_key_returns_decryption_error() {
+        let result = parse_identity("not-a-valid-age-identity");
+        assert!(matches!(result, Err(GitvaultError::Decryption(_))));
+    }
+
+    #[test]
+    fn decrypt_corrupted_ciphertext_returns_decryption_error() {
+        let identity = gen_identity();
+        let result = decrypt(&identity, b"this is not valid age ciphertext");
+        assert!(matches!(result, Err(GitvaultError::Decryption(_))));
+    }
+
+    #[test]
+    fn decrypt_stream_corrupted_ciphertext_returns_decryption_error() {
+        let identity = gen_identity();
+        let mut out = Vec::new();
+        let result = decrypt_stream(
+            &identity,
+            std::io::Cursor::new(b"not valid age ciphertext".to_vec()),
+            &mut out,
+        );
+        assert!(matches!(result, Err(GitvaultError::Decryption(_))));
+    }
+
+    #[test]
+    fn encrypt_stream_empty_plaintext_roundtrip() {
+        let identity = gen_identity();
+        let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
+        let mut reader = std::io::Cursor::new(b"".to_vec());
+        let mut ciphertext = Vec::new();
+        encrypt_stream(vec![recipient], &mut reader, &mut ciphertext)
+            .expect("encrypt_stream empty failed");
+        let mut decrypted = Vec::new();
+        decrypt_stream(&identity, std::io::Cursor::new(&ciphertext), &mut decrypted)
+            .expect("decrypt_stream empty failed");
+        assert_eq!(decrypted, b"");
+    }
 }

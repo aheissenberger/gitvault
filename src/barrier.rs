@@ -319,4 +319,114 @@ mod tests {
 
         assert!(!has_valid_token(dir.path()));
     }
+
+    #[test]
+    fn revoke_prod_when_no_token_exists_is_noop() {
+        // Covers the `if token_path.exists()` branch where the file is absent.
+        let dir = root();
+        // No token created — revoke should succeed silently.
+        revoke_prod(dir.path()).unwrap();
+        assert!(!has_valid_token(dir.path()));
+    }
+
+    #[test]
+    fn allow_prod_with_overflow_ttl_returns_error() {
+        // Covers the `checked_add(...).ok_or_else(...)` error branch.
+        let dir = root();
+        let result = allow_prod(dir.path(), u64::MAX);
+        assert!(
+            matches!(result, Err(GitvaultError::Other(_))),
+            "expected Other error for overflow TTL, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn now_secs_returns_reasonable_timestamp() {
+        // Sanity: should be well past year 2000 (timestamp > 946_684_800).
+        assert!(now_secs() > 946_684_800);
+    }
+
+    #[test]
+    fn read_confirmation_from_returns_false_for_empty_input() {
+        let mut input = Cursor::new(b"".to_vec());
+        let accepted = read_confirmation_from(&mut input).unwrap();
+        assert!(!accepted);
+    }
+
+    #[test]
+    fn read_confirmation_from_accepts_lowercase_y() {
+        let mut input = Cursor::new(b"y\n".to_vec());
+        let accepted = read_confirmation_from(&mut input).unwrap();
+        assert!(accepted);
+    }
+
+    /// Covers the `map_err(GitvaultError::Io)?` error branch in `read_confirmation_from`.
+    #[test]
+    fn read_confirmation_from_returns_io_error_on_read_failure() {
+        struct FailingRead;
+        impl std::io::Read for FailingRead {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("simulated read failure"))
+            }
+        }
+        // BufReader wraps FailingRead and calls Read::read via fill_buf.
+        let mut reader = std::io::BufReader::new(FailingRead);
+        let result = read_confirmation_from(&mut reader);
+        assert!(matches!(result, Err(GitvaultError::Io(_))));
+    }
+
+    /// Covers the `fs::create_dir_all(parent)?` error branch in `allow_prod`
+    /// by placing a regular file where the `.secrets` directory needs to be.
+    #[test]
+    fn allow_prod_fails_when_secrets_path_is_a_file() {
+        let dir = root();
+        // Write a regular file at `.secrets` so create_dir_all fails.
+        std::fs::write(dir.path().join(".secrets"), "not a directory").unwrap();
+        let result = allow_prod(dir.path(), 3600);
+        assert!(
+            result.is_err(),
+            "allow_prod should fail when .secrets is a regular file"
+        );
+    }
+
+    /// Covers the `NamedTempFile::new_in(token_parent)?` error branch in `allow_prod`
+    /// by making the `.secrets` directory read-only after creating it.
+    #[test]
+    #[cfg(unix)]
+    fn allow_prod_fails_when_token_dir_is_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = root();
+        let secrets = dir.path().join(".secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+
+        // Mode 0o555: readable + executable (create_dir_all succeeds, no write for new_in).
+        let mut perms = std::fs::metadata(&secrets).unwrap().permissions();
+        perms.set_mode(0o555);
+        std::fs::set_permissions(&secrets, perms).unwrap();
+
+        let result = allow_prod(dir.path(), 3600);
+
+        // Restore before TempDir drop (chmod only requires ownership, not write).
+        let mut perms = std::fs::metadata(&secrets).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&secrets, perms).unwrap();
+
+        assert!(result.is_err(), "allow_prod should fail with read-only .secrets dir");
+    }
+
+    /// Covers the `fs::remove_file(&token_path)?` error branch in `revoke_prod`
+    /// by placing a directory at the token file path (remove_file on a dir → EISDIR).
+    #[test]
+    fn revoke_prod_fails_when_token_path_is_a_directory() {
+        let dir = root();
+        // Create a directory at the token path so `remove_file` returns an error.
+        let token_dir = dir.path().join(".secrets/.prod-token");
+        std::fs::create_dir_all(&token_dir).unwrap();
+
+        let result = revoke_prod(dir.path());
+        assert!(
+            result.is_err(),
+            "revoke_prod should fail when token path is a directory"
+        );
+    }
 }
