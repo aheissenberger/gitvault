@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-009"
 title: "Merge optimization and conflict behavior"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -47,3 +47,6 @@ Optimize secret storage and serialization for conflict isolation and predictable
 
 ## Notes
 Merge driver must be optional and documented.
+
+## Current Verification Status
+cargo test --all passes. Per-file secret storage avoids mega-blob; merge driver with pure merge_env_content implemented and tested with 6 table-driven tests; field-level age-armor minimizes diff noise.

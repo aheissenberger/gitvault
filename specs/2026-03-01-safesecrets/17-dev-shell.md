@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-017"
 title: "NFR: interactive developer sandbox shell"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -80,3 +80,6 @@ isolated environment for testing all `gitvault` subcommands against the current 
 - The generated age identity and public key are printed in the banner for copy-paste convenience.
 - Cleanup uses `fs::remove_dir_all`; a warning is printed (but the task still exits 0) if removal
   fails (e.g. permissions issue in CI).
+
+## Current Verification Status
+cargo build --manifest-path xtask/Cargo.toml passes. dev-shell implemented in xtask/src/main.rs run_dev_shell(). All 4 acceptance criteria satisfied: isolated temp git repo, GITVAULT_IDENTITY set, cleanup on exit, listed in help.

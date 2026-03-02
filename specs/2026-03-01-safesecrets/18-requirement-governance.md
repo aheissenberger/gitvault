@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-018"
 title: "Requirement governance and spec gating"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:
@@ -52,3 +52,6 @@ Define governance for requirement classification and enforce a spec-first gate f
 
 ## Notes
 This file acts as the main spec-set placeholder for REQ-56 and links to the detailed per-REQ artifact in `specs/2026-03-01-safesecrets-req/req-056.md`.
+
+## Current Verification Status
+cargo xtask instructions-lint and cargo xtask spec-verify pass. Governance instructions present in .copilot/ instruction files.

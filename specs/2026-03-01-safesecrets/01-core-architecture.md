@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-001"
 title: "Core architecture and encryption format"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -50,3 +50,6 @@ Implement deterministic encryption behavior with explicit support for structured
 
 ## Notes
 All deterministic behavior should be enforced with canonical ordering and encoding rules.
+
+## Current Verification Status
+cargo test --all passes. age encryption, multi-recipient, field-level JSON/YAML/TOML, and .env whole-file mode all implemented in src/crypto.rs and src/structured.rs.

@@ -47,3 +47,6 @@ Guarantee script-safe operation and cloud auth compatibility for automated workf
 
 ## Notes
 Check mode should validate policy, access, and drift without mutation.
+
+## Current Verification Status
+REQ-48 (non-interactive CI): done — GITVAULT_IDENTITY env var + CI auto-detection via ci_is_non_interactive(). REQ-50 (preflight check): done — gitvault check subcommand implemented in src/main.rs cmd_check. REQ-49 (AWS role-based auth): pending — AwsConfig struct prepared in src/aws_config.rs but AWS SSM backend (REQ-26..30) not yet implemented.

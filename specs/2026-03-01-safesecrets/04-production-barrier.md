@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-004"
 title: "Production barrier enforcement"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:
@@ -47,3 +47,6 @@ Enforce explicit multi-signal authorization for prod materialization and runtime
 
 ## Notes
 Token storage and expiry validation must be deterministic and auditable.
+
+## Current Verification Status
+cargo test --all passes. Barrier matrix tests pass for all combinations of env/flags/token state. Fail-closed semantics verified in src/barrier.rs.

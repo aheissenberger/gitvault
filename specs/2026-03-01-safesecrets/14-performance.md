@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-014"
 title: "Performance and scaling requirements"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -47,3 +47,6 @@ Define scaling and efficiency guarantees for core operations.
 
 ## Notes
 Performance guardrails should be captured with regression thresholds.
+
+## Current Verification Status
+cargo test --all passes. age streaming API used for all crypto operations; per-file linear iteration in decrypt_env_secrets; status avoids decryption by using git plumbing.

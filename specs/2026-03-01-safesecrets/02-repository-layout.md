@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-002"
 title: "Repository layout and tracked plaintext protection"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -47,3 +47,6 @@ Ensure plaintext cannot be accidentally committed and layout is consistent acros
 
 ## Notes
 Validation should use Git plumbing commands for deterministic results.
+
+## Current Verification Status
+cargo test --all passes. Encrypted artifacts under secrets/, plaintext under .secrets/plain/<env>/, root .env generated and gitignored, tracked plaintext detection implemented in src/repo.rs.

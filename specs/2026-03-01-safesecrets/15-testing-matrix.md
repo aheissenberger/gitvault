@@ -56,6 +56,6 @@ Convert the testing matrix statement into an executable test planning artifact.
 This file captures the matrix section from the consolidated source document.
 
 ## Current Verification Status
-- AC1 and AC2 are implemented in CI workflow definitions and scenario coverage.
+- AC1 and AC2 are implemented in CI workflow definitions and scenario coverage; 206 unit tests + 6 integration tests passing.
 - AC3 remains open until `cargo llvm-cov --workspace --all-features --fail-under-lines 100` passes in CI.
-- Latest local verification snapshot reports total Rust line coverage at `95.43%`, below the `100%` gate.
+- Latest local verification snapshot (2026-03-02) reports total Rust line coverage at `93.72% line / 95.63% region`, below the `100%` gate.

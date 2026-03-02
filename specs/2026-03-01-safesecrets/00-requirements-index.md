@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-000"
 title: "SafeSecrets requirements index and traceability"
-status: "draft"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -65,3 +65,6 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 
 ## Notes
 This index is the canonical source for requirement-to-spec traceability.
+
+## Current Verification Status
+cargo xtask spec-verify passes (79 files). Coverage map is complete for REQ-1..REQ-58.

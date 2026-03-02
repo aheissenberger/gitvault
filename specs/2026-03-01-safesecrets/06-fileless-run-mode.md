@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-006"
 title: "Fileless run mode and process environment injection"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:
@@ -47,3 +47,6 @@ Provide a secure `run` subcommand for environment injection and command executio
 
 ## Notes
 Variable precedence and passthrough behavior must be documented and stable.
+
+## Current Verification Status
+cargo test --all passes. run subcommand injects env vars via src/run.rs without writing plaintext files; exit code propagated; prod barrier enforced.

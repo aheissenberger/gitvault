@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-016"
 title: "Release signing and deterministic versioning"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:
@@ -52,3 +52,6 @@ Define artifact signing, deterministic format version controls, and minimal plat
 ## Notes
 Version bumps should be intentional and governed by compatibility policy.
 Binary size and symbol-table checks should be part of release verification.
+
+## Current Verification Status
+cargo test --all passes. Release artifacts signed in CI; GITVAULT_FORMAT_VERSION=1 in src/crypto.rs; release binaries stripped per platform via CI profile config.
