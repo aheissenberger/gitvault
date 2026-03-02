@@ -534,8 +534,8 @@ EOF
             printf 'class %s < Formula\n' "$class_name"
             printf '  desc "Secure, Git-native vault for managing age-encrypted secrets"\n'
             printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
-            printf '  license "MIT"\n'
             printf '  version "%s"\n' "$VERSION"
+            printf '  license "MIT"\n'
             printf '\n'
             printf '  on_macos do\n'
             printf '    on_arm do\n'
