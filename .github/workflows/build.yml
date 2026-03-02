@@ -1,16 +1,20 @@
-name: build
+name: release-binaries
 
 on:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish binaries to a GitHub Release on manual runs"
+        required: false
+        default: false
+        type: boolean
   push:
-    branches:
-      - main
     tags:
       - 'v*'
 
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-binaries-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -19,50 +23,108 @@ jobs:
     permissions:
       contents: read
     env:
-      CARGO_HOME: ${{ github.workspace }}/.cargo
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Detect cargo workspace
-        id: cargo
-        run: |
-          if [[ -f Cargo.toml ]]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Setup Rust stable
-        if: steps.cargo.outputs.present == 'true'
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           components: clippy,rustfmt
 
       - name: Cache cargo artifacts
-        if: steps.cargo.outputs.present == 'true'
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        if: steps.cargo.outputs.present == 'true'
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        if: steps.cargo.outputs.present == 'true'
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests
-        if: steps.cargo.outputs.present == 'true'
         run: cargo test --all-targets
 
       - name: Release tag consistency check
-        if: steps.cargo.outputs.present == 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         run: cargo run --manifest-path xtask/Cargo.toml -- release-check
 
-      - name: Skip message
-        if: steps.cargo.outputs.present != 'true'
-        run: echo "No Cargo.toml found; skipping Rust CI checks."
+  build:
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: gitvault-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: gitvault-windows-x86_64.exe
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: gitvault-macos-aarch64
+          - os: macos-14
+            target: x86_64-apple-darwin
+            artifact: gitvault-macos-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: cp target/${{ matrix.target }}/release/gitvault ${{ matrix.artifact }}
+
+      - name: Rename artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cp target/${{ matrix.target }}/release/gitvault.exe ${{ matrix.artifact }}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    steps:
+      - name: Download all workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/gitvault-linux-x86_64
+            artifacts/**/gitvault-windows-x86_64.exe
+            artifacts/**/gitvault-macos-aarch64
+            artifacts/**/gitvault-macos-x86_64

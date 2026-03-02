@@ -63,80 +63,22 @@ git push origin vX.Y.Z
 
 ## 5) Confirm CI workflows
 
-After tag push, verify these workflows:
-- [build.yml](../.github/workflows/build.yml) runs and passes release consistency checks.
-- [release-tag.yml](../.github/workflows/release-tag.yml) runs release build/signing steps.
-
-Optional fast-check workflow (non-release gate):
-- [ci-verify.yml](../.github/workflows/ci-verify.yml)
+After tag push or manual dispatch, verify this workflow:
+- [build.yml](../.github/workflows/build.yml) runs and publishes release artifacts.
 
 ## CI/CD overview
 
-- **Fast verify workflow**: [ci-verify.yml](../.github/workflows/ci-verify.yml)
-  - Runs on push to `main` and pull requests.
-  - Enforces `cargo fmt`, `clippy`, and tests.
-  - Does not build release binaries.
-
-- **Build workflow**: [build.yml](../.github/workflows/build.yml)
-  - Runs on pull requests and pushes to `main`.
-  - Also runs on tag pushes matching `v*`.
-  - On tag builds, enforces release/tag consistency with `cargo run -p xtask -- release-check`.
-
-- **Release build workflow**: [release-tag.yml](../.github/workflows/release-tag.yml)
-  - Triggers on `v*` tags and manual dispatch.
-  - Runs verification once, then builds platform binaries.
-  - Produces Linux and Windows cosign-signed binaries.
-  - Produces separate macOS arm64 and x86_64 binaries, signs and notarizes both.
+- **Unified release workflow**: [build.yml](../.github/workflows/build.yml)
+  - Triggers only on tag pushes matching `v*` and manual dispatch.
+  - Runs `cargo fmt`, `clippy`, tests, and tag consistency checks.
+  - Builds release binaries for Linux, Windows, and macOS (arm64 + x86_64).
+  - Uploads binaries as workflow artifacts.
+  - Publishes release assets automatically on tag runs.
+  - On manual runs, publishes release assets only when `publish_release=true`.
 
 ### Required secrets
 
-| Secret | Purpose |
-|--------|---------|
-| `MACOS_CERTIFICATE_P12_BASE64` | Code signing certificate |
-| `MACOS_CERTIFICATE_PASSWORD` | Certificate password |
-| `MACOS_KEYCHAIN_PASSWORD` | Keychain password |
-| `MACOS_SIGNING_IDENTITY` | Signing identity name |
-| `APPLE_API_KEY_ID` | App Store Connect API key ID |
-| `APPLE_API_ISSUER_ID` | App Store Connect issuer ID |
-| `APPLE_API_PRIVATE_KEY_P8_BASE64` | Base64-encoded App Store Connect `.p8` private key |
-
-### API key setup (notarization)
-
-1. In App Store Connect, open [Users and Access → Integrations → App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api), create an API key, and copy the key metadata.
-   - Required role: `Developer` or higher (`App Manager`, `Admin`, or `Account Holder`).
-2. Save the key ID as GitHub secret `APPLE_API_KEY_ID`.
-3. Save the issuer ID as GitHub secret `APPLE_API_ISSUER_ID`.
-4. Base64-encode the downloaded `AuthKey_<KEY_ID>.p8` file and save it as `APPLE_API_PRIVATE_KEY_P8_BASE64`.
-5. Keep the four macOS signing secrets above (`MACOS_*`) unchanged.
-
-### Migration note (from Apple ID auth)
-
-If no other workflow depends on Apple ID-based notarization, you can remove these old secrets:
-
-- `APPLE_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-- `APPLE_TEAM_ID`
-
-Example (macOS) to encode `.p8`:
-
-```bash
-base64 -i AuthKey_<KEY_ID>.p8 | pbcopy
-```
-
-Example (Linux) to encode `.p8`:
-
-```bash
-base64 -w 0 AuthKey_<KEY_ID>.p8
-```
-
-### Optional Homebrew tap automation
-
-Set secret `HOMEBREW_TAP_TOKEN` (PAT with repo write access) and variables `HOMEBREW_TAP_REPO` /
-`HOMEBREW_TAP_FORMULA_PATH` to auto-open formula update PRs on tagged releases.
-
-For this repository:
-- `HOMEBREW_TAP_REPO=aheissenberger/homebrew-tools`
-- `HOMEBREW_TAP_FORMULA_PATH=Formula/gitvault.rb`
+No repository secrets are required for the current unified workflow.
 
 ## 6) Validate published binary version output
 
