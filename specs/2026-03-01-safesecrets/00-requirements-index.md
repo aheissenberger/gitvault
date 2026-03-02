@@ -63,6 +63,7 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-64 -> `22-husky-hook-manager-plugin.md`
 - REQ-65 -> `23-pre-commit-hook-manager-plugin.md`
 - REQ-66 -> `24-lefthook-hook-manager-plugin.md`
+- REQ-67 -> `25-hook-adapter-config.md`
 
 ## Plan Specs (Additive)
 - `19-ssh-identity-requirements.md` -> Plan: SSH identity requirements
@@ -71,6 +72,7 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - `22-husky-hook-manager-plugin.md` -> Plan: Husky hook manager plugin integration
 - `23-pre-commit-hook-manager-plugin.md` -> Plan: pre-commit hook manager plugin integration
 - `24-lefthook-hook-manager-plugin.md` -> Plan: lefthook hook manager plugin integration
+- `25-hook-adapter-config.md` -> Plan: .gitvault/config.toml canonical config and hook-adapter selection
 
 ## Acceptance Criteria
 - AC1: Coverage map exists and is complete.
