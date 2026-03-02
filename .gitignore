@@ -14,3 +14,5 @@ build.keychain-db
 build.keychain
 .env
 .secrets/plain/
+dev-shell-folder
+dev-shell-folder-git

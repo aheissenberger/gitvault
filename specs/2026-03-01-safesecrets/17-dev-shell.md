@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-017"
 title: "NFR: interactive developer sandbox shell"
-status: "done"
+status: "InProgress"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**", "target/**"]
 acceptance:
   - id: "AC1"
-    text: "cargo xtask dev-shell builds the current debug binary, creates an isolated temp git repo containing sample secret files, opens an interactive shell with gitvault resolvable on PATH, and removes the temp directory on exit."
+    text: "cargo xtask dev-shell builds the current debug binary, creates an isolated temp folder, creates a workspace-root symlink named dev-shell-folder to that temp folder, creates a second workspace-root symlink named dev-shell-folder-git to client/.git, creates client and server.git folders, initializes server.git with git init --bare, initializes client with git init, configures origin to ../server.git, and opens an interactive shell in the client folder with gitvault resolvable on PATH."
   - id: "AC2"
     text: "The shell environment provides GITVAULT_IDENTITY pointing to a generated age identity key so that encrypt/decrypt commands work without additional setup."
   - id: "AC3"
@@ -45,6 +45,8 @@ isolated environment for testing all `gitvault` subcommands against the current 
 ## Constraints
 - Must not modify the host repository or working tree.
 - Sandbox is ephemeral: created in `$TMPDIR` and removed unconditionally on exit.
+- A symlink named `dev-shell-folder` is created in the workspace root and points to the temp folder for VS Code access while the shell is active.
+- A second symlink named `dev-shell-folder-git` is created in the workspace root and points to `client/.git` for VS Code access while the shell is active.
 - The `gitvault` binary on PATH must be the current debug build, not any previously installed version.
 - No internet access or cloud credentials are required for the sandbox to be functional.
 
@@ -55,31 +57,56 @@ isolated environment for testing all `gitvault` subcommands against the current 
 - NFR: Discoverability — welcome banner documents available commands and pre-configured values.
 
 ## Acceptance Criteria
-- AC1: Running `cargo xtask dev-shell` results in a shell opened inside a git-initialised temp
-  directory containing `.env.plain` and `db.secrets.json`; `gitvault --help` succeeds inside it.
-- AC2: `$GITVAULT_IDENTITY` is set to a valid age identity file path; `gitvault encrypt .env.plain
-  --recipient <pubkey>` succeeds without extra flags.
-- AC3: After the user types `exit`, the temp directory no longer exists on disk.
-- AC4: `cargo xtask help` (or `cargo xtask --help`) lists `dev-shell` with a description.
+- AC1: Running `cargo xtask dev-shell` builds the current debug binary, creates a temp folder, creates `dev-shell-folder` symlink in
+  workspace root, creates `dev-shell-folder-git` symlink to `client/.git` in workspace root,
+  creates `client/` and `server.git/`, runs `git init --bare` in `server.git`, runs `git init` in
+  `client`, configures `git remote add origin ../server.git`, and sets upstream with `git push -u
+  origin main`.
+- AC2: The `client/` folder contains this sample structure with sample data, including at least 1–2
+  secret-like fields (for example `Password`, `AccessToken`) across files:
+  ```
+  .env
+  conf/
+    dbsecrets.json
+    serverless.yaml
+    mail/
+      acount.toml
+  ```
+- AC3: `gitvault` is resolvable on PATH inside the launched shell and `$GITVAULT_IDENTITY` points to
+  a generated valid age identity key for encrypt/decrypt flows.
+- AC4: After the user types `exit`, the temp directory is removed unconditionally regardless of
+  shell exit code, and `cargo xtask help` (or `cargo xtask --help`) lists `dev-shell`.
 
 ## Test Plan
 - Build check: `cargo build --manifest-path xtask/Cargo.toml` must succeed with no errors.
 - Unit: existing xtask unit tests (`from_args_*`) continue to pass.
 - Manual smoke test:
   1. `cargo xtask dev-shell`
-  2. Inside shell: `gitvault harden && gitvault encrypt .env.plain --recipient $PUBKEY`
-     (where `$PUBKEY` is shown in the welcome banner)
-  3. `gitvault status` exits 0.
-  4. `exit` — confirm temp dir is gone: `ls /tmp/gitvault-sandbox-*` returns no results.
+  2. Verify symlinks exist in workspace root:
+    - `ls -l dev-shell-folder` points to the temp folder.
+    - `ls -l dev-shell-folder-git` points to `dev-shell-folder/client/.git`.
+  3. Inside shell, verify repo layout:
+    - `ls` shows `client` and `server.git`
+    - `git -C server.git rev-parse --is-bare-repository` returns `true`
+    - `git -C client remote -v` includes `origin ../server.git`
+  4. Inside `client`, verify sample files exist and include secret-like fields (`Password`,
+    `AccessToken`) and run `gitvault --help`.
+  5. Optional flow check in `client`: `gitvault encrypt .env --recipient $PUBKEY` succeeds.
+  6. `exit` — confirm temp dir is gone and both symlinks are removed or no longer point to an
+    existing target.
 
 ## Notes
 - The shell is launched via `$SHELL --rcfile <init-script>` so that the welcome banner is shown
   and PATH is configured before the user prompt appears.
+- Workspace-root symlink name is fixed to `dev-shell-folder` for quick navigation in VS Code.
+- Workspace-root git metadata symlink name is fixed to `dev-shell-folder-git` and points to
+  `client/.git` for quick navigation in VS Code.
 - `GITVAULT_IDENTITY` is also set in the environment so `gitvault materialize` and `gitvault
   decrypt` work without passing `--identity` explicitly.
 - The generated age identity and public key are printed in the banner for copy-paste convenience.
-- Cleanup uses `fs::remove_dir_all`; a warning is printed (but the task still exits 0) if removal
-  fails (e.g. permissions issue in CI).
+- Cleanup removes the temp directory unconditionally after shell exit; cleanup should also remove
+  the workspace symlinks created for this session.
 
 ## Current Verification Status
-cargo build --manifest-path xtask/Cargo.toml passes. dev-shell implemented in xtask/src/main.rs run_dev_shell(). All 4 acceptance criteria satisfied: isolated temp git repo, GITVAULT_IDENTITY set, cleanup on exit, listed in help.
+Requirement updated to reflect new sandbox topology (`client` + `server.git`) and workspace symlink
+flow. Implementation and verification status pending against updated acceptance criteria.

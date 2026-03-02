@@ -497,25 +497,68 @@ fn run_dev_shell() -> Result<(), String> {
         .map_err(|e| format!("Failed to create sandbox dir: {e}"))?;
     println!("📁 Sandbox: {}", sandbox.display());
 
-    let result = setup_and_run_shell(&sandbox, &bin);
+    // Step 3: create workspace-root symlink for VS Code access
+    let workspace_root = find_workspace_root()?;
+    let symlink_path = workspace_root.join("dev-shell-folder");
+    let git_symlink_path = workspace_root.join("dev-shell-folder-git");
+    #[cfg(unix)]
+    {
+        // Remove any stale symlink from a previous run
+        let _ = fs::remove_file(&symlink_path);
+        let _ = fs::remove_file(&git_symlink_path);
+        std::os::unix::fs::symlink(&sandbox, &symlink_path)
+            .map_err(|e| format!("Failed to create dev-shell-folder symlink: {e}"))?;
+        println!("🔗 Symlink: {} → {}", symlink_path.display(), sandbox.display());
+    }
 
-    // Step 3: always clean up, regardless of shell exit code
+    let result = setup_and_run_shell(&sandbox, &bin, &git_symlink_path);
+
+    // Step 4: always clean up, regardless of shell exit code
     println!("\n🧹 Removing sandbox {}...", sandbox.display());
     if let Err(e) = fs::remove_dir_all(&sandbox) {
-        eprintln!("  Warning: cleanup failed: {e}");
-    } else {
-        println!("✅ Done.");
+        eprintln!("  Warning: sandbox cleanup failed: {e}");
     }
+    // Remove workspace symlink
+    if symlink_path.exists() || symlink_path.read_link().is_ok() {
+        if let Err(e) = fs::remove_file(&symlink_path) {
+            eprintln!("  Warning: symlink cleanup failed: {e}");
+        }
+    }
+    if git_symlink_path.exists() || git_symlink_path.read_link().is_ok() {
+        if let Err(e) = fs::remove_file(&git_symlink_path) {
+            eprintln!("  Warning: git symlink cleanup failed: {e}");
+        }
+    }
+    println!("✅ Done.");
 
     result
 }
 
-/// Set up the sandbox repo and launch the interactive shell.
-fn setup_and_run_shell(sandbox: &Path, bin: &Path) -> Result<(), String> {
-    // Initialise a git repo
-    git_silent(&["init"], sandbox)?;
-    git_silent(&["config", "user.email", "dev@gitvault.local"], sandbox)?;
-    git_silent(&["config", "user.name", "gitvault-dev"], sandbox)?;
+/// Find the cargo workspace root via cargo metadata.
+fn find_workspace_root() -> Result<PathBuf, String> {
+    let metadata = MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .map_err(|e| format!("Failed to read cargo metadata: {e}"))?;
+    Ok(metadata.workspace_root.into_std_path_buf())
+}
+
+/// Set up the `client/` + `server.git/` sandbox topology and launch the interactive shell.
+fn setup_and_run_shell(sandbox: &Path, bin: &Path, git_symlink_path: &Path) -> Result<(), String> {
+    let server_git = sandbox.join("server.git");
+    let client = sandbox.join("client");
+
+    // Create server.git (bare) and client git repos
+    fs::create_dir_all(&server_git)
+        .map_err(|e| format!("Failed to create server.git dir: {e}"))?;
+    fs::create_dir_all(&client)
+        .map_err(|e| format!("Failed to create client dir: {e}"))?;
+
+    git_silent(&["init", "--bare"], &server_git)?;
+    git_silent(&["init", "-b", "main"], &client)?;
+    git_silent(&["config", "user.email", "dev@gitvault.local"], &client)?;
+    git_silent(&["config", "user.name", "gitvault-dev"], &client)?;
+    git_silent(&["remote", "add", "origin", "../server.git"], &client)?;
 
     // Generate an age X25519 identity for use in the sandbox
     let identity = age::x25519::Identity::generate();
@@ -536,41 +579,83 @@ fn setup_and_run_shell(sandbox: &Path, bin: &Path) -> Result<(), String> {
             .map_err(|e| format!("Failed to chmod identity.key: {e}"))?;
     }
 
-    // Write sample plaintext secret files
+    // Write sample files in client/ with secret-like fields
     fs::write(
-        sandbox.join(".env.plain"),
+        client.join(".env"),
         format!(
-            "# Sample .env — encrypt with: gitvault encrypt .env.plain --recipient {pubkey}\n\
+            "# Sample .env — encrypt with: gitvault encrypt .env --recipient {pubkey}\n\
              DATABASE_URL=postgres://localhost:5432/myapp_dev\n\
-             SECRET_KEY=dev-only-change-in-prod\n\
-             API_TOKEN=sample-api-token-abc123\n\
+             Password=dev-only-change-in-prod\n\
+             AccessToken=sample-access-token-abc123\n\
              REDIS_URL=redis://localhost:6379/0\n"
         ),
     )
-    .map_err(|e| format!("Failed to write .env.plain: {e}"))?;
+    .map_err(|e| format!("Failed to write client/.env: {e}"))?;
+
+    let conf_dir = client.join("conf");
+    fs::create_dir_all(&conf_dir)
+        .map_err(|e| format!("Failed to create conf dir: {e}"))?;
 
     fs::write(
-        sandbox.join("db.secrets.json"),
+        conf_dir.join("dbsecrets.json"),
         "{\n  \"host\": \"localhost\",\n  \"port\": 5432,\n  \
-         \"user\": \"app\",\n  \"password\": \"super-secret-db-password\",\n  \
+         \"user\": \"app\",\n  \"Password\": \"super-secret-db-password\",\n  \
          \"database\": \"myapp_dev\"\n}\n",
     )
-    .map_err(|e| format!("Failed to write db.secrets.json: {e}"))?;
+    .map_err(|e| format!("Failed to write conf/dbsecrets.json: {e}"))?;
+
+    fs::write(
+        conf_dir.join("serverless.yaml"),
+        format!(
+            "service: myapp\nprovider:\n  name: aws\n  region: us-east-1\n\
+             environment:\n  AccessToken: {pubkey}\n  Password: serverless-secret-pw\n"
+        ),
+    )
+    .map_err(|e| format!("Failed to write conf/serverless.yaml: {e}"))?;
+
+    let mail_dir = conf_dir.join("mail");
+    fs::create_dir_all(&mail_dir)
+        .map_err(|e| format!("Failed to create conf/mail dir: {e}"))?;
+
+    fs::write(
+        mail_dir.join("acount.toml"),
+        "# Mail account configuration\n\
+         [smtp]\n\
+         host = \"smtp.example.com\"\n\
+         port = 587\n\
+         user = \"alerts@example.com\"\n\
+         AccessToken = \"mail-access-token-xyz789\"\n",
+    )
+    .map_err(|e| format!("Failed to write conf/mail/acount.toml: {e}"))?;
 
     // Write a .gitignore (harden will add more)
-    fs::write(sandbox.join(".gitignore"), "identity.key\n")
-        .map_err(|e| format!("Failed to write .gitignore: {e}"))?;
+    fs::write(client.join(".gitignore"), "")
+        .map_err(|e| format!("Failed to write client/.gitignore: {e}"))?;
 
-    // Commit the initial sample files (plaintext, unencrypted yet)
-    git_silent(&["add", ".env.plain", "db.secrets.json", ".gitignore"], sandbox)?;
+    // Commit initial sample files and push to server.git to establish main branch
+    git_silent(&["add", "."], &client)?;
     git_silent(
         &["commit", "-m", "chore: initial sandbox sample files"],
-        sandbox,
+        &client,
     )?;
+    git_silent(&["push", "-u", "origin", "main"], &client)?;
+
+    #[cfg(unix)]
+    {
+        let client_git_dir = client.join(".git");
+        std::os::unix::fs::symlink(&client_git_dir, git_symlink_path)
+            .map_err(|e| format!("Failed to create dev-shell-folder-git symlink: {e}"))?;
+        println!(
+            "🔗 Symlink: {} → {}",
+            git_symlink_path.display(),
+            client_git_dir.display()
+        );
+    }
 
     // Write a shell init script that sources the user's bashrc and prints a welcome banner
     let identity_key_path = key_file.display().to_string();
     let pubkey_display = pubkey.clone();
+    let client_display = client.display().to_string();
     let init_script = sandbox.join(".gitvault_shell_init.sh");
     let banner = format!(
         r#"#!/usr/bin/env bash
@@ -579,7 +664,7 @@ fn setup_and_run_shell(sandbox: &Path, bin: &Path) -> Result<(), String> {
 
 # gitvault dev-shell environment
 export GITVAULT_IDENTITY="{identity_key_path}"
-export GITVAULT_SANDBOX="{sandbox}"
+export GITVAULT_SANDBOX="{sandbox_display}"
 
 cat <<'BANNER'
 
@@ -587,27 +672,30 @@ cat <<'BANNER'
 ║           gitvault  ·  interactive dev sandbox        ║
 ╚══════════════════════════════════════════════════════╝
 
-  Sandbox dir : {sandbox_display}
-  Identity key: identity.key  (private, gitignored)
+  Working dir : client/   (git repo with origin → ../server.git)
+  Identity key: {identity_key_path}
   Public key  : {pubkey_display}
 
-  Sample files:
-    .env.plain        — plaintext env vars (ready to encrypt)
-    db.secrets.json   — JSON secrets (ready to encrypt)
+  Sample files in client/:
+    .env                      — env vars  (Password, AccessToken)
+    conf/dbsecrets.json       — JSON secrets (Password)
+    conf/serverless.yaml      — YAML config  (AccessToken, Password)
+    conf/mail/acount.toml     — TOML config  (AccessToken)
 
   Quick-start commands:
     gitvault harden
-    gitvault encrypt .env.plain --recipient {pubkey_display}
+    gitvault encrypt .env --recipient {pubkey_display}
     gitvault status
     gitvault materialize
     gitvault --help
 
-  Type 'exit' or Ctrl-D to leave the sandbox (directory is removed).
+  Type 'exit' or Ctrl-D to leave (sandbox is removed on exit).
 
 BANNER
 "#,
-        sandbox = sandbox.display(),
         sandbox_display = sandbox.display(),
+        identity_key_path = identity_key_path,
+        pubkey_display = pubkey_display,
     );
 
     let mut f = fs::File::create(&init_script)
@@ -631,18 +719,15 @@ BANNER
         .ok_or("Could not determine binary directory")?
         .to_string_lossy()
         .to_string();
-    let path = format!(
-        "{bin_dir}:{}",
-        env::var("PATH").unwrap_or_default()
-    );
+    let path = format!("{bin_dir}:{}", env::var("PATH").unwrap_or_default());
 
-    // Launch the shell
+    // Launch the shell in client/ so the user is immediately in the git repo
     let shell = env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
     println!("🚀 Launching shell ({}). Type 'exit' to quit.", shell);
 
     let status = Command::new(&shell)
         .args(["--rcfile", &init_script.to_string_lossy()])
-        .current_dir(sandbox)
+        .current_dir(&client_display)
         .env("PATH", &path)
         .env("GITVAULT_IDENTITY", &identity_key_path)
         .env("GITVAULT_SANDBOX", sandbox.display().to_string())
