@@ -67,6 +67,8 @@ mod tests {
         let usage_err = GitvaultError::Usage("usage".to_string());
         let other_err = GitvaultError::Other("other".to_string());
         let barrier_err = GitvaultError::BarrierNotSatisfied("barrier".to_string());
+        let keyring_err = GitvaultError::Keyring("keyring".to_string());
+        let drift_err = GitvaultError::Drift("drift".to_string());
 
         assert_eq!(io_err.exit_code(), EXIT_ERROR);
         assert_eq!(enc_err.exit_code(), EXIT_ERROR);
@@ -75,6 +77,8 @@ mod tests {
         assert_eq!(usage_err.exit_code(), EXIT_USAGE);
         assert_eq!(other_err.exit_code(), EXIT_ERROR);
         assert_eq!(barrier_err.exit_code(), EXIT_BARRIER);
+        assert_eq!(keyring_err.exit_code(), EXIT_ERROR);
+        assert_eq!(drift_err.exit_code(), EXIT_PLAINTEXT_LEAK);
     }
 
     #[test]
