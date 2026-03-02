@@ -1,10 +1,10 @@
 mod aws_config;
 mod barrier;
-mod fhsm;
 mod cli;
 mod crypto;
 mod env;
 mod error;
+mod fhsm;
 mod keyring_store;
 mod materialize;
 mod permissions;
@@ -338,10 +338,28 @@ fn cmd_decrypt(
     fields: Option<String>,
     reveal: bool,
     json: bool,
-    _no_prompt: bool,
+    no_prompt: bool,
 ) -> Result<(), GitvaultError> {
+    // Use FHSM to resolve the identity source; file I/O remains here.
+    let event = fhsm::Event::DecryptRequested {
+        file: file.clone(),
+        identity: identity_path,
+        no_prompt,
+        output: output.clone(),
+    };
+    let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
+    let identity_str = effects
+        .iter()
+        .find_map(|e| {
+            if let fhsm::Effect::ResolveIdentity { source } = e {
+                Some(load_identity_from_source(source))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| load_identity(None))?;
+
     let input_path = PathBuf::from(&file);
-    let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
 
     // REQ-4: field-level decryption for JSON/YAML/TOML
@@ -424,6 +442,78 @@ fn decrypt_env_secrets(
     Ok(secrets)
 }
 
+/// Map an [`fhsm::IdentitySource`] to a raw identity key string.
+///
+/// The `Inline("")` sentinel (emitted by the FHSM when no path was supplied)
+/// triggers the standard env-var / keyring fallback via [`load_identity`].
+fn load_identity_from_source(source: &fhsm::IdentitySource) -> Result<String, GitvaultError> {
+    match source {
+        fhsm::IdentitySource::FilePath(p) => load_identity_source(p, "--identity"),
+        fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),
+        fhsm::IdentitySource::Keyring => keyring_store::keyring_get()
+            .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}"))),
+        fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(s.clone()),
+        // Empty Inline is the FHSM sentinel meaning "executor must resolve from env vars".
+        fhsm::IdentitySource::Inline(_) => load_identity(None),
+    }
+}
+
+/// Execute an ordered list of FHSM [`fhsm::Effect`]s using the real I/O functions.
+///
+/// State (resolved identity, decrypted secrets) is accumulated across effects so
+/// that later effects can depend on earlier ones.  Returns early with the
+/// subprocess exit code for [`fhsm::Effect::RunCommand`].
+fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
+    let repo_root = find_repo_root()?;
+    let mut identity_opt: Option<Box<dyn age::Identity>> = None;
+    let mut secrets_opt: Option<Vec<(String, String)>> = None;
+
+    for effect in effects {
+        match effect {
+            fhsm::Effect::CheckProdBarrier {
+                env,
+                prod,
+                no_prompt,
+            } => {
+                barrier::check_prod_barrier(&repo_root, &env, prod, no_prompt)?;
+            }
+            fhsm::Effect::ResolveIdentity { source } => {
+                let identity_str = load_identity_from_source(&source)?;
+                identity_opt = Some(Box::new(crypto::parse_identity(&identity_str)?));
+            }
+            fhsm::Effect::DecryptSecrets { env } => {
+                let identity = identity_opt
+                    .as_deref()
+                    .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
+                secrets_opt = Some(decrypt_env_secrets(&repo_root, &env, identity)?);
+            }
+            fhsm::Effect::RunCommand {
+                command,
+                clear_env,
+                pass_vars,
+            } => {
+                let secrets = secrets_opt.as_deref().unwrap_or(&[]);
+                let cmd = &command[0];
+                let args = &command[1..];
+                // Extract var names from key-value pairs for run_command's pass-through lookup.
+                let pass_var_names: Vec<String> = pass_vars.into_iter().map(|(k, _)| k).collect();
+                let exit_code = run::run_command(secrets, cmd, args, clear_env, &pass_var_names)?;
+                return Ok(CommandOutcome::Exit(exit_code));
+            }
+            fhsm::Effect::MaterializeSecrets { env } => {
+                let identity = identity_opt
+                    .as_deref()
+                    .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
+                let secrets = decrypt_env_secrets(&repo_root, &env, identity)?;
+                materialize::materialize_env_file(&repo_root, &secrets)?;
+            }
+            // DecryptFile effects are handled directly in cmd_decrypt.
+            fhsm::Effect::DecryptFile { .. } => {}
+        }
+    }
+    Ok(CommandOutcome::Success)
+}
+
 /// Materialize secrets to root .env
 fn cmd_materialize(
     env_override: Option<String>,
@@ -432,25 +522,15 @@ fn cmd_materialize(
     json: bool,
     no_prompt: bool,
 ) -> Result<(), GitvaultError> {
-    let repo_root = find_repo_root()?;
-    let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
-
-    // REQ-13/25: prod barrier check
-    barrier::check_prod_barrier(&repo_root, &env, prod, no_prompt)?;
-
-    let identity_str = load_identity(identity_path)?;
-    let identity = crypto::parse_identity(&identity_str)?;
-    let secrets = decrypt_env_secrets(&repo_root, &env, &identity)?;
-
-    materialize::materialize_env_file(&repo_root, &secrets)?;
-
-    output_success(
-        &format!(
-            "Materialized {} secrets to .env (env: {env})",
-            secrets.len()
-        ),
-        json,
-    );
+    let event = fhsm::Event::MaterializeRequested {
+        env: env_override,
+        identity: identity_path,
+        prod,
+        no_prompt,
+    };
+    let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
+    execute_effects(effects)?;
+    output_success("Materialized secrets to .env", json);
     Ok(())
 }
 
@@ -510,35 +590,17 @@ fn cmd_run(
     _json: bool,
     no_prompt: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
-    if command.is_empty() {
-        return Err(GitvaultError::Usage(
-            "No command specified after --".to_string(),
-        ));
-    }
-
-    let repo_root = find_repo_root()?;
-    let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
-
-    // REQ-25: prod barrier
-    barrier::check_prod_barrier(&repo_root, &env, prod, no_prompt)?;
-
-    // Load identity and decrypt secrets
-    let identity_str = load_identity(identity_path)?;
-    let identity = crypto::parse_identity(&identity_str)?;
-    let secrets = decrypt_env_secrets(&repo_root, &env, &identity)?;
-
-    // REQ-24: parse --pass
-    let pass_vars = pass_raw
-        .as_deref()
-        .map(run::parse_pass_vars)
-        .unwrap_or_default();
-
-    let cmd = &command[0];
-    let args = &command[1..];
-
-    // REQ-22, REQ-23: inject and run
-    let exit_code = run::run_command(&secrets, cmd, args, clear_env, &pass_vars)?;
-    Ok(CommandOutcome::Exit(exit_code))
+    let event = fhsm::Event::RunRequested {
+        env: env_override,
+        identity: identity_path,
+        prod,
+        no_prompt,
+        clear_env,
+        pass_raw,
+        command,
+    };
+    let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
+    execute_effects(effects)
 }
 
 /// Write a timed production allow token (REQ-14)

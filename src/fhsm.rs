@@ -262,9 +262,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
                     no_prompt: *no_prompt,
                 },
                 Effect::ResolveIdentity { source },
-                Effect::DecryptSecrets {
-                    env: resolved_env,
-                },
+                Effect::DecryptSecrets { env: resolved_env },
                 Effect::RunCommand {
                     command: command.clone(),
                     clear_env: *clear_env,
@@ -289,9 +287,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
                     no_prompt: *no_prompt,
                 },
                 Effect::ResolveIdentity { source },
-                Effect::MaterializeSecrets {
-                    env: resolved_env,
-                },
+                Effect::MaterializeSecrets { env: resolved_env },
             ])
         }
 
@@ -339,7 +335,12 @@ mod tests {
     fn run_requested_empty_command_returns_usage_error() {
         let event = run_event(vec![]);
         let result = transition(&event);
-        assert_eq!(result, Err(FhsmError::UsageError("command must not be empty".to_string())));
+        assert_eq!(
+            result,
+            Err(FhsmError::UsageError(
+                "command must not be empty".to_string()
+            ))
+        );
     }
 
     #[test]
@@ -377,7 +378,10 @@ mod tests {
         let has_materialize = effects
             .iter()
             .any(|e| matches!(e, Effect::MaterializeSecrets { env } if env == "staging"));
-        assert!(has_materialize, "expected MaterialializeSecrets(staging) in {effects:?}");
+        assert!(
+            has_materialize,
+            "expected MaterialializeSecrets(staging) in {effects:?}"
+        );
     }
 
     #[test]
@@ -389,8 +393,13 @@ mod tests {
             output: None,
         };
         let effects = transition(&event).expect("should succeed");
-        let has_barrier = effects.iter().any(|e| matches!(e, Effect::CheckProdBarrier { .. }));
-        assert!(!has_barrier, "DecryptRequested must not produce CheckProdBarrier");
+        let has_barrier = effects
+            .iter()
+            .any(|e| matches!(e, Effect::CheckProdBarrier { .. }));
+        assert!(
+            !has_barrier,
+            "DecryptRequested must not produce CheckProdBarrier"
+        );
     }
 
     #[test]
@@ -411,7 +420,10 @@ mod tests {
                 if file == std::path::Path::new("foo.age")
                 && out == std::path::Path::new("foo.txt"))
         });
-        assert!(has_resolve, "expected ResolveIdentity(FilePath) in {effects:?}");
+        assert!(
+            has_resolve,
+            "expected ResolveIdentity(FilePath) in {effects:?}"
+        );
         assert!(has_decrypt, "expected DecryptFile in {effects:?}");
     }
 
@@ -431,8 +443,7 @@ mod tests {
 
     #[test]
     fn resolve_identity_source_env_var_returns_env_var() {
-        let source =
-            resolve_identity_source(None, Some("AGE-SECRET-KEY-abc123"), None);
+        let source = resolve_identity_source(None, Some("AGE-SECRET-KEY-abc123"), None);
         assert_eq!(
             source,
             IdentitySource::EnvVar("AGE-SECRET-KEY-abc123".to_string())
@@ -449,6 +460,9 @@ mod tests {
     #[test]
     fn resolve_identity_source_env_var_takes_priority_over_keyring() {
         let source = resolve_identity_source(None, Some("AGE-SECRET-KEY-abc"), Some("1"));
-        assert_eq!(source, IdentitySource::EnvVar("AGE-SECRET-KEY-abc".to_string()));
+        assert_eq!(
+            source,
+            IdentitySource::EnvVar("AGE-SECRET-KEY-abc".to_string())
+        );
     }
 }

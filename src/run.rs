@@ -54,6 +54,7 @@ pub fn run_command(
 }
 
 /// Parse a comma-separated list of variable names (used for --pass).
+#[allow(dead_code)]
 pub fn parse_pass_vars(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(str::trim)
