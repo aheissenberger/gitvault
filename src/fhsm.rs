@@ -30,7 +30,6 @@ pub enum IdentitySource {
     /// Read from the OS keyring (`GITVAULT_KEYRING=1`).
     Keyring,
     /// A raw inline key value (e.g. supplied directly as a string).
-    #[allow(dead_code)]
     Inline(String),
     /// No source was configured at the FHSM level; the executor must resolve
     /// using the full priority chain (GITVAULT_IDENTITY env var, keyring, etc.).
