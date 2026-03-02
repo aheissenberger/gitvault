@@ -322,4 +322,22 @@ mod tests {
         let result = parse_env_pairs("NOT VALID\n=A");
         assert!(matches!(result, Err(GitvaultError::Usage(_))));
     }
+
+    /// Covers line 136 (closing `}` of `if let Some(Some(val))`): when theirs deletes a key
+    /// that was unchanged in ours, the merged result is `Some(None)` → key is silently omitted.
+    #[test]
+    fn test_merge_env_content_key_deleted_in_theirs() {
+        // base has KEY; ours unchanged; theirs removes it → merged omits KEY
+        let base = "KEY=value\nOTHER=keep\n";
+        let ours = "KEY=value\nOTHER=keep\n";
+        let theirs = "OTHER=keep\n";
+
+        let (merged, conflict) = merge_env_content(base, ours, theirs).unwrap();
+        assert!(!conflict, "delete-only merge should not conflict");
+        assert!(
+            !merged.contains("KEY="),
+            "deleted key should not appear in merged output"
+        );
+        assert!(merged.contains("OTHER=keep"), "unrelated key should be preserved");
+    }
 }
