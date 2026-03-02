@@ -4,6 +4,7 @@ use base64::Engine;
 /// REQ-5: Deterministic encryption — existing ciphertext is preserved when plaintext unchanged.
 use std::io::{Read, Write};
 use std::path::Path;
+use crate::merge::{parse_env_pair_from_line, rewrite_env_assignment_line};
 
 const AGE_ARMOR_HEADER: &str = "-----BEGIN AGE ENCRYPTED FILE-----";
 /// Prefix used for single-line encrypted values in .env value-only mode.
@@ -15,36 +16,6 @@ pub fn is_age_armor(value: &str) -> bool {
 
 fn is_env_encrypted(value: &str) -> bool {
     value.starts_with(ENV_ENC_PREFIX)
-}
-
-fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
-    let input = format!("{line}\n");
-    let mut iter = dotenvy::from_read_iter(input.as_bytes());
-    match iter.next() {
-        Some(Ok((key, value))) => Some((key, value)),
-        _ => None,
-    }
-}
-
-fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
-    let Some(eq_index) = original_line.find('=') else {
-        return original_line.to_string();
-    };
-
-    let prefix = &original_line[..=eq_index];
-    let rhs = &original_line[eq_index + 1..];
-    let ws_len: usize = rhs
-        .chars()
-        .take_while(|ch| ch.is_whitespace())
-        .map(char::len_utf8)
-        .sum();
-    let leading_ws = &rhs[..ws_len];
-    let suffix = rhs
-        .find(" #")
-        .filter(|idx| *idx >= ws_len)
-        .map(|idx| &rhs[idx..])
-        .unwrap_or("");
-    format!("{prefix}{leading_ws}{new_value}{suffix}")
 }
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
