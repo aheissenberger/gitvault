@@ -70,8 +70,84 @@ jobs:
           git fetch --force --tags
           cargo run --locked --manifest-path xtask/Cargo.toml -- release-check
 
-  build:
+  homebrew-preflight:
+    name: Homebrew token preflight
     needs: verify
+    runs-on: ubuntu-latest
+    environment: homebrew
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Skip when not tag release
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: echo "Not a tag release; skipping Homebrew preflight."
+
+      - name: Resolve tap metadata
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: tapmeta
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          INPUT_TAP_REPO: ${{ github.event.inputs.tap_repo }}
+          INPUT_TAP_BRANCH: ${{ github.event.inputs.tap_branch }}
+          DEFAULT_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          DEFAULT_TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${GH_TOKEN:-}" ]] || {
+            echo "Missing HOMEBREW_TAP_TOKEN in environment 'homebrew'." >&2
+            exit 1
+          }
+
+          tap_repo="${INPUT_TAP_REPO:-${DEFAULT_TAP_REPO:-}}"
+          [[ -n "${tap_repo}" ]] || {
+            echo "Missing tap repo (set workflow input tap_repo or repo variable HOMEBREW_TAP_REPO)." >&2
+            exit 1
+          }
+
+          tap_branch="${INPUT_TAP_BRANCH:-${DEFAULT_TAP_BRANCH:-main}}"
+          [[ -n "${tap_branch}" ]] || {
+            echo "Missing tap branch (set workflow input tap_branch or repo variable HOMEBREW_TAP_BRANCH)." >&2
+            exit 1
+          }
+
+          if ! gh api "/repos/${tap_repo}/branches/${tap_branch}" >/dev/null 2>&1; then
+            echo "Tap branch not found: ${tap_repo}@${tap_branch}" >&2
+            exit 1
+          fi
+
+          echo "tap_repo=${tap_repo}" >> "$GITHUB_OUTPUT"
+          echo "tap_branch=${tap_branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repository
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ steps.tapmeta.outputs.tap_repo }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ref: ${{ steps.tapmeta.outputs.tap_branch }}
+          path: tap-preflight
+
+      - name: Verify tap write access (dry-run push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAP_BRANCH: ${{ steps.tapmeta.outputs.tap_branch }}
+        run: |
+          set -euo pipefail
+          cd tap-preflight
+
+          if ! git push --dry-run origin "HEAD:${TAP_BRANCH}" >/tmp/push-check.log 2>&1; then
+            cat /tmp/push-check.log >&2
+            echo "HOMEBREW_TAP_TOKEN cannot push to ${GITHUB_REPOSITORY_OWNER}/homebrew-tools branch ${TAP_BRANCH}." >&2
+            echo "Ensure fine-grained PAT has Repository permissions -> Contents: Read and write." >&2
+            exit 1
+          fi
+
+  build:
+    needs:
+      - verify
+      - homebrew-preflight
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
