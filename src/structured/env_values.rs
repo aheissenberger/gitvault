@@ -53,7 +53,6 @@ pub fn encrypt_env_values(
     Ok(result)
 }
 
-#[cfg(test)]
 /// REQ-6: Decrypt each VALUE in a .env file that was encrypted with encrypt_env_values.
 pub fn decrypt_env_values(
     content: &str,
