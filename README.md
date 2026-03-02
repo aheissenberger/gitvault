@@ -354,9 +354,10 @@ Each Git worktree resolves its environment independently (REQ-12).
 | `0` | Success |
 | `1` | General error (I/O, encryption failure) |
 | `2` | Usage / argument error |
-| `3` | Plaintext secret detected in tracked files, or drift detected with `--fail-if-dirty` |
+| `3` | Plaintext secret detected in tracked files |
 | `4` | Decryption error (wrong key, corrupt file) |
 | `5` | Production barrier not satisfied (REQ-13) |
+| `6` | Secrets drift detected (uncommitted changes in encrypted files; REQ-47) |
 
 ---
 
