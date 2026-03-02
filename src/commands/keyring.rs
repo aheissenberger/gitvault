@@ -102,22 +102,22 @@ mod tests {
     // This eliminates dead-closure coverage gaps caused by passing a function
     // as an "unused" parameter to the wrong action arm.
 
-    /// Succeeds silently – used as a stand-in set_fn in Get / Delete tests.
+    /// Succeeds silently – used as a stand-in `set_fn` in Get / Delete tests.
     // Must return Result to match SetFn: Fn(&str) -> Result<(), _> bound.
     #[allow(clippy::unnecessary_wraps)]
     fn set_ok(_key: &str) -> Result<(), GitvaultError> {
         Ok(())
     }
 
-    /// Succeeds silently – used as a stand-in delete_fn in Set / Get tests.
+    /// Succeeds silently – used as a stand-in `delete_fn` in Set / Get tests.
     // Must return Result to match DeleteFn: Fn() -> Result<(), _> bound.
     #[allow(clippy::unnecessary_wraps)]
     fn delete_ok() -> Result<(), GitvaultError> {
         Ok(())
     }
 
-    /// Generates a fresh age identity string – used as a stand-in get_fn in
-    /// Set / Delete tests, and as the real get_fn in Get tests (so the body
+    /// Generates a fresh age identity string – used as a stand-in `get_fn` in
+    /// Set / Delete tests, and as the real `get_fn` in Get tests (so the body
     /// is actually executed and covered during Get-action tests).
     // Must return Result to match GetFn: Fn() -> Result<Zeroizing<String>, _> bound.
     #[allow(clippy::unnecessary_wraps)]
@@ -131,17 +131,17 @@ mod tests {
         ))
     }
 
-    /// Returns an error – used as the active set_fn in Set-error tests.
+    /// Returns an error – used as the active `set_fn` in Set-error tests.
     fn set_err(_key: &str) -> Result<(), GitvaultError> {
         Err(GitvaultError::Keyring("set-failed".to_string()))
     }
 
-    /// Returns an error – used as the active get_fn in Get-error tests.
+    /// Returns an error – used as the active `get_fn` in Get-error tests.
     fn get_err() -> Result<Zeroizing<String>, GitvaultError> {
         Err(GitvaultError::Keyring("get-failed".to_string()))
     }
 
-    /// Returns an error – used as the active delete_fn in Delete-error tests.
+    /// Returns an error – used as the active `delete_fn` in Delete-error tests.
     fn delete_err() -> Result<(), GitvaultError> {
         Err(GitvaultError::Keyring("delete-failed".to_string()))
     }
@@ -310,7 +310,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// json=true path for Get via cmd_keyring_with_ops.
+    /// json=true path for Get via `cmd_keyring_with_ops`.
     #[test]
     fn test_cmd_keyring_get_json_output() {
         use age::secrecy::ExposeSecret;

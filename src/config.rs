@@ -26,7 +26,7 @@ pub enum HookAdapter {
 impl HookAdapter {
     /// Binary name to look up on PATH (e.g. `"gitvault-husky"`).
     #[must_use]
-    pub fn binary_name(&self) -> &'static str {
+    pub const fn binary_name(&self) -> &'static str {
         match self {
             Self::Husky => "gitvault-husky",
             Self::PreCommit => "gitvault-pre-commit",
@@ -36,7 +36,7 @@ impl HookAdapter {
 
     /// Human-readable short name (e.g. `"husky"`).
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Husky => "husky",
             Self::PreCommit => "pre-commit",
@@ -125,10 +125,7 @@ pub fn load_config(repo_root: &Path) -> Result<GitvaultConfig, GitvaultError> {
     };
 
     let raw: RawConfig = toml::from_str(&raw_text).map_err(|e| {
-        GitvaultError::Usage(format!(
-            "failed to parse {}: {e}",
-            config_path.display()
-        ))
+        GitvaultError::Usage(format!("failed to parse {}: {e}", config_path.display()))
     })?;
 
     let hooks = match raw.hooks {

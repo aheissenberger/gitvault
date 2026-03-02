@@ -238,8 +238,8 @@ pub enum IdentityProfile {
 impl std::fmt::Display for IdentityProfile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IdentityProfile::Classic => write!(f, "classic"),
-            IdentityProfile::Hybrid => write!(f, "hybrid"),
+            Self::Classic => write!(f, "classic"),
+            Self::Hybrid => write!(f, "hybrid"),
         }
     }
 }

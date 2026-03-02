@@ -1,11 +1,58 @@
 //! `gitvault encrypt` command implementation.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, env, repo, structured};
+
+/// Compute the output `.age` path for `input_path` under the encrypted secrets directory.
+///
+/// When `keep_path` is set the relative directory structure of `input_path` (relative
+/// to `repo_root`) is replicated under the per-env secrets directory.
+fn compute_output_path(
+    repo_root: &Path,
+    input_path: &Path,
+    active_env: &str,
+    keep_path: bool,
+) -> Result<PathBuf, GitvaultError> {
+    if keep_path {
+        let resolved_input = if input_path.is_absolute() {
+            input_path.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(input_path)
+        };
+
+        let rel_input = resolved_input.strip_prefix(repo_root).map_err(|_| {
+            GitvaultError::Usage(format!(
+                "--keep-path requires input under repository root: {}",
+                input_path.display()
+            ))
+        })?;
+
+        let rel_name = rel_input
+            .file_name()
+            .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
+            .to_string_lossy();
+        let out_name = format!("{rel_name}.age");
+
+        let mut out_dir = repo::get_env_encrypted_dir(repo_root, active_env);
+        if let Some(rel_parent) = rel_input.parent()
+            && !rel_parent.as_os_str().is_empty()
+        {
+            out_dir = out_dir.join(rel_parent);
+        }
+        Ok(out_dir.join(out_name))
+    } else {
+        let filename = input_path
+            .file_name()
+            .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
+            .to_string_lossy();
+        let out_name = format!("{filename}.age");
+        Ok(repo::get_env_encrypted_path(repo_root, active_env, &out_name))
+    }
+}
 
 /// Encrypt a file and write the .age output under secrets/
 ///
@@ -102,41 +149,7 @@ pub fn cmd_encrypt(
     let active_env = env::resolve_env(&repo_root);
 
     repo::ensure_dirs(&repo_root, &active_env)?;
-    let out_path = if keep_path {
-        let resolved_input = if input_path.is_absolute() {
-            input_path.clone()
-        } else {
-            std::env::current_dir()?.join(&input_path)
-        };
-
-        let rel_input = resolved_input.strip_prefix(&repo_root).map_err(|_| {
-            GitvaultError::Usage(format!(
-                "--keep-path requires input under repository root: {}",
-                input_path.display()
-            ))
-        })?;
-
-        let rel_name = rel_input
-            .file_name()
-            .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
-            .to_string_lossy();
-        let out_name = format!("{rel_name}.age");
-
-        let mut out_dir = repo::get_env_encrypted_dir(&repo_root, &active_env);
-        if let Some(rel_parent) = rel_input.parent()
-            && !rel_parent.as_os_str().is_empty()
-        {
-            out_dir = out_dir.join(rel_parent);
-        }
-        out_dir.join(out_name)
-    } else {
-        let filename = input_path
-            .file_name()
-            .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
-            .to_string_lossy();
-        let out_name = format!("{filename}.age");
-        repo::get_env_encrypted_path(&repo_root, &active_env, &out_name)
-    };
+    let out_path = compute_output_path(&repo_root, &input_path, &active_env, keep_path)?;
 
     // REQ-42: prevent path traversal
     repo::validate_write_path(&repo_root, &out_path)?;

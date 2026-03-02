@@ -44,8 +44,8 @@ impl AnyIdentity {
     /// Return a reference to the underlying [`age::Identity`] implementation.
     pub fn as_identity(&self) -> &dyn age::Identity {
         match self {
-            AnyIdentity::X25519(id) => id,
-            AnyIdentity::Ssh(id) => id,
+            Self::X25519(id) => id,
+            Self::Ssh(id) => id,
         }
     }
 }
@@ -70,11 +70,9 @@ pub fn parse_identity_any(s: &str) -> Result<AnyIdentity, GitvaultError> {
 
     // SSH private key (OpenSSH or PEM format)
     if trimmed.starts_with("-----BEGIN") {
-        let identity = age::ssh::Identity::from_buffer(
-            std::io::BufReader::new(trimmed.as_bytes()),
-            None,
-        )
-        .map_err(|e| GitvaultError::Decryption(format!("Invalid SSH private key: {e}")))?;
+        let identity =
+            age::ssh::Identity::from_buffer(std::io::BufReader::new(trimmed.as_bytes()), None)
+                .map_err(|e| GitvaultError::Decryption(format!("Invalid SSH private key: {e}")))?;
         return Ok(AnyIdentity::Ssh(identity));
     }
 

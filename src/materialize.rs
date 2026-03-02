@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(escaped, "a\\$b\\nc\\rd");
     }
 
-    /// REQ-18 / C7: permissions must be set on the temp file BEFORE persist()
+    /// REQ-18 / C7: permissions must be set on the temp file BEFORE `persist()`
     /// so that the rename carries the restricted ACL — no TOCTOU window.
     ///
     /// We intercept by calling `enforce_restricted_env_permissions` on a fresh

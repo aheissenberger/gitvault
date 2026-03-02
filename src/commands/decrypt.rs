@@ -250,7 +250,7 @@ mod tests {
             value_only: false,
             json: true,
             no_prompt: true,
-                    selector: None,
+            selector: None,
         })
         .expect("reveal mode should decrypt to stdout without error");
     }
@@ -278,7 +278,7 @@ mod tests {
             value_only: false,
             json: true,
             no_prompt: true,
-                    selector: None,
+            selector: None,
         })
         .expect("default output decrypt should succeed");
 
@@ -322,7 +322,7 @@ mod tests {
                 value_only: false,
                 json: false,
                 no_prompt: true,
-                        selector: None,
+                selector: None,
             })
         })
         .expect_err("field decrypt with wrong identity should fail");
@@ -379,7 +379,7 @@ mod tests {
             value_only: true,
             json: false,
             no_prompt: true,
-                    selector: None,
+            selector: None,
         })
         .expect("value-only decrypt should succeed");
 
@@ -426,7 +426,7 @@ mod tests {
             value_only: true,
             json: false,
             no_prompt: true,
-                    selector: None,
+            selector: None,
         })
         .expect("reveal + value_only should succeed");
         assert!(matches!(outcome, CommandOutcome::Success));
@@ -467,7 +467,7 @@ mod tests {
             value_only: true,
             json: false,
             no_prompt: true,
-                    selector: None,
+            selector: None,
         })
         .expect("value_only decrypt to explicit output should succeed");
 
@@ -517,7 +517,7 @@ mod tests {
             value_only: false,
             json: false,
             no_prompt: true,
-                    selector: None,
+            selector: None,
         })
         .expect("decrypt with bare --output should succeed");
 

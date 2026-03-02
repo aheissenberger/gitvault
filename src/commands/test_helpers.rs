@@ -22,6 +22,9 @@ pub struct CwdGuard {
 }
 
 impl CwdGuard {
+    /// # Panics
+    ///
+    /// Panics if the current directory cannot be read or if switching to `path` fails.
     pub fn enter(path: &Path) -> Self {
         let previous = std::env::current_dir().expect("current dir should be readable");
         std::env::set_current_dir(path).expect("should switch cwd");
@@ -35,6 +38,9 @@ impl Drop for CwdGuard {
     }
 }
 
+/// # Panics
+///
+/// Panics if `git init` cannot be run or exits with a non-zero status.
 pub fn init_git_repo(path: &Path) {
     let status = Command::new("git")
         .args(["init", "-q"])
@@ -44,6 +50,9 @@ pub fn init_git_repo(path: &Path) {
     assert!(status.success());
 }
 
+/// # Panics
+///
+/// Panics if a temporary file cannot be created or the identity cannot be written to it.
 pub fn setup_identity_file() -> (NamedTempFile, x25519::Identity) {
     let identity = x25519::Identity::generate();
     let identity_file = NamedTempFile::new().expect("temp file should be created");
@@ -85,6 +94,10 @@ pub fn with_env_var<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -
     out
 }
 
+/// # Panics
+///
+/// Panics if encryption fails, if the output path has no parent directory, or if
+/// any file I/O operation fails.
 pub fn write_encrypted_env_file(
     repo_root: &Path,
     env_name: &str,

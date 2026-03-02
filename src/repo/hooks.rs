@@ -85,7 +85,7 @@ fn ensure_executable(hook_path: &Path) -> Result<(), GitvaultError> {
     Ok(())
 }
 
-pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> Result<PathBuf, GitvaultError> {
+pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> PathBuf {
     fn to_real_or_absolute(path: PathBuf) -> PathBuf {
         path.canonicalize().unwrap_or(path)
     }
@@ -107,11 +107,11 @@ pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> Result<PathBuf, GitvaultErr
                 repo_root.join(path)
             };
 
-            return Ok(to_real_or_absolute(absolute));
+            return to_real_or_absolute(absolute);
         }
     }
 
-    Ok(to_real_or_absolute(repo_root.join(".git").join("hooks")))
+    to_real_or_absolute(repo_root.join(".git").join("hooks"))
 }
 
 fn install_hook(hook_path: &Path, body: &str) -> Result<(), GitvaultError> {
@@ -147,7 +147,7 @@ fn install_hook(hook_path: &Path, body: &str) -> Result<(), GitvaultError> {
 ///
 /// Returns [`GitvaultError::Io`] if a hook file cannot be read, written, or made executable.
 pub fn install_git_hooks(repo_root: &Path) -> Result<(), GitvaultError> {
-    let hooks_dir = resolve_hooks_dir(repo_root)?;
+    let hooks_dir = resolve_hooks_dir(repo_root);
     if !hooks_dir.exists() {
         let default_hooks_dir = repo_root.join(".git").join("hooks");
         if hooks_dir == default_hooks_dir {
@@ -246,7 +246,7 @@ mod tests {
         assert!(content.contains(MANAGED_BLOCK_BEGIN));
     }
 
-    /// Covers lines 550-551 in test_recipients_dedup_on_add by taking the
+    /// Covers lines 550-551 in `test_recipients_dedup_on_add` by taking the
     /// `!recipients.contains()` branch (recipient not yet present).
     #[test]
     fn test_install_hook_appends_when_no_trailing_newline() {

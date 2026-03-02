@@ -11,6 +11,7 @@ use crate::fhsm;
 ///
 /// Returns [`GitvaultError`] if the FHSM transition fails, effect execution fails,
 /// or any I/O operation fails.
+#[allow(clippy::needless_pass_by_value)]
 pub fn cmd_materialize(
     env_override: Option<String>,
     identity_path: Option<String>,

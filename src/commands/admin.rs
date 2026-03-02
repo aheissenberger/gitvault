@@ -121,9 +121,8 @@ pub fn cmd_harden(json: bool, no_prompt: bool) -> Result<CommandOutcome, Gitvaul
                 );
                 if no_prompt {
                     return Err(GitvaultError::Usage(msg));
-                } else {
-                    eprintln!("warning: {msg}");
                 }
+                eprintln!("warning: {msg}");
             }
         }
     }
@@ -220,6 +219,7 @@ pub fn cmd_merge_driver(
 ///
 /// Returns [`GitvaultError`] if the repository root is not found, tracked plaintext
 /// is detected, the identity cannot be loaded or parsed, or no encrypted secrets exist.
+#[allow(clippy::needless_pass_by_value)]
 pub fn cmd_check(
     env_override: Option<String>,
     identity_path: Option<String>,
@@ -233,8 +233,7 @@ pub fn cmd_check(
     repo::check_no_tracked_plaintext(&repo_root)?;
 
     // Probe identity source states for reporting (REQ-50)
-    let source_states =
-        probe_identity_sources(identity_path.as_deref(), selector.as_deref());
+    let source_states = probe_identity_sources(identity_path.as_deref(), selector.as_deref());
 
     // Check 2: identity is loadable
     let identity_str = load_identity_with_selector(identity_path, selector.as_deref())?;
@@ -414,7 +413,8 @@ mod tests {
 
         with_identity_env(identity_file.path(), || {
             cmd_allow_prod(30, false).expect("allow-prod should succeed");
-            cmd_check(None, None, None, true).expect("check should succeed with identity and clean repo");
+            cmd_check(None, None, None, true)
+                .expect("check should succeed with identity and clean repo");
         });
     }
 
@@ -743,8 +743,7 @@ mod tests {
 
         // gitvault-husky is not installed, so find_adapter_binary returns NotFound.
         // no_prompt=true should turn that into a Usage error.
-        let err =
-            cmd_harden(false, true).expect_err("missing adapter with no_prompt should fail");
+        let err = cmd_harden(false, true).expect_err("missing adapter with no_prompt should fail");
         assert!(
             matches!(err, GitvaultError::Usage(_)),
             "expected Usage error, got: {err:?}"

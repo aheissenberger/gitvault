@@ -445,7 +445,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Covers line 36: `Ok(p) => p` in validate_write_path (target file exists → canonicalize succeeds).
+    /// Covers line 36: `Ok(p) => p` in `validate_write_path` (target file exists → canonicalize succeeds).
     #[test]
     fn test_validate_write_path_with_existing_target_file() {
         let dir = TempDir::new().unwrap();
@@ -459,7 +459,7 @@ mod tests {
         );
     }
 
-    /// Covers `validate_write_path` lines 42-46: path with no file_name component (ends in "..").
+    /// Covers `validate_write_path` lines 42-46: path with no `file_name` component (ends in "..").
     #[test]
     fn test_validate_write_path_target_ends_with_dotdot_returns_usage_error() {
         let dir = TempDir::new().unwrap();

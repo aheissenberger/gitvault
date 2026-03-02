@@ -96,7 +96,7 @@ impl DefaultRunner {
 
     /// Create a `DefaultRunner` with an explicit selector.
     #[must_use]
-    pub fn with_selector(selector: Option<String>) -> Self {
+    pub const fn with_selector(selector: Option<String>) -> Self {
         Self { selector }
     }
 }
@@ -183,7 +183,7 @@ pub fn execute_effects_with(
             fhsm::Effect::DecryptSecrets { env } => {
                 let identity = identity_opt
                     .as_ref()
-                    .map(|id| id.as_identity())
+                    .map(crate::crypto::AnyIdentity::as_identity)
                     .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
                 secrets_opt = Some(runner.decrypt_secrets(repo_root, &env, identity)?);
             }
@@ -206,11 +206,9 @@ pub fn execute_effects_with(
             fhsm::Effect::DecryptFile { file, output } => {
                 let identity = identity_opt
                     .as_ref()
-                    .map(|id| id.as_identity())
+                    .map(crate::crypto::AnyIdentity::as_identity)
                     .ok_or_else(|| {
-                        GitvaultError::Usage(
-                            "identity not resolved before DecryptFile".to_string(),
-                        )
+                        GitvaultError::Usage("identity not resolved before DecryptFile".to_string())
                     })?;
                 let in_file =
                     std::io::BufReader::new(std::fs::File::open(&file).map_err(GitvaultError::Io)?);

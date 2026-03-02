@@ -87,13 +87,18 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Recipient { action } => {
             crate::commands::recipients::cmd_recipient(action, cli.json)
         }
-        Commands::Rotate { identity } => {
-            crate::commands::recipients::cmd_rotate(identity, cli.identity_selector.clone(), cli.json)
-        }
+        Commands::Rotate { identity } => crate::commands::recipients::cmd_rotate(
+            identity,
+            cli.identity_selector.clone(),
+            cli.json,
+        ),
         Commands::Keyring { action } => crate::commands::keyring::cmd_keyring(action, cli.json),
-        Commands::Check { env, identity } => {
-            crate::commands::admin::cmd_check(env, identity, cli.identity_selector.clone(), cli.json)
-        }
+        Commands::Check { env, identity } => crate::commands::admin::cmd_check(
+            env,
+            identity,
+            cli.identity_selector.clone(),
+            cli.json,
+        ),
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
         Commands::Identity { action } => {
             crate::commands::identity::cmd_identity(action, cli.json, cli.no_prompt)

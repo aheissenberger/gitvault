@@ -438,7 +438,7 @@ mod tests {
     }
 
     /// Covers the `fs::remove_file(&token_path)?` error branch in `revoke_prod`
-    /// by placing a directory at the token file path (remove_file on a dir → EISDIR).
+    /// by placing a directory at the token file path (`remove_file` on a dir → EISDIR).
     #[test]
     fn revoke_prod_fails_when_token_path_is_a_directory() {
         let dir = root();
@@ -453,10 +453,10 @@ mod tests {
         );
     }
 
-    /// REQ-18 / C7: permissions must be set on the temp file BEFORE persist()
+    /// REQ-18 / C7: permissions must be set on the temp file BEFORE `persist()`
     /// so that the rename carries the restricted ACL — no TOCTOU window.
     ///
-    /// We mimic `allow_prod`'s logic: create a NamedTempFile, apply
+    /// We mimic `allow_prod`'s logic: create a `NamedTempFile`, apply
     /// `enforce_restricted_token_permissions` on `tmp.path()`, verify the
     /// mode is 0600, then persist.  The final file should inherit the ACL.
     #[test]

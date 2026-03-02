@@ -41,6 +41,7 @@ struct IdentityCreateOutput {
 ///
 /// Returns an error if the keyring is unavailable and no `--out` path is given,
 /// or if the file cannot be written or its permissions cannot be set.
+#[allow(clippy::needless_pass_by_value)]
 pub fn cmd_identity_create(
     profile: IdentityProfile,
     out: Option<String>,
@@ -56,13 +57,14 @@ pub fn cmd_identity_create(
     let profile_label = profile.to_string();
 
     let mut stored_in_keyring = false;
-    let mut out_path: Option<String> = None;
 
     // Write to file if --out is given
-    if let Some(ref path) = out {
+    let out_path = if let Some(ref path) = out {
         write_identity_to_file(secret_key.expose_secret(), path)?;
-        out_path = Some(path.clone());
-    }
+        Some(path.clone())
+    } else {
+        None
+    };
 
     // Store in keyring by default; also try when --out is given alongside.
     // If no --out, keyring is the only storage — fail if unavailable (REQ-62).
@@ -94,8 +96,8 @@ pub fn cmd_identity_create(
     };
 
     if json {
-        let json_str = serde_json::to_string(&result)
-            .map_err(|e| GitvaultError::Other(e.to_string()))?;
+        let json_str =
+            serde_json::to_string(&result).map_err(|e| GitvaultError::Other(e.to_string()))?;
         println!("{json_str}");
     } else {
         println!("Profile    : {profile_label}");
@@ -129,9 +131,7 @@ fn write_identity_to_file(key: &str, path: &str) -> Result<(), GitvaultError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(path)
-            .map_err(GitvaultError::Io)?
-            .permissions();
+        let mut perms = fs::metadata(path).map_err(GitvaultError::Io)?.permissions();
         perms.set_mode(0o600);
         fs::set_permissions(path, perms).map_err(GitvaultError::Io)?;
     }
@@ -145,8 +145,8 @@ mod tests {
     use crate::cli::IdentityProfile;
     use tempfile::NamedTempFile;
 
-    /// Helper: run cmd_identity_create with a real --out file path and the
-    /// real OS keyring. Returns (out_path_string, NamedTempFile-to-keep-alive).
+    /// Helper: run `cmd_identity_create` with a real --out file path and the
+    /// real OS keyring. Returns (`out_path_string`, NamedTempFile-to-keep-alive).
     fn make_out_file() -> (NamedTempFile, String) {
         let f = NamedTempFile::new().expect("temp file should be created");
         let path = f.path().to_string_lossy().to_string();
@@ -216,8 +216,9 @@ mod tests {
         // No out_path write happens.
 
         // Simulate keyring failure.
-        let keyring_result: Result<(), GitvaultError> =
-            Err(GitvaultError::Keyring("simulated keyring error".to_string()));
+        let keyring_result: Result<(), GitvaultError> = Err(GitvaultError::Keyring(
+            "simulated keyring error".to_string(),
+        ));
 
         let err_result: Result<CommandOutcome, GitvaultError> = match keyring_result {
             Ok(()) => Ok(CommandOutcome::Success),
@@ -265,7 +266,7 @@ mod tests {
             profile: "classic".to_string(),
             public_key: pubkey.clone(),
             stored_in_keyring: false,
-            out_path: Some(path.clone()),
+            out_path: Some(path),
         };
 
         let json_str = serde_json::to_string(&output).expect("serialization should succeed");
@@ -275,10 +276,7 @@ mod tests {
             json_str.contains("classic"),
             "JSON must include profile label"
         );
-        assert!(
-            json_str.contains(&pubkey),
-            "JSON must include public key"
-        );
+        assert!(json_str.contains(&pubkey), "JSON must include public key");
         // Must NOT include any age secret key material.
         assert!(
             !json_str.contains("AGE-SECRET-KEY-"),
@@ -295,16 +293,14 @@ mod tests {
 
         let (_tmp, path) = make_out_file();
 
-        let result = cmd_identity_create(
-            IdentityProfile::Classic,
-            Some(path.clone()),
-            false,
-            true,
-        );
+        let result = cmd_identity_create(IdentityProfile::Classic, Some(path.clone()), false, true);
         assert!(result.is_ok(), "create should succeed: {result:?}");
 
         let meta = std::fs::metadata(&path).expect("metadata should be readable");
         let mode = meta.permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "file permissions should be 0o600, got {mode:o}");
+        assert_eq!(
+            mode, 0o600,
+            "file permissions should be 0o600, got {mode:o}"
+        );
     }
 }

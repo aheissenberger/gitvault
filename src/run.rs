@@ -208,7 +208,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// REQ-23: a process killed by a signal must return 128 + signal_number, not EXIT_ERROR(1).
+    /// REQ-23: a process killed by a signal must return 128 + `signal_number`, not `EXIT_ERROR(1)`.
     #[cfg(unix)]
     #[test]
     fn test_signal_killed_process_returns_128_plus_signal() {

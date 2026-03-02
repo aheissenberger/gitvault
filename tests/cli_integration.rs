@@ -253,7 +253,6 @@ fn r064_s1_husky_adapter_discovery_is_deterministic() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
 
@@ -280,7 +279,6 @@ fn r064_s2_husky_missing_adapter_ci_fails_deterministically() {
     let out = bin()
         .args(["harden", "--no-prompt"])
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
 
@@ -306,7 +304,6 @@ fn r064_s3_husky_pre_commit_blocks_plaintext() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
     assert!(out.status.success(), "harden should succeed");
@@ -329,7 +326,6 @@ fn r064_s4_husky_pre_push_blocks_drift() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
     assert!(out.status.success(), "harden should succeed");
@@ -348,12 +344,9 @@ fn r064_s5_husky_install_later_activates_without_rebuild() {
     configure_git_identity(repo.path());
     write_adapter_config(repo.path(), "husky");
 
-    
-
     let first = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("first harden should run");
     assert!(first.status.success(), "first harden should succeed");
@@ -364,7 +357,6 @@ fn r064_s5_husky_install_later_activates_without_rebuild() {
     let second = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("second harden should run");
     assert!(second.status.success(), "second harden should succeed");
@@ -393,7 +385,6 @@ fn r065_s1_pre_commit_adapter_discovery_is_deterministic() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
 
@@ -419,7 +410,6 @@ fn r065_s2_pre_commit_missing_runtime_ci_fails_machine_parseable() {
     let out = bin()
         .args(["harden", "--no-prompt"])
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
 
@@ -445,7 +435,6 @@ fn r065_s3_pre_commit_blocks_plaintext() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
     assert!(out.status.success());
@@ -467,7 +456,6 @@ fn r065_s4_pre_commit_blocks_drift_on_push_path() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
     assert!(out.status.success());
@@ -486,12 +474,9 @@ fn r065_s5_pre_commit_config_is_preserved() {
     configure_git_identity(repo.path());
     write_adapter_config(repo.path(), "pre-commit");
 
-    
-
     bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("first harden should run");
 
@@ -500,13 +485,15 @@ fn r065_s5_pre_commit_config_is_preserved() {
     bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("second harden should run");
 
     let hook_2 = std::fs::read_to_string(repo.path().join(".git/hooks/pre-commit")).unwrap();
 
-    assert_eq!(hook_1, hook_2, "hook content should be identical after two harden runs");
+    assert_eq!(
+        hook_1, hook_2,
+        "hook content should be identical after two harden runs"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +511,6 @@ fn r066_s1_lefthook_adapter_discovery_is_deterministic() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
 
@@ -550,7 +536,6 @@ fn r066_s2_lefthook_missing_adapter_ci_fails_deterministically() {
     let out = bin()
         .args(["harden", "--no-prompt"])
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
 
@@ -576,7 +561,6 @@ fn r066_s3_lefthook_pre_commit_blocks_plaintext() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
     assert!(out.status.success());
@@ -598,7 +582,6 @@ fn r066_s4_lefthook_pre_push_blocks_drift() {
     let out = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("harden should run");
     assert!(out.status.success());
@@ -617,12 +600,9 @@ fn r066_s5_lefthook_repeated_runs_are_idempotent() {
     configure_git_identity(repo.path());
     write_adapter_config(repo.path(), "lefthook");
 
-    
-
     let first = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("first harden should run");
     assert!(first.status.success(), "first harden should succeed");
@@ -632,7 +612,6 @@ fn r066_s5_lefthook_repeated_runs_are_idempotent() {
     let second = bin()
         .arg("harden")
         .current_dir(repo.path())
-        
         .output()
         .expect("second harden should run");
     assert!(second.status.success(), "second harden should succeed");
@@ -646,6 +625,7 @@ fn r066_s5_lefthook_repeated_runs_are_idempotent() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn harden_installs_merge_driver_and_git_merge_uses_it() {
     let repo = TempDir::new().unwrap();
     init_git_repo(repo.path());
@@ -956,7 +936,7 @@ fn run_command_propagates_exit_code() {
 
 // ── A7 expanded tests ──────────────────────────────────────────────────────────
 
-/// A7-1: `gitvault check` exits with code 3 (EXIT_PLAINTEXT_LEAK) when a
+/// A7-1: `gitvault check` exits with code 3 (`EXIT_PLAINTEXT_LEAK`) when a
 /// plaintext secret file is staged in the git index.
 #[test]
 fn check_exits_3_on_plaintext_leak() {
@@ -986,7 +966,7 @@ fn check_exits_3_on_plaintext_leak() {
     );
 }
 
-/// A7-2: `gitvault run --env prod` exits with code 5 (EXIT_BARRIER) when
+/// A7-2: `gitvault run --env prod` exits with code 5 (`EXIT_BARRIER`) when
 /// the `--prod` flag is absent (production barrier not satisfied).
 #[test]
 fn run_exits_barrier_without_prod_flag() {
@@ -1132,10 +1112,10 @@ fn recipient_list_json_outputs_valid_json() {
     );
 }
 
-/// Cover the keyring_set / keyring_get / keyring_delete code paths in the
+/// Cover the `keyring_set` / `keyring_get` / `keyring_delete` code paths in the
 /// non-test binary by actually running the CLI subcommands.  These commands
 /// are expected to *fail* (no keyring backend in CI), but must not panic.
-/// Their mere invocation exercises the closure bodies in keyring_store.rs
+/// Their mere invocation exercises the closure bodies in `keyring_store.rs`
 /// that would otherwise be 0-hit in the non-test binary's profdata.
 #[test]
 fn keyring_commands_exercise_store_code_paths() {

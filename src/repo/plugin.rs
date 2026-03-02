@@ -36,13 +36,12 @@ pub enum AdapterLookup {
 #[must_use]
 pub fn find_adapter_binary(adapter: &HookAdapter) -> AdapterLookup {
     let binary = adapter.binary_name();
-    if let Ok(path) = which_binary(binary) {
-        AdapterLookup::Found(path)
-    } else {
-        AdapterLookup::NotFound {
+    which_binary(binary).map_or_else(
+        |()| AdapterLookup::NotFound {
             binary: binary.to_string(),
-        }
-    }
+        },
+        AdapterLookup::Found,
+    )
 }
 
 /// Resolve a binary name to its full path by searching `PATH`, mirroring
@@ -132,9 +131,7 @@ mod tests {
             None => unsafe { std::env::remove_var("PATH") },
         }
 
-        assert!(
-            matches!(result, AdapterLookup::NotFound { binary } if binary == "gitvault-husky")
-        );
+        assert!(matches!(result, AdapterLookup::NotFound { binary } if binary == "gitvault-husky"));
     }
 
     #[test]

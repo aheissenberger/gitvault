@@ -89,8 +89,7 @@ pub fn list_ssh_agent_keys() -> Result<Vec<SshAgentKey>, SshAgentError> {
             // Extract comment (everything before the final " (TYPE)")
             let comment = rest
                 .rfind(" (")
-                .map(|i| rest[..i].to_string())
-                .unwrap_or_else(|| rest.to_string());
+                .map_or_else(|| rest.to_string(), |i| rest[..i].to_string());
             Some(SshAgentKey {
                 fingerprint,
                 comment,
@@ -565,11 +564,7 @@ mod tests {
         let result = with_env_var(
             "GITVAULT_IDENTITY",
             Some(tmp_file.path().to_string_lossy().as_ref()),
-            || {
-                with_env_var("SSH_AUTH_SOCK", None, || {
-                    load_identity_from_source(&source)
-                })
-            },
+            || with_env_var("SSH_AUTH_SOCK", None, || load_identity_from_source(&source)),
         );
         assert!(result.is_ok());
     }

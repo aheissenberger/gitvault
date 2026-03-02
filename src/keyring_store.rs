@@ -111,9 +111,9 @@ mod tests {
 
     // ── Public API via mock backend (covers the Entry::new() success paths) ──────
 
-    /// Use the mock backend so Entry::new() succeeds and the set/get/delete
+    /// Use the mock backend so `Entry::new()` succeeds and the set/get/delete
     /// code paths (lines 19-21, 30-32, 41-43) are covered.
-    /// The mock has EntryOnly persistence (no shared store between Entry instances),
+    /// The mock has `EntryOnly` persistence (no shared store between Entry instances),
     /// so get/delete operate on fresh entries — we only assert the lines were reached.
     #[test]
     fn keyring_public_fns_with_mock_backend() {

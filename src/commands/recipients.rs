@@ -62,6 +62,7 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
 ///
 /// Returns [`GitvaultError`] if the repository root cannot be found, the identity
 /// cannot be loaded, or re-encryption of any secret file fails.
+#[allow(clippy::needless_pass_by_value)]
 pub fn cmd_rotate(
     identity_path: Option<String>,
     selector: Option<String>,
@@ -324,8 +325,8 @@ mod tests {
         std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err =
-                cmd_rotate(None, None, false).expect_err("rotate with invalid recipient should fail");
+            let err = cmd_rotate(None, None, false)
+                .expect_err("rotate with invalid recipient should fail");
             assert!(
                 matches!(err, GitvaultError::Encryption(_)),
                 "expected Encryption error, got: {err:?}"
