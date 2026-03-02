@@ -1,5 +1,6 @@
 use crate::error::GitvaultError;
 
+/// Parse a `.env`-formatted string into a list of `(key, value)` pairs.
 pub(crate) fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultError> {
     dotenvy::from_read_iter(content.as_bytes())
         .map(|pair| pair.map_err(|e| GitvaultError::Usage(format!("Invalid .env content: {e}"))))
@@ -15,6 +16,7 @@ pub(crate) fn parse_env_key_from_line(line: &str) -> Option<String> {
     }
 }
 
+/// Parse the key and value from a single `.env` assignment line, or `None` for blanks/comments.
 pub(crate) fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
     let input = format!("{line}\n");
     let mut iter = dotenvy::from_read_iter(input.as_bytes());
@@ -24,6 +26,7 @@ pub(crate) fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
     }
 }
 
+/// Rewrite the value portion of a `.env` assignment line, preserving spacing and inline comments.
 pub(crate) fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
     let Some(eq_index) = original_line.find('=') else {
         return original_line.to_string();

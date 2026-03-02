@@ -105,6 +105,10 @@ pub(crate) fn cmd_merge_driver(
         return Ok(CommandOutcome::Exit(1));
     }
 
+    if !has_conflict {
+        crate::output_success("Merge completed successfully.", json);
+    }
+
     Ok(CommandOutcome::Success)
 }
 
