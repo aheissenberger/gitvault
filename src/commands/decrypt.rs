@@ -8,6 +8,9 @@ use crate::identity::{load_identity, load_identity_from_source};
 use crate::{crypto, fhsm, repo, structured};
 
 /// Options for the [`cmd_decrypt`] command.
+// Each bool field maps directly to a CLI flag; suppressing `struct_excessive_bools`
+// is intentional for CLI option structs.
+#[allow(clippy::struct_excessive_bools)]
 pub struct DecryptOptions {
     /// Path to the encrypted `.age` file.
     pub file: String,
