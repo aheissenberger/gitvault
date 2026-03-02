@@ -23,6 +23,11 @@ pub struct RunOptions {
 }
 
 /// Run a command with secrets injected as environment variables (REQ-21..25)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the FHSM transition fails or any effect in the
+/// execution chain fails (barrier check, identity load, decryption, subprocess).
 pub fn cmd_run(opts: RunOptions) -> Result<CommandOutcome, GitvaultError> {
     let event = fhsm::Event::Run {
         env: opts.env,

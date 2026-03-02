@@ -214,6 +214,11 @@ pub(super) async fn cmd_ssm_push_with<B: SsmBackend>(
 /// paths to the local `.ssm-refs.json` file.
 ///
 /// REQ-28: pull — read SSM values and compare with local references.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the app name cannot be resolved, the AWS client
+/// cannot be built, or the SSM pull operation or file write fails.
 pub async fn cmd_ssm_pull(
     repo_root: &Path,
     env: &str,
@@ -229,6 +234,11 @@ pub async fn cmd_ssm_pull(
 /// Values are masked unless `reveal` is true.
 ///
 /// REQ-30: diff without revealing values.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the app name cannot be resolved, the AWS client
+/// cannot be built, or reading local refs or fetching SSM values fails.
 pub async fn cmd_ssm_diff(
     repo_root: &Path,
     env: &str,
@@ -244,6 +254,12 @@ pub async fn cmd_ssm_diff(
 /// Write a single SSM parameter and record its path in the local refs file.
 ///
 /// REQ-29: production barrier required.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::BarrierNotSatisfied`] if the prod barrier is not met.
+/// Returns [`GitvaultError`] if the app name cannot be resolved, the AWS client
+/// cannot be built, or the SSM put operation or file write fails.
 pub async fn cmd_ssm_set(
     repo_root: &Path,
     env: &str,
@@ -274,6 +290,12 @@ pub async fn cmd_ssm_set(
 /// environment variables of the calling process (keys must be present).
 ///
 /// REQ-29: production barrier required.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::BarrierNotSatisfied`] if the prod barrier is not met.
+/// Returns [`GitvaultError`] if the app name cannot be resolved, the AWS client
+/// cannot be built, any required env var is missing, or a SSM put operation fails.
 pub async fn cmd_ssm_push(
     repo_root: &Path,
     env: &str,

@@ -6,6 +6,11 @@ use crate::error::GitvaultError;
 use crate::fhsm;
 
 /// Materialize secrets to root .env
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the FHSM transition fails, effect execution fails,
+/// or any I/O operation fails.
 pub fn cmd_materialize(
     env_override: Option<String>,
     identity_path: Option<String>,

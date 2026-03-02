@@ -8,6 +8,11 @@ use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, env, repo, structured};
 
 /// Encrypt a file and write the .age output under secrets/
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found, the input
+/// file cannot be read, no valid recipients are resolved, or encryption fails.
 // String params are intentionally owned: public API called from CLI dispatch
 // where values are moved out of the parsed command struct.
 #[allow(clippy::needless_pass_by_value)]

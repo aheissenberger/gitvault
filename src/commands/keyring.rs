@@ -8,6 +8,12 @@ use crate::{crypto, keyring_store};
 use zeroize::Zeroizing;
 
 /// Manage identity key in OS keyring (REQ-39)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] if the OS keyring operation fails, or
+/// [`GitvaultError::Usage`] / [`GitvaultError::Decryption`] if the identity
+/// cannot be loaded or parsed.
 pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     cmd_keyring_with_ops(
         action,
@@ -43,6 +49,11 @@ pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, 
 /// Prefer this function in tests so you can inject lightweight mock closures
 /// (or named helper functions) in place of the real OS keyring, keeping tests
 /// hermetic and fast.  Production callers should use [`cmd_keyring`] instead.
+///
+/// # Errors
+///
+/// Propagates errors from `set_fn`, `get_fn`, `delete_fn`, and from identity
+/// loading or parsing during the `Set` action.
 pub fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
     action: KeyringAction,
     json: bool,

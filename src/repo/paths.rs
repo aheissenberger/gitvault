@@ -10,6 +10,11 @@ pub const SECRETS_DIR: &str = "secrets";
 pub const PLAIN_BASE_DIR: &str = ".secrets/plain";
 
 /// Guard against path traversal: ensure `target` is under `base`.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if `target` has no file-name component or
+/// resolves to a path outside `base`.
 pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultError> {
     fn normalize(path: &Path) -> PathBuf {
         let mut out = PathBuf::new();
@@ -74,6 +79,10 @@ pub fn get_env_encrypted_path(repo_root: &Path, env: &str, name: &str) -> PathBu
 ///
 /// Prefers env-scoped layout `secrets/<env>/*.age` and falls back to legacy
 /// layout `secrets/*.age` when no env-scoped files exist.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if reading the secrets directory fails.
 pub fn list_encrypted_files_for_env(
     repo_root: &Path,
     env: &str,
@@ -91,6 +100,10 @@ pub fn list_encrypted_files_for_env(
 }
 
 /// List all encrypted files under `secrets/**` recursively.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if reading the secrets directory or any subdirectory fails.
 pub fn list_all_encrypted_files(repo_root: &Path) -> Result<Vec<PathBuf>, GitvaultError> {
     let mut out = Vec::new();
     collect_age_files(&repo_root.join(SECRETS_DIR), &mut out)?;
@@ -139,6 +152,11 @@ pub fn get_plain_path(repo_root: &Path, env: &str, name: &str) -> PathBuf {
 }
 
 /// Ensure all required directories exist.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if `env` is not a valid environment name.
+/// Returns [`GitvaultError::Io`] if any directory cannot be created.
 pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
     crate::env::validate_env_name(env)?;
     fs::create_dir_all(repo_root.join(SECRETS_DIR))?;
@@ -151,6 +169,12 @@ pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
 ///
 /// Reads all `.age` files for `env`, decrypts them with `identity`, and returns
 /// the key-value pairs parsed from the plaintext.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if reading an encrypted file fails.
+/// Returns [`GitvaultError::Decryption`] if any file cannot be decrypted with `identity`.
+/// Returns [`GitvaultError::Usage`] if decrypted content is not valid `.env` syntax.
 pub fn decrypt_env_secrets(
     repo_root: &Path,
     env: &str,
@@ -182,6 +206,10 @@ pub fn decrypt_env_secrets(
 ///
 /// Returns [`crate::error::GitvaultError::Usage`] if no `.git` is found — the caller is
 /// not inside a git repository.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if no `.git` directory is found while walking up.
 pub fn find_repo_root_from(
     start: &std::path::Path,
 ) -> Result<std::path::PathBuf, crate::error::GitvaultError> {
@@ -202,6 +230,11 @@ pub fn find_repo_root_from(
 }
 
 /// Find the repository root starting from `std::env::current_dir()`.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if the current directory cannot be determined.
+/// Returns [`GitvaultError::Usage`] if no `.git` directory is found while walking up.
 pub fn find_repo_root() -> Result<std::path::PathBuf, crate::error::GitvaultError> {
     let cwd = std::env::current_dir()?;
     find_repo_root_from(&cwd)

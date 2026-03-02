@@ -19,6 +19,11 @@ impl AwsConfig {
     }
 
     /// Build an SSM client using the configured profile and/or role ARN.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::GitvaultError::Other`] if the AWS SDK fails to
+    /// create a client or the optional role assumption fails.
     #[cfg(feature = "ssm")]
     pub async fn build_client(&self) -> Result<aws_sdk_ssm::Client, crate::error::GitvaultError> {
         use aws_config::sts::AssumeRoleProvider;

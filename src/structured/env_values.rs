@@ -6,6 +6,12 @@ use super::helpers::{ENV_ENC_PREFIX, is_env_encrypted};
 
 /// REQ-6: Encrypt each VALUE in a .env file individually (KEY=enc:base64).
 /// Returns the new .env content.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if an existing encrypted value cannot be
+/// decrypted by `identity`. Returns [`GitvaultError::Encryption`] if a new value
+/// cannot be encrypted.
 pub fn encrypt_env_values(
     content: &str,
     identity: &dyn age::Identity,
@@ -53,7 +59,12 @@ pub fn encrypt_env_values(
     Ok(result)
 }
 
-/// REQ-6: Decrypt each VALUE in a .env file that was encrypted with encrypt_env_values.
+/// REQ-6: Decrypt each VALUE in a .env file that was encrypted with `encrypt_env_values`.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if any encrypted value cannot be decrypted
+/// by `identity` or the decrypted bytes are not valid UTF-8.
 pub fn decrypt_env_values(
     content: &str,
     identity: &dyn age::Identity,

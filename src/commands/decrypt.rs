@@ -31,6 +31,11 @@ pub struct DecryptOptions {
 }
 
 /// Decrypt a .age file and write plaintext
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the identity cannot be loaded, the input file cannot
+/// be read, decryption fails, or the output path is outside the repository root.
 pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError> {
     // Use FHSM to resolve the identity source; file I/O remains here.
     let event = fhsm::Event::Decrypt {

@@ -7,6 +7,11 @@ use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, repo};
 
 /// Manage persistent recipients (REQ-37)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found, the recipient
+/// key is invalid, or reading/writing the recipients file fails.
 pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     match action {
@@ -52,6 +57,11 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
 }
 
 /// Re-encrypt all secrets with the current recipients list (REQ-38)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found, the identity
+/// cannot be loaded, or re-encryption of any secret file fails.
 pub fn cmd_rotate(
     identity_path: Option<String>,
     json: bool,

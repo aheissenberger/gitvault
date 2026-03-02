@@ -5,6 +5,13 @@ use std::path::Path;
 use std::sync::OnceLock;
 use zeroize::Zeroizing;
 
+/// Extract the first `AGE-SECRET-KEY-…` line from a text blob.
+///
+/// Returns `None` if no valid key line is found.
+///
+/// # Panics
+///
+/// Never panics in practice; the identity regex literal always compiles.
 pub fn extract_identity_key(content: &str) -> Option<String> {
     static IDENTITY_LINE_RE: OnceLock<Regex> = OnceLock::new();
     let identity_line_re = IDENTITY_LINE_RE.get_or_init(|| {
@@ -17,6 +24,15 @@ pub fn extract_identity_key(content: &str) -> Option<String> {
         .map(|captures| captures[1].to_string())
 }
 
+/// Load an identity key from an inline `AGE-SECRET-KEY-…` value or a file path.
+///
+/// If `source` starts with `AGE-SECRET-KEY-`, it is used directly. Otherwise,
+/// `source` is treated as a file path and the first key line is extracted.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if `source` is a file path that cannot be read
+/// or does not contain a valid `AGE-SECRET-KEY` line.
 pub fn load_identity_source(
     source: &str,
     source_name: &str,
@@ -42,11 +58,25 @@ pub fn load_identity_source(
         })
 }
 
-/// Load identity key string from file path or GITVAULT_IDENTITY env var
+/// Load identity key string from file path or `GITVAULT_IDENTITY` env var
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if no identity source is configured or the
+/// identity cannot be loaded from the specified source.
 pub fn load_identity(path: Option<String>) -> Result<Zeroizing<String>, GitvaultError> {
     load_identity_with(path, keyring_store::keyring_get)
 }
 
+/// Dependency-injected variant of [`load_identity`].
+///
+/// Resolves the identity using the same priority chain as [`load_identity`]
+/// but calls `keyring_get_fn` instead of the real OS keyring.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if no identity source is configured.
+/// Propagates errors from the identity source or `keyring_get_fn`.
 pub fn load_identity_with<F>(
     path: Option<String>,
     keyring_get_fn: F,
@@ -73,6 +103,10 @@ where
 ///
 /// The `Unresolved` variant (emitted by the FHSM when no path was supplied)
 /// triggers the standard env-var / keyring fallback via [`load_identity`].
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the identity cannot be loaded from the resolved source.
 pub fn load_identity_from_source(
     source: &fhsm::IdentitySource,
 ) -> Result<Zeroizing<String>, GitvaultError> {
@@ -86,6 +120,13 @@ pub fn load_identity_from_source(
     }
 }
 
+/// Resolve the final recipient key list, falling back to the recipients file and
+/// then the caller's own identity public key.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if reading the recipients file fails or the identity
+/// cannot be loaded to derive the default recipient public key.
 pub fn resolve_recipient_keys(
     repo_root: &Path,
     recipient_keys: Vec<String>,

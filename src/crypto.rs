@@ -7,6 +7,10 @@ use std::io::Read;
 pub const GITVAULT_FORMAT_VERSION: u32 = 1;
 
 /// Parse an age X25519 public key string into a Recipient.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Encryption`] if `pubkey` is not a valid age X25519 public key.
 pub fn parse_recipient(pubkey: &str) -> Result<x25519::Recipient, GitvaultError> {
     pubkey
         .parse::<x25519::Recipient>()
@@ -14,6 +18,10 @@ pub fn parse_recipient(pubkey: &str) -> Result<x25519::Recipient, GitvaultError>
 }
 
 /// Parse an age X25519 identity (private key) from a string.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if `privkey` is not a valid age X25519 identity.
 pub fn parse_identity(privkey: &str) -> Result<x25519::Identity, GitvaultError> {
     privkey
         .parse::<x25519::Identity>()
@@ -22,6 +30,10 @@ pub fn parse_identity(privkey: &str) -> Result<x25519::Identity, GitvaultError> 
 
 /// Encrypt plaintext bytes using age format with multiple recipients.
 /// REQ-1: uses age file format. REQ-2: native Rust. REQ-3: multi-recipient.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Encryption`] if the recipient list is empty or encryption fails.
 pub fn encrypt(
     recipients: Vec<Box<dyn age::Recipient + Send>>,
     plaintext: &[u8],
@@ -33,6 +45,11 @@ pub fn encrypt(
 }
 
 /// Decrypt age-encrypted bytes using an identity.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if the ciphertext is malformed, the identity
+/// does not match any recipient, or the data cannot be fully read.
 pub fn decrypt(identity: &dyn age::Identity, ciphertext: &[u8]) -> Result<Vec<u8>, GitvaultError> {
     let decryptor = Decryptor::new(ciphertext)
         .map_err(|e| GitvaultError::Decryption(format!("Failed to create decryptor: {e}")))?;
@@ -57,6 +74,11 @@ pub fn decrypt(identity: &dyn age::Identity, ciphertext: &[u8]) -> Result<Vec<u8
 }
 
 /// REQ-51: Streaming encryption from a reader to a writer.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Encryption`] if the recipient list is empty, the
+/// encrypted writer cannot be created, streaming fails, or finalisation fails.
 pub fn encrypt_stream(
     recipients: Vec<Box<dyn age::Recipient + Send>>,
     reader: &mut impl std::io::Read,
@@ -76,6 +98,11 @@ pub fn encrypt_stream(
 }
 
 /// REQ-51: Streaming decryption from a reader to a writer.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if the ciphertext is malformed, the identity
+/// does not match any recipient, or streaming the plaintext to the writer fails.
 pub fn decrypt_stream(
     identity: &dyn age::Identity,
     reader: impl std::io::Read,

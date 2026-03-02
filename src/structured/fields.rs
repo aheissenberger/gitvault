@@ -71,6 +71,12 @@ fn toml_field_mut<'a>(value: &'a mut toml::Value, path: &[&str]) -> Option<&'a m
 /// public-key `recipient_keys`; the identity is retained in the signature to support future
 /// scenarios such as decryption-then-re-encryption or identity-based key derivation without
 /// a breaking API change.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if the file cannot be read or written.
+/// Returns [`GitvaultError::Encryption`] if the file format is unsupported, JSON/YAML/TOML
+/// parsing fails, a field value is not a string, or encryption fails.
 pub fn encrypt_fields(
     file_path: &Path,
     fields: &[&str],
@@ -168,6 +174,12 @@ fn encrypt_fields_toml(
 }
 
 /// REQ-4: Decrypt specified fields in a JSON, YAML, or TOML file.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if the file cannot be read or written.
+/// Returns [`GitvaultError::Decryption`] if the file format is unsupported,
+/// parsing fails, a field value is not a string, or decryption fails.
 pub fn decrypt_fields(
     file_path: &Path,
     fields: &[&str],

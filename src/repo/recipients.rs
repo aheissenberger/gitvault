@@ -7,6 +7,11 @@ use std::sync::OnceLock;
 pub const RECIPIENTS_FILE: &str = ".secrets/recipients";
 
 /// Read persistent recipients from .secrets/recipients (one pubkey per line).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if the file exists but cannot be read.
+/// Returns [`GitvaultError::Usage`] if any line is not a valid age recipient key.
 pub fn read_recipients(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
     let path = repo_root.join(RECIPIENTS_FILE);
     if !path.exists() {
@@ -49,6 +54,11 @@ fn parse_recipient_line(line: &str) -> Result<Option<String>, &'static str> {
 }
 
 /// Write recipients to .secrets/recipients atomically.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if the parent directory cannot be created or
+/// the file cannot be written atomically.
 pub fn write_recipients(repo_root: &Path, recipients: &[String]) -> Result<(), GitvaultError> {
     let path = repo_root.join(RECIPIENTS_FILE);
     if let Some(parent) = path.parent() {

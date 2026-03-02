@@ -40,6 +40,14 @@ pub fn resolve_env(worktree_root: &Path) -> String {
 /// Only allows `[A-Za-z0-9_-]+` so that values like `../../etc` cannot
 /// escape the repository root when used in `repo_root.join(env)` calls.
 /// Returns [`GitvaultError::Usage`] if the name is invalid.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if `env` contains characters outside `[A-Za-z0-9_-]`.
+///
+/// # Panics
+///
+/// Never panics in practice; the regex literal `^[A-Za-z0-9_-]+$` always compiles.
 pub fn validate_env_name(env: &str) -> Result<(), GitvaultError> {
     static ENV_RE: OnceLock<Regex> = OnceLock::new();
     let re = ENV_RE

@@ -13,6 +13,10 @@ use crate::commands::CommandOutcome;
 use crate::error::GitvaultError;
 
 /// Dispatch a parsed [`Cli`] to the appropriate command implementation.
+///
+/// # Errors
+///
+/// Propagates any [`GitvaultError`] returned by the dispatched command.
 pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
     cli.no_prompt = crate::output::resolve_no_prompt(cli.no_prompt);
     match cli.command {

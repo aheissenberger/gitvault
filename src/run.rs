@@ -17,6 +17,11 @@ use crate::error::GitvaultError;
 ///   `clear_env` is true.  Ignored when `clear_env` is false (all current vars pass through).
 ///
 /// Returns the child process exit code. REQ-23.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Other`] if the child process cannot be spawned or its
+/// exit code cannot be retrieved.
 pub fn run_command(
     secrets: &[(String, String)],
     cmd: &str,

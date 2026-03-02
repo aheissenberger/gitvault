@@ -13,6 +13,11 @@ const SERVICE: &str = "gitvault";
 const USERNAME: &str = "age-identity";
 
 /// Store the age identity key in the OS keyring (REQ-39).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be created or
+/// the password cannot be stored.
 pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
     keyring_set_with(key, |service, username, key| {
         let entry = keyring::Entry::new(service, username)
@@ -24,6 +29,11 @@ pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
 }
 
 /// Retrieve the age identity key from the OS keyring (REQ-39).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be opened or
+/// the password cannot be retrieved.
 pub fn keyring_get() -> Result<Zeroizing<String>, GitvaultError> {
     keyring_get_with(|service, username| {
         let entry = keyring::Entry::new(service, username)
@@ -36,6 +46,11 @@ pub fn keyring_get() -> Result<Zeroizing<String>, GitvaultError> {
 }
 
 /// Delete the age identity key from the OS keyring (REQ-39).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be opened or
+/// the credential cannot be deleted.
 pub fn keyring_delete() -> Result<(), GitvaultError> {
     keyring_delete_with(|service, username| {
         let entry = keyring::Entry::new(service, username)
@@ -48,6 +63,11 @@ pub fn keyring_delete() -> Result<(), GitvaultError> {
 
 // ── Platform-independent injectable helpers (testable on all platforms) ───────
 
+/// Injectable variant of [`keyring_set`] — calls `set_password(service, username, key)`.
+///
+/// # Errors
+///
+/// Propagates any error returned by `set_password`.
 pub fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str, &str) -> Result<(), GitvaultError>,
@@ -55,6 +75,11 @@ where
     set_password(SERVICE, USERNAME, key)
 }
 
+/// Injectable variant of [`keyring_get`] — calls `get_password(service, username)`.
+///
+/// # Errors
+///
+/// Propagates any error returned by `get_password`.
 pub fn keyring_get_with<F>(get_password: F) -> Result<Zeroizing<String>, GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<Zeroizing<String>, GitvaultError>,
@@ -62,6 +87,11 @@ where
     get_password(SERVICE, USERNAME)
 }
 
+/// Injectable variant of [`keyring_delete`] — calls `delete_credential(service, username)`.
+///
+/// # Errors
+///
+/// Propagates any error returned by `delete_credential`.
 pub fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<(), GitvaultError>,

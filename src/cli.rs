@@ -56,7 +56,7 @@ pub enum Commands {
     Decrypt {
         /// Encrypted .age file to decrypt
         file: String,
-        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
         /// Output file path (default: strip .age extension)
@@ -74,7 +74,7 @@ pub enum Commands {
     },
     /// Materialize secrets to root .env
     Materialize {
-        /// Environment to use (overrides SECRETS_ENV and .secrets/env)
+        /// Environment to use (overrides `SECRETS_ENV` and .secrets/env)
         #[arg(short, long)]
         env: Option<String>,
         /// Identity key file path
@@ -97,7 +97,7 @@ pub enum Commands {
         /// Environment to use
         #[arg(short, long)]
         env: Option<String>,
-        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
         /// Require production barrier (required when env=prod) (REQ-13)
@@ -136,7 +136,7 @@ pub enum Commands {
     },
     /// Re-encrypt all secrets with the current recipients list (REQ-38)
     Rotate {
-        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
     },
@@ -150,7 +150,7 @@ pub enum Commands {
         /// Environment to validate
         #[arg(short, long)]
         env: Option<String>,
-        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
     },
@@ -185,7 +185,7 @@ pub enum RecipientAction {
 pub enum KeyringAction {
     /// Store identity key in OS keyring
     Set {
-        /// Identity key file path (or use GITVAULT_IDENTITY env var)
+        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
     },

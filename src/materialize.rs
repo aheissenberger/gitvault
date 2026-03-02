@@ -16,6 +16,11 @@ pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[".env", ".secrets/plain/"];
 /// REQ-18: restricted .env permissions (0600 on Unix; restricted ACL via icacls on Windows)
 /// REQ-19: deterministic output (sorted keys, canonical quoting)
 /// REQ-20: ensures .env is in .gitignore first
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if writing the `.env` temp file or atomic rename fails,
+/// or if `.gitignore` cannot be read or updated.
 pub fn materialize_env_file(
     repo_root: &Path,
     secrets: &[(String, String)],
@@ -89,6 +94,10 @@ fn escape_env_value(value: &str) -> String {
 pub const GITATTRIBUTES_MERGE_DRIVER_ENTRY: &str = "*.env merge=gitvault-env";
 
 /// Ensure the `.gitattributes` file at `repo_root` contains the given lines. REQ-34
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if reading or writing `.gitattributes` fails.
 pub fn ensure_gitattributes(repo_root: &Path, entries: &[&str]) -> Result<(), GitvaultError> {
     let gitattributes_path = repo_root.join(".gitattributes");
 
@@ -114,6 +123,10 @@ fn merge_gitattributes_entries(existing: &str, entries: &[&str]) -> Option<Strin
 }
 
 /// Ensure the given entries exist in `.gitignore`. REQ-9, REQ-20
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if reading or writing `.gitignore` fails.
 pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), GitvaultError> {
     let gitignore_path = repo_root.join(".gitignore");
 

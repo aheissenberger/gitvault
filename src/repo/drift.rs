@@ -5,6 +5,10 @@ use std::process::Command;
 /// Check whether `secrets/` has uncommitted changes (drift). REQ-32.
 ///
 /// Returns Ok(true) if there are uncommitted changes, Ok(false) if clean.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Other`] if `git diff` cannot be spawned.
 pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
     let output = Command::new("git")
         .args(["diff", "--quiet", "HEAD", "--", "secrets/"])
@@ -25,6 +29,11 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
 /// Checks that staged files do not include:
 /// - anything under .secrets/plain/
 /// - .env
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Other`] if `git diff --cached` cannot be spawned.
+/// Returns [`GitvaultError::PlaintextLeak`] if plaintext secrets are staged.
 pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError> {
     let output = Command::new("git")
         .args(["diff", "--cached", "--name-only"])

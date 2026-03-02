@@ -79,6 +79,10 @@ fn install_hook(hook_path: &Path, script: &str) -> Result<(), GitvaultError> {
 ///
 /// Hooks are idempotent: existing hooks that already call gitvault are left unchanged;
 /// otherwise the script is written (or overwritten with the gitvault block).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if a hook file cannot be read, written, or made executable.
 pub fn install_git_hooks(repo_root: &Path) -> Result<(), GitvaultError> {
     let hooks_dir = repo_root.join(".git").join("hooks");
     if !hooks_dir.exists() {

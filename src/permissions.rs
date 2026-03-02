@@ -3,6 +3,12 @@ use std::path::Path;
 use crate::error::GitvaultError;
 
 /// Restrict `path` to owner-read/write only (mode `0600` on Unix, restricted ACL on Windows).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if reading file metadata or setting permissions fails.
+/// On Windows, returns [`GitvaultError::Usage`] if the current username cannot be
+/// determined, or [`GitvaultError::Io`] if `icacls` cannot be spawned or reports failure.
 pub fn enforce_owner_rw(path: &Path, resource: &str) -> Result<(), GitvaultError> {
     #[cfg(unix)]
     {

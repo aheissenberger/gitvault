@@ -9,6 +9,11 @@ use crate::merge::merge_env_content;
 use crate::{barrier, crypto, env, repo};
 
 /// Check repository safety status
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found, tracked plaintext
+/// is detected, or drift detection fails.
 pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, GitvaultError> {
     // REQ-44: no decryption performed
     let repo_root = crate::repo::find_repo_root()?;
@@ -41,6 +46,11 @@ pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, Git
 }
 
 /// Harden the repository: update .gitignore, install git hooks, register merge driver in .gitattributes
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found, `.gitignore` or
+/// `.gitattributes` update fails, or git hook installation fails.
 pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     crate::materialize::ensure_gitignored(
@@ -60,6 +70,11 @@ pub fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
 }
 
 /// Write a timed production allow token (REQ-14)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found or writing
+/// the allow token fails.
 pub fn cmd_allow_prod(ttl: u64, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let expiry = barrier::allow_prod(&repo_root, ttl)?;
@@ -71,6 +86,11 @@ pub fn cmd_allow_prod(ttl: u64, json: bool) -> Result<CommandOutcome, GitvaultEr
 }
 
 /// Immediately revoke the production allow token (REQ-14)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found or the
+/// token file cannot be removed.
 pub fn cmd_revoke_prod(json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     barrier::revoke_prod(&repo_root)?;
@@ -79,6 +99,12 @@ pub fn cmd_revoke_prod(json: bool) -> Result<CommandOutcome, GitvaultError> {
 }
 
 /// Run as git merge driver for .env files (REQ-34, REQ-48)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if any input file cannot be read or the merged
+/// output cannot be written. Returns [`GitvaultError::Usage`] if any file is not
+/// valid `.env` syntax.
 // String params are intentionally owned: this is a public API called from CLI
 // dispatch where the values are moved out of the parsed command struct.
 #[allow(clippy::needless_pass_by_value)]
@@ -123,6 +149,11 @@ pub fn cmd_merge_driver(
 }
 
 /// Run preflight validation without side effects (REQ-50)
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root is not found, tracked plaintext
+/// is detected, the identity cannot be loaded or parsed, or no encrypted secrets exist.
 pub fn cmd_check(
     env_override: Option<String>,
     identity_path: Option<String>,

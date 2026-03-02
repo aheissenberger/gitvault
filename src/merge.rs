@@ -1,6 +1,10 @@
 use crate::error::GitvaultError;
 
 /// Parse a `.env`-formatted string into a list of `(key, value)` pairs.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if the content is not valid `.env` syntax.
 pub fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultError> {
     dotenvy::from_read_iter(content.as_bytes())
         .map(|pair| pair.map_err(|e| GitvaultError::Usage(format!("Invalid .env content: {e}"))))
@@ -55,6 +59,10 @@ pub fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> Stri
 /// Uses a standard three-way merge algorithm: for each key, if only one side changed
 /// relative to base, take that change; if both changed identically, accept it; if both
 /// changed differently, emit a conflict marker block.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if any input string is not valid `.env` syntax.
 pub fn merge_env_content(
     base: &str,
     ours: &str,

@@ -1,4 +1,4 @@
-//! FHSM effect runner infrastructure and CommandOutcome type.
+//! FHSM effect runner infrastructure and `CommandOutcome` type.
 
 use std::path::Path;
 
@@ -20,6 +20,11 @@ pub enum CommandOutcome {
 /// Each method corresponds to one [`fhsm::Effect`] variant that requires I/O.
 /// Implementations receive the repo root and accumulated state as parameters.
 pub trait EffectRunner {
+    /// Check the production barrier. See [`barrier::check_prod_barrier`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitvaultError::BarrierNotSatisfied`] if the barrier is not satisfied.
     fn check_prod_barrier(
         &self,
         repo_root: &Path,
@@ -28,11 +33,21 @@ pub trait EffectRunner {
         no_prompt: bool,
     ) -> Result<(), GitvaultError>;
 
+    /// Resolve an identity key from the given source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitvaultError`] if the identity cannot be loaded from the source.
     fn load_identity_str(
         &self,
         source: &fhsm::IdentitySource,
     ) -> Result<Zeroizing<String>, GitvaultError>;
 
+    /// Decrypt all `.age` files for `env` using `identity`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitvaultError`] if any file cannot be read or decrypted.
     fn decrypt_secrets(
         &self,
         repo_root: &Path,
@@ -40,6 +55,11 @@ pub trait EffectRunner {
         identity: &dyn age::Identity,
     ) -> Result<Vec<(String, String)>, GitvaultError>;
 
+    /// Spawn `command` with `secrets` injected as environment variables.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitvaultError::Other`] if the child process cannot be spawned.
     fn run_command(
         &self,
         secrets: &[(String, String)],
@@ -48,6 +68,11 @@ pub trait EffectRunner {
         pass_vars: &[String],
     ) -> Result<i32, GitvaultError>;
 
+    /// Write decrypted `secrets` to the root `.env` file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GitvaultError::Io`] if writing the `.env` file fails.
     fn materialize_secrets(
         &self,
         repo_root: &Path,
@@ -113,6 +138,10 @@ impl EffectRunner for DefaultRunner {
 /// State (resolved identity, decrypted secrets) is accumulated across effects so
 /// that later effects can depend on earlier ones.  Returns early with the
 /// subprocess exit code for [`fhsm::Effect::RunCommand`].
+///
+/// # Errors
+///
+/// Propagates any [`GitvaultError`] returned by the runner's methods.
 pub fn execute_effects_with(
     effects: Vec<fhsm::Effect>,
     repo_root: &Path,
@@ -185,6 +214,11 @@ pub fn execute_effects_with(
 }
 
 /// Execute an ordered list of FHSM [`fhsm::Effect`]s using the real I/O functions.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if the repository root cannot be found or any
+/// effect execution fails.
 pub fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     execute_effects_with(effects, &repo_root, &DefaultRunner)

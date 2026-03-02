@@ -2,7 +2,7 @@
 //!
 //! REQ-13: accessing prod requires --prod flag AND (valid allow token OR interactive confirmation).
 //! REQ-14: allow token expires automatically (default TTL: 3600 seconds).
-//! REQ-15: fail closed — any unmet condition returns BarrierNotSatisfied.
+//! REQ-15: fail closed — any unmet condition returns `BarrierNotSatisfied`.
 
 use std::fs;
 use std::path::Path;
@@ -21,10 +21,16 @@ const TOKEN_PATH: &str = ".secrets/.prod-token";
 ///
 /// REQ-13: if `env` == "prod", requires:
 ///   - `prod_flag` == true   (explicit --prod opt-in), AND
-///   - valid unexpired allow token OR interactive confirmation (blocked when no_prompt)
+///   - valid unexpired allow token OR interactive confirmation (blocked when `no_prompt`)
 ///
 /// REQ-15: fails closed — returns Err(BarrierNotSatisfied) if any condition is unmet.
 /// Non-prod environments pass immediately.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::BarrierNotSatisfied`] if `env` is `"prod"` and the
+/// `--prod` flag was not set, no valid token exists, or the user declines the prompt.
+/// Returns [`GitvaultError::Io`] if reading the token file or stdin fails.
 pub fn check_prod_barrier(
     repo_root: &Path,
     env: &str,
@@ -108,6 +114,11 @@ fn read_confirmation_from(reader: &mut impl std::io::BufRead) -> Result<bool, Gi
 /// Write a timed allow token to `.secrets/.prod-token`. REQ-14.
 ///
 /// The token contains the Unix timestamp at which it expires.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Other`] if the expiry timestamp overflows.
+/// Returns [`GitvaultError::Io`] if creating or writing the token file fails.
 pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError> {
     let expiry = now_secs()
         .checked_add(ttl_secs)
@@ -136,6 +147,10 @@ fn enforce_restricted_token_permissions(path: &Path) -> Result<(), GitvaultError
 }
 
 /// Revoke the allow token by removing the token file.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Io`] if the token file exists but cannot be removed.
 pub fn revoke_prod(repo_root: &Path) -> Result<(), GitvaultError> {
     let token_path = repo_root.join(TOKEN_PATH);
     match fs::remove_file(&token_path) {

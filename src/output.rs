@@ -17,7 +17,7 @@ pub fn ci_is_non_interactive() -> bool {
     matches!(std::env::var("CI").as_deref(), Ok("1" | "true" | "yes"))
 }
 
-/// Return the effective no_prompt setting — always true in CI.
+/// Return the effective `no_prompt` setting — always true in CI.
 pub fn resolve_no_prompt(no_prompt: bool) -> bool {
     no_prompt || ci_is_non_interactive()
 }
