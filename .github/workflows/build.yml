@@ -369,7 +369,7 @@ jobs:
           set -euo pipefail
           cd tap
 
-          if git diff --quiet -- "${FORMULA_PATH}"; then
+          if [[ -z "$(git status --porcelain -- "${FORMULA_PATH}")" ]]; then
             echo "No formula changes detected; skipping push."
             exit 0
           fi
