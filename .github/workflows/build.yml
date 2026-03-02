@@ -40,17 +40,17 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      - name: Setup Rust stable
+      - name: Setup Rust 1.93.1
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: 1.93.1
           components: clippy,rustfmt
 
       - name: Cache cargo artifacts
         id: cache_verify
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          shared-key: rust-${{ runner.os }}-stable
+          shared-key: rust-${{ runner.os }}-1.93.1
 
       - name: Cache diagnostics (verify)
         run: |
@@ -66,7 +66,7 @@ jobs:
             echo "### Cache status (verify)"
             echo "- OS: $RUNNER_OS"
             echo "- rust-cache hit: ${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}"
-            echo "- shared-key: rust-${{ runner.os }}-stable"
+            echo "- shared-key: rust-${{ runner.os }}-1.93.1"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Persist cache status (verify)
@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           mkdir -p cache-status
           cat > cache-status/verify-${{ runner.os }}.tsv <<'EOF'
-verify	${{ runner.os }}	-	${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-stable
+verify	${{ runner.os }}	-	${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-1.93.1
 EOF
 
       - name: Upload cache status (verify)
@@ -143,17 +143,17 @@ EOF
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Rust stable
+      - name: Setup Rust 1.93.1
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: 1.93.1
           targets: ${{ matrix.target }}
 
       - name: Cache cargo artifacts
         id: cache_build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          shared-key: rust-${{ runner.os }}-stable
+          shared-key: rust-${{ runner.os }}-1.93.1
 
       - name: Cache diagnostics (build)
         run: |
@@ -170,7 +170,7 @@ EOF
             echo "- OS: $RUNNER_OS"
             echo "- target: ${{ matrix.target }}"
             echo "- rust-cache hit: ${{ steps.cache_build.outputs.cache-hit || 'n/a' }}"
-            echo "- shared-key: rust-${{ runner.os }}-stable"
+            echo "- shared-key: rust-${{ runner.os }}-1.93.1"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Persist cache status (build)
@@ -178,7 +178,7 @@ EOF
           set -euo pipefail
           mkdir -p cache-status
           cat > cache-status/build-${{ matrix.target }}-${{ runner.os }}.tsv <<'EOF'
-build	${{ runner.os }}	${{ matrix.target }}	${{ steps.cache_build.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-stable
+build	${{ runner.os }}	${{ matrix.target }}	${{ steps.cache_build.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-1.93.1
 EOF
 
       - name: Upload cache status (build)
