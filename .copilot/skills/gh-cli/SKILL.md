@@ -7,6 +7,8 @@ description: GitHub CLI (gh) comprehensive reference for repositories, issues, p
 
 Comprehensive reference for GitHub CLI (gh) - work seamlessly with GitHub from the command line.
 
+Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../../../.github/instructions/rust.instructions.md).
+
 **Version:** 2.85.0 (current as of January 2026)
 
 ## Prerequisites
