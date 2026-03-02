@@ -41,7 +41,7 @@ pub(crate) trait EffectRunner {
         secrets: &[(String, String)],
         command: &[String],
         clear_env: bool,
-        pass_vars: &[(String, String)],
+        pass_vars: &[String],
     ) -> Result<i32, GitvaultError>;
 
     fn materialize_secrets(
@@ -83,14 +83,12 @@ impl EffectRunner for DefaultRunner {
         secrets: &[(String, String)],
         command: &[String],
         clear_env: bool,
-        pass_vars: &[(String, String)],
+        pass_vars: &[String],
     ) -> Result<i32, GitvaultError> {
         let (cmd, args) = command.split_first().ok_or_else(|| {
             crate::error::GitvaultError::Usage("command must not be empty".to_string())
         })?;
-        // Extract var names from key-value pairs for run_command's pass-through lookup.
-        let pass_var_names: Vec<String> = pass_vars.iter().map(|(k, _)| k.clone()).collect();
-        run::run_command(secrets, cmd, args, clear_env, &pass_var_names)
+        run::run_command(secrets, cmd, args, clear_env, pass_vars)
     }
 
     fn materialize_secrets(
@@ -228,7 +226,7 @@ mod tests {
             _secrets: &[(String, String)],
             _command: &[String],
             _clear_env: bool,
-            _pass_vars: &[(String, String)],
+            _pass_vars: &[String],
         ) -> Result<i32, GitvaultError> {
             self.run_exit_code
                 .as_ref()

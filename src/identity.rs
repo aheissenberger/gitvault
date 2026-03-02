@@ -49,7 +49,7 @@ pub(crate) fn load_identity_with<F>(
     keyring_get_fn: F,
 ) -> Result<String, GitvaultError>
 where
-    F: Fn() -> Result<String, String>,
+    F: Fn() -> Result<String, GitvaultError>,
 {
     if let Some(p) = path {
         return load_identity_source(&p, "--identity");
@@ -59,7 +59,7 @@ where
     }
     // REQ-39: load from OS keyring if GITVAULT_KEYRING=1
     if std::env::var("GITVAULT_KEYRING").as_deref() == Ok("1") {
-        return keyring_get_fn().map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")));
+        return keyring_get_fn();
     }
     Err(GitvaultError::Usage(
         "No identity provided. Use --identity <file>, set GITVAULT_IDENTITY, or use GITVAULT_KEYRING=1".to_string(),
@@ -76,8 +76,7 @@ pub(crate) fn load_identity_from_source(
     match source {
         fhsm::IdentitySource::FilePath(p) => load_identity_source(p, "--identity"),
         fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),
-        fhsm::IdentitySource::Keyring => keyring_store::keyring_get()
-            .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}"))),
+        fhsm::IdentitySource::Keyring => keyring_store::keyring_get(),
         fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(s.clone()),
         fhsm::IdentitySource::Inline(_) => load_identity(None),
         // Unresolved: executor must run the full priority chain at runtime
@@ -200,12 +199,12 @@ mod tests {
             std::env::set_var("GITVAULT_KEYRING", "1");
         }
 
-        let err = load_identity_with(None, || Err("no key".to_string())).unwrap_err();
+        let err = load_identity_with(None, || Err(GitvaultError::Keyring("no key".to_string()))).unwrap_err();
 
         unsafe {
             std::env::remove_var("GITVAULT_KEYRING");
         }
-        assert!(matches!(err, GitvaultError::Other(_)));
+        assert!(matches!(err, GitvaultError::Keyring(_)));
     }
 
     // ─── load_identity_source ─────────────────────────────────────────────────

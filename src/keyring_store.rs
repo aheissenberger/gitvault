@@ -1,47 +1,58 @@
 //! OS keyring integration (REQ-39).
 //! Stores the age identity key in the system keyring under service "gitvault".
 
+use crate::error::GitvaultError;
+
 const SERVICE: &str = "gitvault";
 const USERNAME: &str = "age-identity";
 
-pub fn keyring_set(key: &str) -> Result<(), String> {
+pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
     keyring_set_with(key, |service, username, key| {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.set_password(key).map_err(|e| e.to_string())
+        let entry = keyring::Entry::new(service, username)
+            .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
+        entry
+            .set_password(key)
+            .map_err(|e| GitvaultError::Keyring(e.to_string()))
     })
 }
 
-pub fn keyring_get() -> Result<String, String> {
+pub fn keyring_get() -> Result<String, GitvaultError> {
     keyring_get_with(|service, username| {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.get_password().map_err(|e| e.to_string())
+        let entry = keyring::Entry::new(service, username)
+            .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
+        entry
+            .get_password()
+            .map_err(|e| GitvaultError::Keyring(e.to_string()))
     })
 }
 
-pub fn keyring_delete() -> Result<(), String> {
+pub fn keyring_delete() -> Result<(), GitvaultError> {
     keyring_delete_with(|service, username| {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.delete_credential().map_err(|e| e.to_string())
+        let entry = keyring::Entry::new(service, username)
+            .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
+        entry
+            .delete_credential()
+            .map_err(|e| GitvaultError::Keyring(e.to_string()))
     })
 }
 
-fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), String>
+fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
 where
-    F: FnOnce(&str, &str, &str) -> Result<(), String>,
+    F: FnOnce(&str, &str, &str) -> Result<(), GitvaultError>,
 {
     set_password(SERVICE, USERNAME, key)
 }
 
-fn keyring_get_with<F>(get_password: F) -> Result<String, String>
+fn keyring_get_with<F>(get_password: F) -> Result<String, GitvaultError>
 where
-    F: FnOnce(&str, &str) -> Result<String, String>,
+    F: FnOnce(&str, &str) -> Result<String, GitvaultError>,
 {
     get_password(SERVICE, USERNAME)
 }
 
-fn keyring_delete_with<F>(delete_credential: F) -> Result<(), String>
+fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
 where
-    F: FnOnce(&str, &str) -> Result<(), String>,
+    F: FnOnce(&str, &str) -> Result<(), GitvaultError>,
 {
     delete_credential(SERVICE, USERNAME)
 }
@@ -101,8 +112,8 @@ mod tests {
 
     #[test]
     fn keyring_helpers_propagate_errors() {
-        assert!(keyring_set_with("k", |_s, _u, _k| Err("set failed".to_string())).is_err());
-        assert!(keyring_get_with(|_s, _u| Err("get failed".to_string())).is_err());
-        assert!(keyring_delete_with(|_s, _u| Err("delete failed".to_string())).is_err());
+        assert!(keyring_set_with("k", |_s, _u, _k| Err(GitvaultError::Keyring("set failed".to_string()))).is_err());
+        assert!(keyring_get_with(|_s, _u| Err(GitvaultError::Keyring("get failed".to_string()))).is_err());
+        assert!(keyring_delete_with(|_s, _u| Err(GitvaultError::Keyring("delete failed".to_string()))).is_err());
     }
 }
