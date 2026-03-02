@@ -1,10 +1,10 @@
 use crate::error::GitvaultError;
+use crate::merge::{parse_env_pair_from_line, rewrite_env_assignment_line};
 use base64::Engine;
 /// REQ-4: Field-level encryption for JSON, YAML, and TOML.
 /// REQ-5: Deterministic encryption — existing ciphertext is preserved when plaintext unchanged.
 use std::io::{Read, Write};
 use std::path::Path;
-use crate::merge::{parse_env_pair_from_line, rewrite_env_assignment_line};
 
 const AGE_ARMOR_HEADER: &str = "-----BEGIN AGE ENCRYPTED FILE-----";
 /// Prefix used for single-line encrypted values in .env value-only mode.

@@ -52,13 +52,7 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             fields,
             value_only,
         } => {
-            cmd_encrypt(
-                file,
-                recipients,
-                fields,
-                value_only,
-                cli.json,
-            )?;
+            cmd_encrypt(file, recipients, fields, value_only, cli.json)?;
             Ok(CommandOutcome::Success)
         }
         Commands::Decrypt {
@@ -116,7 +110,9 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cmd_allow_prod(ttl, cli.json)?;
             Ok(CommandOutcome::Success)
         }
-        Commands::MergeDriver { base, ours, theirs } => cmd_merge_driver(base, ours, theirs, cli.json),
+        Commands::MergeDriver { base, ours, theirs } => {
+            cmd_merge_driver(base, ours, theirs, cli.json)
+        }
         Commands::Recipient { action } => {
             cmd_recipient(action, cli.json)?;
             Ok(CommandOutcome::Success)
@@ -161,7 +157,7 @@ fn find_repo_root_from(start: &Path) -> Result<PathBuf, GitvaultError> {
             None => {
                 return Err(GitvaultError::Usage(
                     "not inside a git repository (no .git directory found)".to_string(),
-                ))
+                ));
             }
         }
     }
@@ -2197,7 +2193,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // No .git dir — should now return an error
         let result = find_repo_root_from(tmp.path());
-        assert!(result.is_err(), "expected error when no .git directory found");
+        assert!(
+            result.is_err(),
+            "expected error when no .git directory found"
+        );
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("not inside a git repository"),

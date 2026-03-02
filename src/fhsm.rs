@@ -4,7 +4,6 @@
 //! run, decrypt, and materialize command flows. No I/O is performed here; callers
 //! are responsible for executing the returned [`Effect`] list.
 
-
 use std::path::PathBuf;
 
 use thiserror::Error;
