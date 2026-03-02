@@ -656,6 +656,14 @@ mod tests {
         refs.insert("DB_PASS".to_string(), "/myapp/dev/DB_PASS".to_string());
         save_refs(dir.path(), "dev", &refs).await.unwrap();
 
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().times(1).returning(|_| {
+            Ok(vec![(
+                "/myapp/dev/DB_PASS".to_string(),
+                "secret".to_string(),
+            )])
+        });
+
         cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, false)
             .await
             .expect("diff should succeed");
