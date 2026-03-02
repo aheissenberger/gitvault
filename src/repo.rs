@@ -1,4 +1,5 @@
 use crate::error::GitvaultError;
+use crate::{crypto, merge};
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,15 +32,24 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
     }
 
     let canonical_base = base.canonicalize().unwrap_or_else(|_| normalize(base));
-    let canonical_target = target.canonicalize().unwrap_or_else(|_| {
-        // For not-yet-existing files, canonicalize the parent then re-attach filename
-        if let Some(parent) = target.parent() {
-            let canon_parent = parent.canonicalize().unwrap_or_else(|_| normalize(parent));
-            canon_parent.join(target.file_name().unwrap_or_default())
-        } else {
-            normalize(target)
+    let canonical_target = match target.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            // For not-yet-existing files, canonicalize the parent then re-attach filename
+            if let Some(parent) = target.parent() {
+                let canon_parent = parent.canonicalize().unwrap_or_else(|_| normalize(parent));
+                let fname = target.file_name().ok_or_else(|| {
+                    GitvaultError::Usage(format!(
+                        "path has no file name component: {}",
+                        target.display()
+                    ))
+                })?;
+                canon_parent.join(fname)
+            } else {
+                normalize(target)
+            }
         }
-    });
+    };
     if canonical_target.starts_with(&canonical_base) {
         Ok(())
     } else {
@@ -100,7 +110,13 @@ pub fn write_recipients(repo_root: &Path, recipients: &[String]) -> Result<(), G
         std::fs::create_dir_all(parent)?;
     }
     let content = recipients.join("\n") + "\n";
-    let tmp = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    let parent = path.parent().ok_or_else(|| {
+        GitvaultError::Io(std::io::Error::other(format!(
+            "cannot determine parent directory of {}",
+            path.display()
+        )))
+    })?;
+    let tmp = tempfile::NamedTempFile::new_in(parent)?;
     std::fs::write(tmp.path(), content)?;
     tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
     Ok(())
@@ -197,6 +213,37 @@ pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
     fs::create_dir_all(get_env_encrypted_dir(repo_root, env))?;
     fs::create_dir_all(repo_root.join(PLAIN_BASE_DIR).join(env))?;
     Ok(())
+}
+
+/// Decrypt all encrypted secrets for the given environment.
+///
+/// Reads all `.age` files for `env`, decrypts them with `identity`, and returns
+/// the key-value pairs parsed from the plaintext.
+pub(crate) fn decrypt_env_secrets(
+    repo_root: &Path,
+    env: &str,
+    identity: &dyn age::Identity,
+) -> Result<Vec<(String, String)>, GitvaultError> {
+    let mut secrets: Vec<(String, String)> = Vec::new();
+    let encrypted_files = list_encrypted_files_for_env(repo_root, env)?;
+
+    for path in encrypted_files {
+        let ciphertext = std::fs::read(&path)?;
+        match crypto::decrypt(identity, &ciphertext) {
+            Ok(plaintext) => {
+                let text = String::from_utf8_lossy(&plaintext);
+                secrets.extend(merge::parse_env_pairs(&text)?);
+            }
+            Err(e) => {
+                return Err(GitvaultError::Decryption(format!(
+                    "Failed to decrypt {}: {e}",
+                    path.display()
+                )));
+            }
+        }
+    }
+
+    Ok(secrets)
 }
 
 /// Install gitvault git hooks into `.git/hooks/`. REQ-31.

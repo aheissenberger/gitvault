@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::error::GitvaultError;
 use crate::identity::load_identity_from_source;
-use crate::merge::parse_env_pairs;
-use crate::{barrier, crypto, fhsm, materialize, repo, run};
+use crate::repo::decrypt_env_secrets;
+use crate::{barrier, crypto, fhsm, materialize, run};
 
 /// Outcome returned by the top-level command dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +85,9 @@ impl EffectRunner for DefaultRunner {
         clear_env: bool,
         pass_vars: &[(String, String)],
     ) -> Result<i32, GitvaultError> {
-        let cmd = &command[0];
-        let args = &command[1..];
+        let (cmd, args) = command.split_first().ok_or_else(|| {
+            crate::error::GitvaultError::Usage("command must not be empty".to_string())
+        })?;
         // Extract var names from key-value pairs for run_command's pass-through lookup.
         let pass_var_names: Vec<String> = pass_vars.iter().map(|(k, _)| k.clone()).collect();
         run::run_command(secrets, cmd, args, clear_env, &pass_var_names)
@@ -99,33 +100,6 @@ impl EffectRunner for DefaultRunner {
     ) -> Result<(), GitvaultError> {
         materialize::materialize_env_file(repo_root, secrets)
     }
-}
-
-fn decrypt_env_secrets(
-    repo_root: &Path,
-    env: &str,
-    identity: &dyn age::Identity,
-) -> Result<Vec<(String, String)>, GitvaultError> {
-    let mut secrets: Vec<(String, String)> = Vec::new();
-    let encrypted_files = repo::list_encrypted_files_for_env(repo_root, env)?;
-
-    for path in encrypted_files {
-        let ciphertext = std::fs::read(&path)?;
-        match crypto::decrypt(identity, &ciphertext) {
-            Ok(plaintext) => {
-                let text = String::from_utf8_lossy(&plaintext);
-                secrets.extend(parse_env_pairs(&text)?);
-            }
-            Err(e) => {
-                return Err(GitvaultError::Decryption(format!(
-                    "Failed to decrypt {}: {e}",
-                    path.display()
-                )));
-            }
-        }
-    }
-
-    Ok(secrets)
 }
 
 /// Execute an ordered list of FHSM [`fhsm::Effect`]s, delegating I/O to `runner`.
