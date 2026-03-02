@@ -50,7 +50,7 @@ pub fn run_command(
         .map_err(|e| GitvaultError::Other(format!("Failed to execute '{cmd}': {e}")))?;
 
     // REQ-23: propagate exit code
-    Ok(status.code().unwrap_or(1))
+    Ok(status.code().unwrap_or(crate::error::EXIT_ERROR))
 }
 
 /// Parse a comma-separated list of variable names (used for --pass).
