@@ -190,7 +190,7 @@ fn parse_pass_vars(raw: Option<&str>) -> Vec<String> {
                 }
                 // If the entry is in KEY=value form take only the key; otherwise
                 // the whole trimmed string is already the variable name.
-                let key = trimmed.splitn(2, '=').next().unwrap_or(trimmed).trim();
+                let key = trimmed.split('=').next().unwrap_or(trimmed).trim();
                 if key.is_empty() { None } else { Some(key.to_owned()) }
             })
             .collect()

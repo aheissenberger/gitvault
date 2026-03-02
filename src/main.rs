@@ -103,11 +103,11 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
                     match action {
                         SsmAction::Pull { env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            gitvault::ssm::cmd_ssm_pull(&repo_root, &env, &aws).await
+                            gitvault::ssm::cmd_ssm_pull(&repo_root, &env, &aws, cli.json).await
                         }
                         SsmAction::Diff { env, reveal } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            gitvault::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal).await
+                            gitvault::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal, cli.json).await
                         }
                         SsmAction::Set { key, value, env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());

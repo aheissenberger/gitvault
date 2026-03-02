@@ -3,6 +3,7 @@
 //! All functions in this module are gated behind the `ssm` Cargo feature.
 
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -79,7 +80,11 @@ fn save_refs(
     }
     let text =
         serde_json::to_string_pretty(refs).map_err(|e| GitvaultError::Other(e.to_string()))?;
-    std::fs::write(&path, text)?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix(".gitvault-tmp-")
+        .tempfile_in(path.parent().unwrap_or(Path::new(".")))?;
+    tmp.write_all(text.as_bytes())?;
+    tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
     Ok(())
 }
 
@@ -132,6 +137,7 @@ pub async fn cmd_ssm_pull(
     repo_root: &Path,
     env: &str,
     aws: &AwsConfig,
+    json: bool,
 ) -> Result<(), GitvaultError> {
     let app = get_app_name(repo_root);
     let client = aws.build_client().await?;
@@ -151,11 +157,20 @@ pub async fn cmd_ssm_pull(
 
     save_refs(repo_root, env, &refs)?;
 
-    println!(
-        "Pulled {} parameter(s) from SSM path prefix '{}'",
-        refs.len(),
-        prefix
-    );
+    if json {
+        let mut keys: Vec<&String> = refs.keys().collect();
+        keys.sort();
+        println!(
+            "{}",
+            serde_json::json!({ "pulled": keys, "status": "ok" })
+        );
+    } else {
+        println!(
+            "Pulled {} parameter(s) from SSM path prefix '{}'",
+            refs.len(),
+            prefix
+        );
+    }
     Ok(())
 }
 
@@ -168,6 +183,7 @@ pub async fn cmd_ssm_diff(
     env: &str,
     aws: &AwsConfig,
     reveal: bool,
+    json: bool,
 ) -> Result<(), GitvaultError> {
     let app = get_app_name(repo_root);
     let client = aws.build_client().await?;
@@ -198,27 +214,51 @@ pub async fn cmd_ssm_diff(
     };
     all_keys.sort();
 
-    let mut has_diff = false;
-    for key in &all_keys {
-        match (local_refs.get(key), ssm_params.get(key)) {
-            (None, Some(v)) => {
-                has_diff = true;
-                let display = if reveal { v.as_str() } else { "***" };
-                println!("+ {key} = {display}  (in SSM, not in local refs)");
-            }
-            (Some(_path), None) => {
-                has_diff = true;
-                println!("- {key}  (in local refs, not found in SSM)");
-            }
-            (Some(_path), Some(_v)) => {
-                // Key exists in both; no value comparison since refs don't store values
-            }
-            (None, None) => {}
-        }
-    }
+    if json {
+        let mut only_local: Vec<&String> = Vec::new();
+        let mut only_ssm: Vec<&String> = Vec::new();
+        let mut in_sync: Vec<&String> = Vec::new();
 
-    if !has_diff {
-        println!("No diff — local refs and SSM are in sync.");
+        for key in &all_keys {
+            match (local_refs.get(key), ssm_params.get(key)) {
+                (None, Some(_)) => only_ssm.push(key),
+                (Some(_), None) => only_local.push(key),
+                (Some(_), Some(_)) => in_sync.push(key),
+                (None, None) => {}
+            }
+        }
+
+        println!(
+            "{}",
+            serde_json::json!({
+                "only_local": only_local,
+                "only_ssm": only_ssm,
+                "in_sync": in_sync,
+            })
+        );
+    } else {
+        let mut has_diff = false;
+        for key in &all_keys {
+            match (local_refs.get(key), ssm_params.get(key)) {
+                (None, Some(v)) => {
+                    has_diff = true;
+                    let display = if reveal { v.as_str() } else { "***" };
+                    println!("+ {key} = {display}  (in SSM, not in local refs)");
+                }
+                (Some(_path), None) => {
+                    has_diff = true;
+                    println!("- {key}  (in local refs, not found in SSM)");
+                }
+                (Some(_path), Some(_v)) => {
+                    // Key exists in both; no value comparison since refs don't store values
+                }
+                (None, None) => {}
+            }
+        }
+
+        if !has_diff {
+            println!("No diff — local refs and SSM are in sync.");
+        }
     }
 
     Ok(())

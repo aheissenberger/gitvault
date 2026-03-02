@@ -61,22 +61,40 @@ pub fn cmd_rotate(
     let identity = crypto::parse_identity(&identity_str)?;
 
     let recipient_keys = resolve_recipient_keys(&repo_root, vec![])?;
-    let mut rotated = 0usize;
 
+    // Parse all recipient keys once up-front (validates them before touching any file).
+    let parsed_recipients: Vec<age::x25519::Recipient> = recipient_keys
+        .iter()
+        .map(|k| crypto::parse_recipient(k))
+        .collect::<Result<Vec<_>, GitvaultError>>()?;
+
+    // Phase 1 – pre-flight: decrypt every file; bail on the first error without
+    // writing anything.  This prevents a split-key state where some files have
+    // been re-encrypted and others have not.
     let encrypted_files = repo::list_all_encrypted_files(&repo_root)?;
-    for path in encrypted_files {
-        let ciphertext = std::fs::read(&path)?;
-        let plaintext = crypto::decrypt(&identity, &ciphertext)?;
-        let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
+    let decrypted: Vec<(std::path::PathBuf, Vec<u8>)> = encrypted_files
+        .into_iter()
+        .map(|path| {
+            let ciphertext = std::fs::read(&path)?;
+            let plaintext = crypto::decrypt(&identity, &ciphertext)?;
+            Ok((path, plaintext))
+        })
+        .collect::<Result<Vec<_>, GitvaultError>>()?;
+
+    // Phase 2 – persist-all: only reached when every decryption succeeded.
+    // Re-encrypt and write all files atomically via a temp-file rename so that
+    // each individual write is crash-safe.
+    let rotated = decrypted.len();
+    for (path, plaintext) in decrypted {
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = parsed_recipients
             .iter()
-            .map(|k| Ok(Box::new(crypto::parse_recipient(k)?) as Box<dyn age::Recipient + Send>))
-            .collect::<Result<Vec<_>, GitvaultError>>()?;
+            .map(|r| Box::new(r.clone()) as Box<dyn age::Recipient + Send>)
+            .collect();
         let new_ciphertext = crypto::encrypt(recipients, &plaintext)?;
         let tmp =
             tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
         std::fs::write(tmp.path(), &new_ciphertext)?;
         tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
-        rotated += 1;
     }
     crate::output::output_success(
         &format!(

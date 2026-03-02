@@ -2,6 +2,7 @@ use crate::error::GitvaultError;
 use crate::{crypto, merge};
 use regex::Regex;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -270,6 +271,11 @@ pub fn install_git_hooks(repo_root: &Path) -> Result<(), GitvaultError> {
 const PRE_COMMIT_HOOK: &str = r#"#!/usr/bin/env sh
 # gitvault: block commits if plaintext secrets are staged
 set -e
+staged=$(git diff --cached --name-only 2>/dev/null | grep -E '(^|/)\.secrets/plain/|^\.env$' || true)
+if [ -n "$staged" ]; then
+    echo "gitvault: refusing commit – plaintext secrets staged for commit: $staged" >&2
+    exit 1
+fi
 if command -v gitvault >/dev/null 2>&1; then
   gitvault status --no-prompt
 fi
@@ -282,6 +288,15 @@ if command -v gitvault >/dev/null 2>&1; then
     gitvault status --no-prompt --fail-if-dirty
 fi
 "#;
+
+fn atomic_write(path: &Path, content: &[u8]) -> Result<(), GitvaultError> {
+    let mut tmp = tempfile::Builder::new()
+        .prefix(".gitvault-tmp-")
+        .tempfile_in(path.parent().unwrap_or(Path::new(".")))?;
+    tmp.write_all(content)?;
+    tmp.persist(path).map_err(|e| GitvaultError::Io(e.error))?;
+    Ok(())
+}
 
 fn install_hook(hook_path: &Path, script: &str) -> Result<(), GitvaultError> {
     // If hook already exists and already contains a gitvault block, skip
@@ -304,9 +319,9 @@ fn install_hook(hook_path: &Path, script: &str) -> Result<(), GitvaultError> {
             .join("\n");
         content.push_str(&body);
         content.push('\n');
-        fs::write(hook_path, &content)?;
+        atomic_write(hook_path, content.as_bytes())?;
     } else {
-        fs::write(hook_path, script)?;
+        atomic_write(hook_path, script.as_bytes())?;
     }
 
     // Make executable (Unix)
@@ -336,20 +351,29 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
     }
 }
 
-/// Check that no plaintext secrets are tracked in git. REQ-10
+/// Check that no plaintext secrets are staged for commit. REQ-10
 ///
-/// Checks that:
-/// - .secrets/plain/** is not tracked
-/// - .env is not tracked
+/// Uses `git diff --cached --name-only` so that a first-time `git add .env`
+/// (staged but not yet tracked) is caught before the commit lands.
+///
+/// Checks that staged files do not include:
+/// - anything under .secrets/plain/
+/// - .env
 pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError> {
     let output = Command::new("git")
-        .args(["ls-files", ".secrets/plain/", ".env"])
+        .args(["diff", "--cached", "--name-only"])
         .current_dir(repo_root)
         .output()
         .map_err(|e| GitvaultError::Other(format!("Failed to run git: {e}")))?;
 
-    let tracked = String::from_utf8_lossy(&output.stdout);
-    let files: Vec<&str> = tracked.lines().filter(|l| !l.is_empty()).collect();
+    let staged = String::from_utf8_lossy(&output.stdout);
+    let files: Vec<&str> = staged
+        .lines()
+        .filter(|l| {
+            !l.is_empty()
+                && (l.contains(".secrets/plain/") || *l == ".env" || l.ends_with("/.env"))
+        })
+        .collect();
     if !files.is_empty() {
         return Err(GitvaultError::PlaintextLeak(files.join(", ")));
     }
@@ -700,7 +724,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_no_tracked_plaintext_detects_tracked_files() {
+    fn test_check_no_staged_plaintext_detects_staged_files() {
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
 
