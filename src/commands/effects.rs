@@ -52,6 +52,7 @@ pub trait EffectRunner {
 }
 
 /// Production implementation — delegates to the real I/O functions.
+#[derive(Debug)]
 pub struct DefaultRunner;
 
 impl EffectRunner for DefaultRunner {

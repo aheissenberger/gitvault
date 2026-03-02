@@ -7,6 +7,7 @@ homepage = "https://github.com/aheissenberger/gitvault"
 keywords = ["secrets", "encryption", "age", "git", "dotenv"]
 categories = ["command-line-utilities", "cryptography"]
 edition = "2024"
+rust-version = "1.85"
 description = "gitvault CLI"
 license = "MIT"
 
@@ -50,7 +51,9 @@ keyring = { version = "3", features = ["windows-native"] }
 ssm = ["dep:aws-config", "dep:aws-sdk-ssm", "dep:tokio"]
 
 [dev-dependencies]
-tempfile = "3"
 
 [profile.release]
 strip = "symbols"
+lto = true
+codegen-units = 1
+panic = "abort"

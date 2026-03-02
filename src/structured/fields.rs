@@ -66,6 +66,11 @@ fn toml_field_mut<'a>(value: &'a mut toml::Value, path: &[&str]) -> Option<&'a m
 
 /// REQ-4: Encrypt specified fields in a JSON, YAML, or TOML file.
 /// REQ-5: Idempotent — existing ciphertext is preserved when the field is already encrypted.
+///
+/// The `_identity` parameter is reserved for future use. Current encryption relies solely on
+/// public-key `recipient_keys`; the identity is retained in the signature to support future
+/// scenarios such as decryption-then-re-encryption or identity-based key derivation without
+/// a breaking API change.
 pub fn encrypt_fields(
     file_path: &Path,
     fields: &[&str],

@@ -19,25 +19,17 @@ pub fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<Stri
 
     let mut output = Vec::new();
     {
-        // ArmoredWriter on a Vec<u8> is infallible; the Result is a type-system artefact.
         let armor =
-            age::armor::ArmoredWriter::wrap_output(&mut output, age::armor::Format::AsciiArmor)
-                .expect("ArmoredWriter on Vec<u8> is infallible");
+            age::armor::ArmoredWriter::wrap_output(&mut output, age::armor::Format::AsciiArmor)?;
         let mut writer = encryptor
             .wrap_output(armor)
-            .expect("age encryption wrapping is infallible");
-        writer
-            .write_all(plaintext)
-            .expect("Vec<u8> write is infallible");
-        let armor = writer
-            .finish()
-            .expect("age encryption finalize is infallible");
-        armor
-            .finish()
-            .expect("ArmoredWriter finalize is infallible");
+            .map_err(|e| GitvaultError::Encryption(format!("age encryption wrapping: {e}")))?;
+        writer.write_all(plaintext)?;
+        let armor = writer.finish()?;
+        armor.finish()?;
     }
-    // age ASCII armor is always valid UTF-8
-    Ok(String::from_utf8(output).expect("age armor output is always UTF-8"))
+    String::from_utf8(output)
+        .map_err(|e| GitvaultError::Encryption(format!("age armor output is not valid UTF-8: {e}")))
 }
 
 /// Decrypt an age armor string using the given identity.
@@ -86,13 +78,9 @@ pub fn encrypt_binary_b64(
     let mut output = Vec::new();
     let mut writer = encryptor
         .wrap_output(&mut output)
-        .expect("age binary encryption wrapping is infallible");
-    writer
-        .write_all(plaintext)
-        .expect("Vec<u8> write is infallible");
-    writer
-        .finish()
-        .expect("age binary encryption finalize is infallible");
+        .map_err(|e| GitvaultError::Encryption(format!("age binary encryption wrapping: {e}")))?;
+    writer.write_all(plaintext)?;
+    writer.finish()?;
 
     Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
