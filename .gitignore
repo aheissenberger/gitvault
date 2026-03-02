@@ -1,5 +1,6 @@
 /target
 /.cargo-target
+/cache-status
 /.cargo-home
 /.local-cargo-home
 
