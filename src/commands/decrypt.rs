@@ -55,6 +55,7 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
     // REQ-6: value-only mode: decrypt each VALUE in a .env file individually
     if opts.value_only {
         use crate::structured::decrypt_env_values;
+        use std::io::Write;
         let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
         let decrypted = decrypt_env_values(&content, &identity)?;
         if opts.reveal {
@@ -73,7 +74,6 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
                     .parent()
                     .unwrap_or_else(|| std::path::Path::new(".")),
             )?;
-        use std::io::Write;
         tmp.write_all(decrypted.as_bytes())?;
         tmp.persist(&out_path)
             .map_err(|e| GitvaultError::Io(e.error))?;

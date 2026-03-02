@@ -116,11 +116,11 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_defaults_to_local_identity_public_key() {
+        use age::secrecy::ExposeSecret;
         let _lock = global_test_lock().lock().unwrap();
         let identity = x25519::Identity::generate();
         let expected_recipient = identity.to_public().to_string();
 
-        use age::secrecy::ExposeSecret;
         let dir = TempDir::new().unwrap();
 
         let resolved = with_env_var(
@@ -137,11 +137,11 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_defaults_from_identity_file_path() {
+        use age::secrecy::ExposeSecret;
         let _lock = global_test_lock().lock().unwrap();
         let identity = x25519::Identity::generate();
         let expected_recipient = identity.to_public().to_string();
 
-        use age::secrecy::ExposeSecret;
         let identity_file = tempfile::NamedTempFile::new().expect("temp file should be created");
         std::fs::write(identity_file.path(), identity.to_string().expose_secret())
             .expect("identity should be written to temp file");

@@ -87,41 +87,49 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
-            let aws = crate::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);
-            let repo_root = crate::repo::find_repo_root()?;
-            tokio::runtime::Runtime::new()
-                .map_err(|e| GitvaultError::Other(e.to_string()))?
-                .block_on(async {
-                    match action {
-                        SsmAction::Pull { env } => {
-                            let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_pull(&repo_root, &env, &aws, cli.json).await
-                        }
-                        SsmAction::Diff { env, reveal } => {
-                            let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal, cli.json).await
-                        }
-                        SsmAction::Set {
-                            key,
-                            value,
-                            env,
-                            prod,
-                        } => {
-                            let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_set(
-                                &repo_root, &env, &key, &value, &aws, cli.json, prod,
-                            )
-                            .await
-                        }
-                        SsmAction::Push { env, prod } => {
-                            let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_push(&repo_root, &env, &aws, cli.json, prod).await
-                        }
-                    }
-                })
-                .map(|()| CommandOutcome::Success)
+            dispatch_ssm(action, cli.aws_profile, cli.aws_role_arn, cli.json)
         }
     }
+}
+
+/// Dispatch SSM sub-commands, constructing the async runtime and AWS config.
+#[cfg(feature = "ssm")]
+fn dispatch_ssm(
+    action: SsmAction,
+    aws_profile: Option<String>,
+    aws_role_arn: Option<String>,
+    json: bool,
+) -> Result<CommandOutcome, GitvaultError> {
+    let aws = crate::aws_config::AwsConfig::from_cli(aws_profile, aws_role_arn);
+    let repo_root = crate::repo::find_repo_root()?;
+    tokio::runtime::Runtime::new()
+        .map_err(|e| GitvaultError::Other(e.to_string()))?
+        .block_on(async {
+            match action {
+                SsmAction::Pull { env } => {
+                    let env = env.unwrap_or_else(|| "dev".to_string());
+                    crate::ssm::cmd_ssm_pull(&repo_root, &env, &aws, json).await
+                }
+                SsmAction::Diff { env, reveal } => {
+                    let env = env.unwrap_or_else(|| "dev".to_string());
+                    crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal, json).await
+                }
+                SsmAction::Set {
+                    key,
+                    value,
+                    env,
+                    prod,
+                } => {
+                    let env = env.unwrap_or_else(|| "dev".to_string());
+                    crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, json, prod).await
+                }
+                SsmAction::Push { env, prod } => {
+                    let env = env.unwrap_or_else(|| "dev".to_string());
+                    crate::ssm::cmd_ssm_push(&repo_root, &env, &aws, json, prod).await
+                }
+            }
+        })
+        .map(|()| CommandOutcome::Success)
 }
 
 #[cfg(test)]
