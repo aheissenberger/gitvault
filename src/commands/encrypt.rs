@@ -19,6 +19,7 @@ use crate::{crypto, env, repo, structured};
 pub fn cmd_encrypt(
     file: String,
     recipient_keys: Vec<String>,
+    keep_path: bool,
     fields: Option<String>,
     value_only: bool,
     json: bool,
@@ -98,18 +99,53 @@ pub fn cmd_encrypt(
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
 
-    let filename = input_path
-        .file_name()
-        .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
-        .to_string_lossy();
-    let out_name = format!("{filename}.age");
     let active_env = env::resolve_env(&repo_root);
 
     repo::ensure_dirs(&repo_root, &active_env)?;
-    let out_path = repo::get_env_encrypted_path(&repo_root, &active_env, &out_name);
+    let out_path = if keep_path {
+        let resolved_input = if input_path.is_absolute() {
+            input_path.clone()
+        } else {
+            std::env::current_dir()?.join(&input_path)
+        };
+
+        let rel_input = resolved_input.strip_prefix(&repo_root).map_err(|_| {
+            GitvaultError::Usage(format!(
+                "--keep-path requires input under repository root: {}",
+                input_path.display()
+            ))
+        })?;
+
+        let rel_name = rel_input
+            .file_name()
+            .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
+            .to_string_lossy();
+        let out_name = format!("{rel_name}.age");
+
+        let mut out_dir = repo::get_env_encrypted_dir(&repo_root, &active_env);
+        if let Some(rel_parent) = rel_input.parent()
+            && !rel_parent.as_os_str().is_empty()
+        {
+            out_dir = out_dir.join(rel_parent);
+        }
+        out_dir.join(out_name)
+    } else {
+        let filename = input_path
+            .file_name()
+            .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
+            .to_string_lossy();
+        let out_name = format!("{filename}.age");
+        repo::get_env_encrypted_path(&repo_root, &active_env, &out_name)
+    };
 
     // REQ-42: prevent path traversal
     repo::validate_write_path(&repo_root, &out_path)?;
+
+    if let Some(parent) = out_path.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
 
     // REQ-51: streaming encryption — no full-file buffer
     let tmp = tempfile::NamedTempFile::new_in(
@@ -148,6 +184,7 @@ mod tests {
         let err = cmd_encrypt(
             in_path.to_string_lossy().to_string(),
             vec![],
+            false,
             None,
             false,
             true,
@@ -173,6 +210,7 @@ mod tests {
             cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![recipient],
+                false,
                 None,
                 true,
                 true,
@@ -200,6 +238,7 @@ mod tests {
             cmd_encrypt(
                 json_file.to_string_lossy().to_string(),
                 vec![recipient.clone()],
+                false,
                 Some("secret".to_string()),
                 false,
                 true,
@@ -242,6 +281,7 @@ mod tests {
             let err = cmd_encrypt(
                 nonexistent.to_string_lossy().to_string(),
                 vec![recipient],
+                false,
                 Some("field".to_string()),
                 false,
                 false,
@@ -272,6 +312,7 @@ mod tests {
         let err = cmd_encrypt(
             plain_file.to_string_lossy().to_string(),
             vec![bad_recipient.to_string()],
+            false,
             None,
             false,
             false,
@@ -297,7 +338,7 @@ mod tests {
         // The path "." has no meaningful filename (file_name() returns Some(".")).
         // Use "/" which has no file_name().
         with_identity_env(identity_file.path(), || {
-            let err = cmd_encrypt("/".to_string(), vec![recipient], None, false, false)
+            let err = cmd_encrypt("/".to_string(), vec![recipient], false, None, false, false)
                 .expect_err("root path should fail with no filename");
             // Either Usage (no filename) or Io (can't read /) is acceptable.
             assert!(
@@ -305,5 +346,37 @@ mod tests {
                 "expected Usage or Io error for root path, got: {err:?}"
             );
         });
+    }
+
+    #[test]
+    fn test_cmd_encrypt_keep_path_writes_nested_output() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let nested = dir.path().join("app/platform/service/config");
+        std::fs::create_dir_all(&nested).unwrap();
+        let plain_file = nested.join("service.env");
+        std::fs::write(&plain_file, "TOKEN=abc\n").unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_encrypt(
+                plain_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                true,
+                None,
+                false,
+                false,
+            )
+            .expect("encrypt with --keep-path should succeed");
+        });
+
+        assert!(
+            dir.path()
+                .join("secrets/dev/app/platform/service/config/service.env.age")
+                .exists()
+        );
     }
 }

@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+pub const OUTPUT_KEEP_PATH_SENTINEL: &str = "__GITVAULT_KEEP_PATH__";
+
 #[derive(Parser)]
 #[command(
     name = "gitvault",
@@ -45,6 +47,9 @@ pub enum Commands {
         /// Recipient age public key (repeat for multi-recipient; defaults to local identity if omitted)
         #[arg(short, long = "recipient")]
         recipients: Vec<String>,
+        /// Preserve input path relative to repo root under secrets/<env>/
+        #[arg(long)]
+        keep_path: bool,
         /// Fields to encrypt (comma-separated key paths, for JSON/YAML/TOML field-level encryption; REQ-4)
         #[arg(long, value_name = "FIELDS")]
         fields: Option<String>,
@@ -60,7 +65,12 @@ pub enum Commands {
         #[arg(short, long)]
         identity: Option<String>,
         /// Output file path (default: strip .age extension)
-        #[arg(short, long)]
+        #[arg(
+            short,
+            long,
+            num_args = 0..=1,
+            default_missing_value = OUTPUT_KEEP_PATH_SENTINEL
+        )]
         output: Option<String>,
         /// Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML; REQ-4)
         #[arg(long, value_name = "FIELDS")]
@@ -193,6 +203,45 @@ pub enum KeyringAction {
     Get,
     /// Remove stored identity from OS keyring
     Delete,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decrypt_bare_output_sets_keep_path_sentinel() {
+        let cli =
+            Cli::try_parse_from(["gitvault", "decrypt", "secrets/dev/app.env.age", "--output"])
+                .expect("bare --output should parse");
+
+        match cli.command {
+            Commands::Decrypt { output, .. } => {
+                assert_eq!(output, Some(OUTPUT_KEEP_PATH_SENTINEL.to_string()));
+            }
+            _ => panic!("expected decrypt command"),
+        }
+    }
+
+    #[test]
+    fn test_encrypt_keep_path_flag_parses() {
+        let cli = Cli::try_parse_from([
+            "gitvault",
+            "encrypt",
+            "app.env",
+            "--recipient",
+            "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq7f7f3",
+            "--keep-path",
+        ])
+        .expect("--keep-path should parse");
+
+        match cli.command {
+            Commands::Encrypt { keep_path, .. } => {
+                assert!(keep_path);
+            }
+            _ => panic!("expected encrypt command"),
+        }
+    }
 }
 
 #[cfg(feature = "ssm")]

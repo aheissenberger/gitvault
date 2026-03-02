@@ -70,11 +70,13 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
             print!("{decrypted}");
             return Ok(CommandOutcome::Success);
         }
-        let out_path = opts
-            .output
-            .as_ref()
-            .map_or(input_path, std::path::PathBuf::from);
+        let out_path = resolve_output_path(&repo_root, &input_path, opts.output.as_deref())?;
         repo::validate_write_path(&repo_root, &out_path)?;
+        if let Some(parent) = out_path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
         let mut tmp = tempfile::Builder::new()
             .prefix(".gitvault-tmp-")
             .tempfile_in(
@@ -117,24 +119,16 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         return Ok(CommandOutcome::Success);
     }
 
-    let out_path = if let Some(out) = opts.output {
-        PathBuf::from(out)
-    } else {
-        let name = input_path
-            .file_name()
-            .ok_or_else(|| {
-                GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
-            })?
-            .to_string_lossy();
-        let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
-        input_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(out_name)
-    };
+    let out_path = resolve_output_path(&repo_root, &input_path, opts.output.as_deref())?;
 
     // REQ-42: prevent path traversal
     repo::validate_write_path(&repo_root, &out_path)?;
+
+    if let Some(parent) = out_path.parent()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
 
     // REQ-51: streaming decryption
     let tmp = tempfile::NamedTempFile::new_in(
@@ -152,6 +146,73 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
 
     crate::output::output_success(&format!("Decrypted to {}", out_path.display()), opts.json);
     Ok(CommandOutcome::Success)
+}
+
+fn resolve_output_path(
+    repo_root: &std::path::Path,
+    input_path: &std::path::Path,
+    output: Option<&str>,
+) -> Result<PathBuf, GitvaultError> {
+    match output {
+        Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL) => {
+            let abs_input = if input_path.is_absolute() {
+                input_path.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(input_path)
+            };
+            let rel_input = abs_input.strip_prefix(repo_root).map_err(|_| {
+                GitvaultError::Usage(format!(
+                    "--output without value requires encrypted input under repository root: {}",
+                    input_path.display()
+                ))
+            })?;
+
+            let mut components = rel_input.components();
+            let first = components
+                .next()
+                .and_then(|c| c.as_os_str().to_str())
+                .unwrap_or_default();
+            let _env = components
+                .next()
+                .and_then(|c| c.as_os_str().to_str())
+                .unwrap_or_default();
+            if first != "secrets" {
+                return Err(GitvaultError::Usage(
+                    "--output without value expects encrypted input under secrets/<env>/..."
+                        .to_string(),
+                ));
+            }
+
+            let rest = components.collect::<PathBuf>();
+            let name = rest.file_name().ok_or_else(|| {
+                GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
+            })?;
+            let name = name.to_string_lossy();
+            let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
+
+            let mut out_path = repo_root.to_path_buf();
+            if let Some(parent) = rest.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                out_path = out_path.join(parent);
+            }
+            Ok(out_path.join(out_name))
+        }
+        Some(out) => Ok(PathBuf::from(out)),
+        None => {
+            let name = input_path
+                .file_name()
+                .ok_or_else(|| {
+                    GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
+                })?
+                .to_string_lossy();
+            let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
+            Ok(input_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(out_name))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -234,6 +295,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 json_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                false,
                 Some("secret".to_string()),
                 false,
                 false,
@@ -279,6 +341,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                false,
                 None,
                 true, // value_only
                 false,
@@ -335,6 +398,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                false,
                 None,
                 true, // value_only
                 false,
@@ -373,6 +437,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                false,
                 None,
                 true, // value_only
                 false,
@@ -399,5 +464,52 @@ mod tests {
             content, "DB_PASS=hunter2\n",
             "decrypted output should match original"
         );
+    }
+
+    #[test]
+    fn test_cmd_decrypt_bare_output_restores_repo_relative_path() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let nested = dir.path().join("service/api/v1/config");
+        std::fs::create_dir_all(&nested).unwrap();
+        let plain_file = nested.join("app.env");
+        std::fs::write(&plain_file, "KEY=VALUE\n").unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                plain_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                true,
+                None,
+                false,
+                false,
+            )
+            .expect("keep-path encrypt should succeed");
+        });
+
+        std::fs::remove_file(&plain_file).unwrap();
+        let encrypted = dir
+            .path()
+            .join("secrets/dev/service/api/v1/config/app.env.age");
+
+        cmd_decrypt(DecryptOptions {
+            file: encrypted.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL.to_string()),
+            fields: None,
+            reveal: false,
+            value_only: false,
+            json: false,
+            no_prompt: true,
+        })
+        .expect("decrypt with bare --output should succeed");
+
+        let restored =
+            std::fs::read_to_string(dir.path().join("service/api/v1/config/app.env")).unwrap();
+        assert!(restored.contains("KEY=VALUE"));
     }
 }

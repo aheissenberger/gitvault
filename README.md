@@ -162,8 +162,8 @@ Options:
   --aws-role-arn   AWS role ARN to assume for SSM backend (or AWS_ROLE_ARN env var)
 
 Commands:
-  encrypt       Encrypt a file → secrets/<env>/<name>.age  (or field-level for JSON/YAML/TOML)
-  decrypt       Decrypt a .age file  (or field-level)
+  encrypt       Encrypt a file → secrets/<env>/<name>.age (or preserve repo-relative path with --keep-path)
+  decrypt       Decrypt a .age file (or field-level); bare --output restores repo-relative path from secrets/<env>/...
   materialize   Decrypt all secrets/*.age → root .env
   status        Check repo safety (exit 3 if plaintext is tracked)
   harden        Update .gitignore and install git hooks
@@ -180,12 +180,16 @@ Commands:
 ### `encrypt`
 
 ```
-gitvault encrypt <FILE> [--recipient <PUBKEY>...] [--fields <FIELDS>] [--value-only]
+gitvault encrypt <FILE> [--recipient <PUBKEY>...] [--keep-path] [--fields <FIELDS>] [--value-only]
 ```
 
 **Whole-file mode** (default): reads `<FILE>`, encrypts it for all recipients, writes
 `secrets/<active-env>/<FILE>.age` where active env resolves via `SECRETS_ENV` → `.secrets/env`
 → `dev`. If no `--recipient` is provided the local identity's public key is used.
+
+**Keep-path mode** (`--keep-path`): preserves `<FILE>` path relative to repo root under
+`secrets/<active-env>/...`. Example: `app/config/service.env` →
+`secrets/dev/app/config/service.env.age`.
 
 **Field-level mode** (`--fields KEY1,KEY2`): for `.json`, `.yaml`/`.yml`, and `.toml` files, only
 the specified fields are encrypted in-place using age ASCII armor. Unchanged fields keep their
@@ -197,12 +201,16 @@ individually instead of the whole file.
 ### `decrypt`
 
 ```
-gitvault decrypt <FILE> [--identity <KEY_FILE>] [--output <PATH>] [--fields <FIELDS>]
+gitvault decrypt <FILE> [--identity <KEY_FILE>] [--output [PATH]] [--fields <FIELDS>]
 ```
 
 Decrypts `<FILE>`. Without `--fields`, strips the `.age` extension and writes plaintext.
 With `--fields`, decrypts only the specified inline fields (JSON/YAML/TOML).
 Identity is read from `--identity` or `GITVAULT_IDENTITY` env var.
+
+- `--output <PATH>` writes to explicit path.
+- Bare `--output` (without value) restores repo-relative path from `secrets/<env>/...`.
+- Without `--output`, default behavior stays unchanged (writes next to encrypted input with `.age` stripped).
 
 ### `materialize`
 

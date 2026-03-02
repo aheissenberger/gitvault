@@ -412,6 +412,67 @@ fn encrypt_decrypt_and_materialize_roundtrip() {
 }
 
 #[test]
+fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_identity_tmp, identity_path, pubkey) = write_identity_file();
+
+    let nested = repo.path().join("apps/payments/api/config");
+    std::fs::create_dir_all(&nested).unwrap();
+    let plain = nested.join("service.env");
+    std::fs::write(&plain, "API_KEY=nested-123\n").unwrap();
+
+    let encrypt = bin()
+        .args([
+            "encrypt",
+            "apps/payments/api/config/service.env",
+            "--recipient",
+            &pubkey,
+            "--keep-path",
+        ])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .env("SECRETS_ENV", "dev")
+        .current_dir(repo.path())
+        .output()
+        .expect("encrypt should run");
+    assert!(
+        encrypt.status.success(),
+        "encrypt failed: {}",
+        String::from_utf8_lossy(&encrypt.stderr)
+    );
+
+    let enc_path = repo
+        .path()
+        .join("secrets/dev/apps/payments/api/config/service.env.age");
+    assert!(enc_path.exists(), "expected keep-path encrypted artifact");
+
+    std::fs::remove_file(&plain).unwrap();
+    std::fs::remove_dir_all(repo.path().join("apps")).unwrap();
+
+    let decrypt = bin()
+        .args([
+            "decrypt",
+            "secrets/dev/apps/payments/api/config/service.env.age",
+            "--identity",
+            &identity_path,
+            "--output",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .expect("decrypt should run");
+    assert!(
+        decrypt.status.success(),
+        "decrypt failed: {}",
+        String::from_utf8_lossy(&decrypt.stderr)
+    );
+
+    let restored = repo.path().join("apps/payments/api/config/service.env");
+    assert!(restored.exists(), "expected restored plaintext path");
+    let content = std::fs::read_to_string(restored).unwrap();
+    assert!(content.contains("API_KEY=nested-123"));
+}
+
+#[test]
 fn recipient_add_list_remove_flow() {
     let repo = TempDir::new().unwrap();
     init_git_repo(repo.path());
