@@ -165,7 +165,10 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static CONFIRM_LOCK: Mutex<()> = Mutex::new(());
 
     fn root() -> TempDir {
         TempDir::new().unwrap()
@@ -274,6 +277,7 @@ mod tests {
     #[test]
     fn check_prod_barrier_interactive_yes_via_prompt_helper() {
         let dir = root();
+        let _guard = CONFIRM_LOCK.lock().unwrap();
         unsafe {
             std::env::set_var("GITVAULT_TEST_CONFIRM", "y");
         }
@@ -287,6 +291,7 @@ mod tests {
     #[test]
     fn check_prod_barrier_interactive_no_via_prompt_helper() {
         let dir = root();
+        let _guard = CONFIRM_LOCK.lock().unwrap();
         unsafe {
             std::env::set_var("GITVAULT_TEST_CONFIRM", "n");
         }
