@@ -153,6 +153,13 @@ pub enum Commands {
     },
     /// Revoke the production allow token immediately [REQ-14].
     RevokeProd,
+
+    /// AWS SSM Parameter Store backend (REQ-26 to REQ-30)
+    #[cfg(feature = "ssm")]
+    Ssm {
+        #[command(subcommand)]
+        action: SsmAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -183,4 +190,33 @@ pub enum KeyringAction {
     Get,
     /// Remove stored identity from OS keyring
     Delete,
+}
+
+#[cfg(feature = "ssm")]
+#[derive(Subcommand)]
+pub enum SsmAction {
+    /// Pull parameter values from SSM into local comparison
+    Pull {
+        #[arg(short, long)]
+        env: Option<String>,
+    },
+    /// Show diff between local references and SSM (hide values unless --reveal)
+    Diff {
+        #[arg(short, long)]
+        env: Option<String>,
+        #[arg(long)]
+        reveal: bool,
+    },
+    /// Set a single SSM parameter and record reference locally
+    Set {
+        key: String,
+        value: String,
+        #[arg(short, long)]
+        env: Option<String>,
+    },
+    /// Push all local SSM references to Parameter Store
+    Push {
+        #[arg(short, long)]
+        env: Option<String>,
+    },
 }

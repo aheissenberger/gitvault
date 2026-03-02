@@ -17,6 +17,34 @@ impl AwsConfig {
     pub fn is_configured(&self) -> bool {
         self.profile.is_some() || self.role_arn.is_some()
     }
+
+    /// Build an SSM client using the configured profile and/or role ARN.
+    #[cfg(feature = "ssm")]
+    pub async fn build_client(&self) -> Result<aws_sdk_ssm::Client, crate::error::GitvaultError> {
+        use aws_config::sts::AssumeRoleProvider;
+
+        let mut loader = aws_config::from_env();
+        if let Some(p) = &self.profile {
+            loader = loader.profile_name(p.as_str());
+        }
+        let base = loader.load().await;
+
+        let sdk_config = if let Some(arn) = &self.role_arn {
+            let provider = AssumeRoleProvider::builder(arn.as_str())
+                .session_name("gitvault")
+                .configure(&base)
+                .build()
+                .await;
+            aws_config::from_env()
+                .credentials_provider(provider)
+                .load()
+                .await
+        } else {
+            base
+        };
+
+        Ok(aws_sdk_ssm::Client::new(&sdk_config))
+    }
 }
 
 #[cfg(test)]
