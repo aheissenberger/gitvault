@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   verify:
-    name: CI: Verify
+    name: "CI: Verify"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -21,10 +21,10 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cargo
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
-      - name: CI: Checkout
+      - name: "CI: Checkout"
         uses: actions/checkout@v4
 
-      - name: CI: Detect cargo workspace
+      - name: "CI: Detect cargo workspace"
         id: cargo
         run: |
           if [[ -f Cargo.toml ]]; then
@@ -33,29 +33,29 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: CI: Setup Rust stable
+      - name: "CI: Setup Rust stable"
         if: steps.cargo.outputs.present == 'true'
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           components: clippy,rustfmt
 
-      - name: CI: Cache cargo artifacts
+      - name: "CI: Cache cargo artifacts"
         if: steps.cargo.outputs.present == 'true'
         uses: Swatinem/rust-cache@v2
 
-      - name: CI: Check formatting
+      - name: "CI: Check formatting"
         if: steps.cargo.outputs.present == 'true'
         run: cargo fmt --all -- --check
 
-      - name: CI: Run clippy
+      - name: "CI: Run clippy"
         if: steps.cargo.outputs.present == 'true'
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: CI: Run tests
+      - name: "CI: Run tests"
         if: steps.cargo.outputs.present == 'true'
         run: cargo test --all-targets
 
-      - name: CI: Skip message
+      - name: "CI: Skip message"
         if: steps.cargo.outputs.present != 'true'
         run: echo "No Cargo.toml found; skipping Rust CI checks."

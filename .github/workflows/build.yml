@@ -61,7 +61,7 @@ jobs:
 
       - name: Release tag consistency check
         if: steps.cargo.outputs.present == 'true' && startsWith(github.ref, 'refs/tags/v')
-        run: cargo run -p xtask -- release-check
+        run: cargo run --manifest-path xtask/Cargo.toml -- release-check
 
       - name: Skip message
         if: steps.cargo.outputs.present != 'true'

@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   release-verify:
-    name: Release: Verify
+    name: "Release: Verify"
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -35,33 +35,33 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cargo
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
-      - name: Release: Checkout
+      - name: "Release: Checkout"
         uses: actions/checkout@v4
 
-      - name: Release: Validate Cargo project
+      - name: "Release: Validate Cargo project"
         run: |
           [[ -f Cargo.toml ]] || { echo "Cargo.toml not found" >&2; exit 1; }
 
-      - name: Release: Setup Rust stable
+      - name: "Release: Setup Rust stable"
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           components: clippy,rustfmt
 
-      - name: Release: Cache cargo artifacts
+      - name: "Release: Cache cargo artifacts"
         uses: Swatinem/rust-cache@v2
 
-      - name: Release: Check formatting
+      - name: "Release: Check formatting"
         run: cargo fmt --all -- --check
 
-      - name: Release: Run clippy
+      - name: "Release: Run clippy"
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Release: Run tests
+      - name: "Release: Run tests"
         run: cargo test --all-targets
 
   release-macos-notarize:
-    name: Release: macOS notarize
+    name: "Release: macOS notarize"
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     needs: release-verify
     environment: MacOS App Signing
@@ -81,23 +81,23 @@ jobs:
       archive_name_x86_64: ${{ steps.package.outputs.archive_name_x86_64 }}
       archive_sha256_x86_64: ${{ steps.package.outputs.archive_sha256_x86_64 }}
     steps:
-      - name: Release: Checkout
+      - name: "Release: Checkout"
         uses: actions/checkout@v4
 
-      - name: Release: Validate Cargo project
+      - name: "Release: Validate Cargo project"
         run: |
           [[ -f Cargo.toml ]] || { echo "Cargo.toml not found" >&2; exit 1; }
 
-      - name: Release: Setup Rust stable
+      - name: "Release: Setup Rust stable"
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Release: Cache cargo artifacts
+      - name: "Release: Cache cargo artifacts"
         uses: Swatinem/rust-cache@v2
 
-      - name: Release: Resolve metadata
+      - name: "Release: Resolve metadata"
         id: meta
         env:
           INPUT_BINARY_NAME: ${{ github.event.inputs.binary_name }}
@@ -128,7 +128,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
-      - name: Release: Build macOS targets
+      - name: "Release: Build macOS targets"
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
         run: |
@@ -138,7 +138,7 @@ jobs:
           [[ -f "target/aarch64-apple-darwin/release/${BINARY_NAME}" ]] || { echo "Missing ARM binary" >&2; exit 1; }
           [[ -f "target/x86_64-apple-darwin/release/${BINARY_NAME}" ]] || { echo "Missing x86_64 binary" >&2; exit 1; }
 
-      - name: Release: Prepare per-arch binaries
+      - name: "Release: Prepare per-arch binaries"
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
         run: |
@@ -148,7 +148,7 @@ jobs:
           cp "target/x86_64-apple-darwin/release/${BINARY_NAME}" "dist/x86_64-apple-darwin/${BINARY_NAME}"
           chmod +x "dist/aarch64-apple-darwin/${BINARY_NAME}" "dist/x86_64-apple-darwin/${BINARY_NAME}"
 
-      - name: Release: Import signing certificate
+      - name: "Release: Import signing certificate"
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -167,7 +167,7 @@ jobs:
           security list-keychain -d user -s build.keychain login.keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k "${MACOS_KEYCHAIN_PASSWORD}" build.keychain
 
-      - name: Release: Code sign binaries
+      - name: "Release: Code sign binaries"
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
           MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
@@ -180,7 +180,7 @@ jobs:
             codesign --verify --verbose=2 "${bin}"
           done
 
-      - name: Release: Package and checksum
+      - name: "Release: Package and checksum"
         id: package
         env:
           BINARY_NAME: ${{ steps.meta.outputs.binary_name }}
@@ -201,7 +201,7 @@ jobs:
           echo "archive_name_x86_64=${archive_name_x86_64}" >> "$GITHUB_OUTPUT"
           echo "archive_sha256_x86_64=${archive_sha256_x86_64}" >> "$GITHUB_OUTPUT"
 
-      - name: Release: Notarize packaged binaries
+      - name: "Release: Notarize packaged binaries"
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
@@ -235,13 +235,13 @@ jobs:
           done
           rm -f "${api_key_file}"
 
-      - name: Release: Upload workflow artifact (aarch64)
+      - name: "Release: Upload workflow artifact (aarch64)"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.archive_name_aarch64 }}
           path: dist/${{ steps.package.outputs.archive_name_aarch64 }}
 
-      - name: Release: Upload workflow artifact (x86_64)
+      - name: "Release: Upload workflow artifact (x86_64)"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.archive_name_x86_64 }}
@@ -251,7 +251,7 @@ jobs:
   release-platform-builds:
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
     needs: release-verify
-    name: Release: build and sign (${{ matrix.target }})
+    name: "Release: build and sign (${{ matrix.target }})"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -271,36 +271,36 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: gitvault-windows-x86_64.exe
     steps:
-      - name: Release: Checkout
+      - name: "Release: Checkout"
         uses: actions/checkout@v4
 
-      - name: Release: Setup Rust stable
+      - name: "Release: Setup Rust stable"
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Release: Cache cargo artifacts
+      - name: "Release: Cache cargo artifacts"
         uses: Swatinem/rust-cache@v2
 
-      - name: Release: Build release binary
+      - name: "Release: Build release binary"
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Release: Rename artifact (Unix)
+      - name: "Release: Rename artifact (Unix)"
         if: matrix.os != 'windows-latest'
         run: cp target/${{ matrix.target }}/release/gitvault ${{ matrix.artifact }}
 
-      - name: Release: Rename artifact (Windows)
+      - name: "Release: Rename artifact (Windows)"
         if: matrix.os == 'windows-latest'
         run: cp target/${{ matrix.target }}/release/gitvault.exe ${{ matrix.artifact }}
 
-      - name: Release: Install cosign
+      - name: "Release: Install cosign"
         uses: sigstore/cosign-installer@v3
 
-      - name: Release: Sign artifact with cosign
+      - name: "Release: Sign artifact with cosign"
         run: cosign sign-blob --yes --bundle ${{ matrix.artifact }}.bundle ${{ matrix.artifact }}
 
-      - name: Release: Upload workflow artifact
+      - name: "Release: Upload workflow artifact"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -309,7 +309,7 @@ jobs:
             ${{ matrix.artifact }}.bundle
 
   release-publish:
-    name: Release: Publish assets
+    name: "Release: Publish assets"
     if: ${{ github.ref_type == 'tag' }}
     needs:
       - release-macos-notarize
@@ -319,12 +319,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Release: Download all workflow artifacts
+      - name: "Release: Download all workflow artifacts"
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Release: Publish GitHub release assets
+      - name: "Release: Publish GitHub release assets"
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -336,7 +336,7 @@ jobs:
             artifacts/**/gitvault-windows-x86_64.exe.bundle
 
   release-homebrew-update:
-    name: Release: Update Homebrew tap
+    name: "Release: Update Homebrew tap"
     environment: homebrew
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
@@ -349,7 +349,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
-      - name: Release: Resolve tap metadata
+      - name: "Release: Resolve tap metadata"
         id: tapmeta
         env:
           INPUT_TAP_REPO: ${{ github.event.inputs.tap_repo }}
@@ -396,7 +396,7 @@ jobs:
           echo "sha256_aarch64=${ARCHIVE_SHA256_AARCH64}" >> "$GITHUB_OUTPUT"
           echo "sha256_x86_64=${ARCHIVE_SHA256_X86_64}" >> "$GITHUB_OUTPUT"
 
-      - name: Release: Checkout tap repository
+      - name: "Release: Checkout tap repository"
         if: steps.tapmeta.outputs.skip == 'false'
         uses: actions/checkout@v4
         with:
@@ -404,7 +404,7 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
-      - name: Release: Create or update formula (arm64 + x86_64)
+      - name: "Release: Create or update formula (arm64 + x86_64)"
         if: steps.tapmeta.outputs.skip == 'false'
         env:
           FORMULA_PATH: ${{ steps.tapmeta.outputs.formula_path }}
@@ -452,7 +452,7 @@ jobs:
             printf 'end\n'
           } > "$file"
 
-      - name: Release: Create pull request in tap repo
+      - name: "Release: Create pull request in tap repo"
         if: steps.tapmeta.outputs.skip == 'false'
         continue-on-error: true
         id: tap_pr
@@ -469,7 +469,7 @@ jobs:
             - macOS arm64 SHA256: ${{ needs.release-macos-notarize.outputs.archive_sha256_aarch64 }}
             - macOS x86_64 SHA256: ${{ needs.release-macos-notarize.outputs.archive_sha256_x86_64 }}
 
-      - name: Release: Warn if tap PR failed
+      - name: "Release: Warn if tap PR failed"
         if: steps.tapmeta.outputs.skip == 'false' && steps.tap_pr.outcome == 'failure'
         run: |
           echo "Homebrew tap PR creation failed (likely token/repo permissions)."
