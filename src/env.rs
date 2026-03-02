@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 ///
 /// Each worktree resolves independently (REQ-12) because resolution
 /// is relative to the passed `worktree_root` path.
+#[must_use]
 pub fn resolve_env(worktree_root: &Path) -> String {
     // Priority 1: SECRETS_ENV env var
     if let Ok(env) = std::env::var("SECRETS_ENV") {

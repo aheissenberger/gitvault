@@ -154,6 +154,7 @@ pub enum Effect {
 /// Returns [`IdentitySource::FilePath`] for explicit paths, [`IdentitySource::EnvVar`]
 /// for values found in `GITVAULT_IDENTITY`, and [`IdentitySource::Keyring`] when
 /// `GITVAULT_KEYRING=1`.
+#[must_use]
 pub fn resolve_identity_source(
     path: Option<&str>,
     gitvault_identity_env: Option<&str>,

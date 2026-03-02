@@ -9,12 +9,14 @@ use crate::error::GitvaultError;
 
 /// Return the SSM parameter path for a given app, environment, and key.
 /// Format: `/{app}/{env}/{key}`
+#[must_use]
 pub fn ssm_path(app: &str, env: &str, key: &str) -> String {
     format!("/{app}/{env}/{key}")
 }
 
 /// Return the path to the local SSM refs file for the given environment.
 /// Path: `{repo_root}/secrets/{env}/.ssm-refs.json`
+#[must_use]
 pub fn refs_file_path(repo_root: &Path, env: &str) -> PathBuf {
     repo_root.join("secrets").join(env).join(".ssm-refs.json")
 }

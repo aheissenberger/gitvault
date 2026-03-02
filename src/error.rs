@@ -47,6 +47,7 @@ impl GitvaultError {
     ///
     /// Callers use this to propagate structured exit codes to the shell so
     /// scripts can distinguish encryption failures from permission errors, etc.
+    #[must_use]
     pub const fn exit_code(&self) -> i32 {
         match self {
             Self::Decryption(_) => EXIT_DECRYPT_ERROR,
