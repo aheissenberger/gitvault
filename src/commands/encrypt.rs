@@ -193,16 +193,16 @@ mod tests {
             )
             .expect("field encryption should succeed");
 
-            crate::commands::decrypt::cmd_decrypt(
-                json_file.to_string_lossy().to_string(),
-                None,
-                None,
-                Some("secret".to_string()),
-                false,
-                false,
-                true,
-                true,
-            )
+            crate::commands::decrypt::cmd_decrypt(crate::commands::decrypt::DecryptOptions {
+                file: json_file.to_string_lossy().to_string(),
+                identity: None,
+                output: None,
+                fields: Some("secret".to_string()),
+                reveal: false,
+                value_only: false,
+                json: true,
+                no_prompt: true,
+            })
             .expect("field decryption should succeed");
         });
 

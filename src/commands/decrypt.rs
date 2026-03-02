@@ -7,24 +7,34 @@ use crate::error::GitvaultError;
 use crate::identity::{load_identity, load_identity_from_source};
 use crate::{crypto, fhsm, repo, structured};
 
+/// Options for the [`cmd_decrypt`] command.
+pub struct DecryptOptions {
+    /// Path to the encrypted `.age` file.
+    pub file: String,
+    /// Path to an age identity file.
+    pub identity: Option<String>,
+    /// Output path (defaults to the input path with `.age` stripped).
+    pub output: Option<String>,
+    /// Comma-separated field paths to decrypt in structured files.
+    pub fields: Option<String>,
+    /// Print decrypted value to stdout instead of writing to file.
+    pub reveal: bool,
+    /// Decrypt each VALUE in a `.env` file individually (REQ-6).
+    pub value_only: bool,
+    /// Emit JSON output.
+    pub json: bool,
+    /// Suppress interactive prompts.
+    pub no_prompt: bool,
+}
+
 /// Decrypt a .age file and write plaintext
-#[allow(clippy::too_many_arguments)]
-pub fn cmd_decrypt(
-    file: String,
-    identity_path: Option<String>,
-    output: Option<String>,
-    fields: Option<String>,
-    reveal: bool,
-    value_only: bool,
-    json: bool,
-    no_prompt: bool,
-) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError> {
     // Use FHSM to resolve the identity source; file I/O remains here.
     let event = fhsm::Event::Decrypt {
-        file: file.clone(),
-        identity: identity_path,
-        no_prompt,
-        output: output.clone(),
+        file: opts.file.clone(),
+        identity: opts.identity,
+        no_prompt: opts.no_prompt,
+        output: opts.output.clone(),
     };
     let effects = fhsm::transition(&event)?;
     let identity_str = effects
@@ -38,20 +48,20 @@ pub fn cmd_decrypt(
         })
         .unwrap_or_else(|| load_identity(None))?;
 
-    let input_path = PathBuf::from(&file);
+    let input_path = PathBuf::from(&opts.file);
     let identity = crypto::parse_identity(&identity_str)?;
     let repo_root = crate::repo::find_repo_root()?;
 
     // REQ-6: value-only mode: decrypt each VALUE in a .env file individually
-    if value_only {
+    if opts.value_only {
         use crate::structured::decrypt_env_values;
         let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
         let decrypted = decrypt_env_values(&content, &identity)?;
-        if reveal {
+        if opts.reveal {
             print!("{decrypted}");
             return Ok(CommandOutcome::Success);
         }
-        let out_path = match &output {
+        let out_path = match &opts.output {
             Some(p) => std::path::PathBuf::from(p),
             None => input_path.clone(),
         };
@@ -63,12 +73,15 @@ pub fn cmd_decrypt(
         tmp.write_all(decrypted.as_bytes())?;
         tmp.persist(&out_path)
             .map_err(|e| GitvaultError::Io(e.error))?;
-        crate::output::output_success(&format!("Decrypted values in {}", out_path.display()), json);
+        crate::output::output_success(
+            &format!("Decrypted values in {}", out_path.display()),
+            opts.json,
+        );
         return Ok(CommandOutcome::Success);
     }
 
     // REQ-4: field-level decryption for JSON/YAML/TOML
-    if let Some(fields_str) = &fields {
+    if let Some(fields_str) = &opts.fields {
         let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
         // REQ-42: prevent path traversal for in-place field writes
         repo::validate_write_path(&repo_root, &input_path)?;
@@ -79,20 +92,20 @@ pub fn cmd_decrypt(
                 "Decrypted fields [{fields_str}] in {}",
                 input_path.display()
             ),
-            json,
+            opts.json,
         );
         return Ok(CommandOutcome::Success);
     }
 
     // REQ-41: if --reveal, print to stdout and never write to file
-    if reveal {
+    if opts.reveal {
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut stdout = std::io::BufWriter::new(std::io::stdout());
         crypto::decrypt_stream(&identity, in_file, &mut stdout)?;
         return Ok(CommandOutcome::Success);
     }
 
-    let out_path = if let Some(out) = output {
+    let out_path = if let Some(out) = opts.output {
         PathBuf::from(out)
     } else {
         let name = input_path
@@ -122,7 +135,7 @@ pub fn cmd_decrypt(
     tmp.persist(&out_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
 
-    crate::output::output_success(&format!("Decrypted to {}", out_path.display()), json);
+    crate::output::output_success(&format!("Decrypted to {}", out_path.display()), opts.json);
     Ok(CommandOutcome::Success)
 }
 
@@ -146,16 +159,16 @@ mod tests {
         let encrypted_file = dir.path().join("secret.env.age");
         std::fs::write(&encrypted_file, ciphertext).unwrap();
 
-        cmd_decrypt(
-            encrypted_file.to_string_lossy().to_string(),
-            Some(identity_file.path().to_string_lossy().to_string()),
-            None,
-            None,
-            true,
-            false,
-            true,
-            true,
-        )
+        cmd_decrypt(DecryptOptions {
+            file: encrypted_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: None,
+            fields: None,
+            reveal: true,
+            value_only: false,
+            json: true,
+            no_prompt: true,
+        })
         .expect("reveal mode should decrypt to stdout without error");
     }
 
@@ -173,16 +186,16 @@ mod tests {
         let encrypted_file = dir.path().join("app.env.age");
         std::fs::write(&encrypted_file, ciphertext).unwrap();
 
-        cmd_decrypt(
-            encrypted_file.to_string_lossy().to_string(),
-            Some(identity_file.path().to_string_lossy().to_string()),
-            None,
-            None,
-            false,
-            false,
-            true,
-            true,
-        )
+        cmd_decrypt(DecryptOptions {
+            file: encrypted_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: None,
+            fields: None,
+            reveal: false,
+            value_only: false,
+            json: true,
+            no_prompt: true,
+        })
         .expect("default output decrypt should succeed");
 
         let plain = std::fs::read_to_string(dir.path().join("app.env")).unwrap();
@@ -215,16 +228,16 @@ mod tests {
 
         // Try to decrypt with the wrong identity → map_err closure fires.
         let err = with_identity_env(wrong_identity_file.path(), || {
-            cmd_decrypt(
-                json_file.to_string_lossy().to_string(),
-                None,
-                None,
-                Some("secret".to_string()),
-                false,
-                false,
-                false,
-                true,
-            )
+            cmd_decrypt(DecryptOptions {
+                file: json_file.to_string_lossy().to_string(),
+                identity: None,
+                output: None,
+                fields: Some("secret".to_string()),
+                reveal: false,
+                value_only: false,
+                json: false,
+                no_prompt: true,
+            })
         })
         .expect_err("field decrypt with wrong identity should fail");
 
@@ -270,16 +283,16 @@ mod tests {
         );
 
         // Decrypt with --value-only
-        cmd_decrypt(
-            env_file.to_string_lossy().to_string(),
-            Some(identity_file.path().to_string_lossy().to_string()),
-            None,
-            None,
-            false,
-            true, // value_only
-            false,
-            true,
-        )
+        cmd_decrypt(DecryptOptions {
+            file: env_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: None,
+            fields: None,
+            reveal: false,
+            value_only: true,
+            json: false,
+            no_prompt: true,
+        })
         .expect("value-only decrypt should succeed");
 
         // Verify values are restored
@@ -315,16 +328,16 @@ mod tests {
         });
 
         // --reveal + --value-only: must succeed without writing to disk
-        let outcome = cmd_decrypt(
-            env_file.to_string_lossy().to_string(),
-            Some(identity_file.path().to_string_lossy().to_string()),
-            None,
-            None,
-            true, // reveal
-            true, // value_only
-            false,
-            true,
-        )
+        let outcome = cmd_decrypt(DecryptOptions {
+            file: env_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: None,
+            fields: None,
+            reveal: true,
+            value_only: true,
+            json: false,
+            no_prompt: true,
+        })
         .expect("reveal + value_only should succeed");
         assert!(matches!(outcome, CommandOutcome::Success));
     }
@@ -354,16 +367,16 @@ mod tests {
 
         // Decrypt into a separate output file (explicit output path)
         let out_file = dir.path().join("dest.env");
-        cmd_decrypt(
-            env_file.to_string_lossy().to_string(),
-            Some(identity_file.path().to_string_lossy().to_string()),
-            Some(out_file.to_string_lossy().to_string()), // explicit output
-            None,
-            false, // reveal
-            true,  // value_only
-            false,
-            true,
-        )
+        cmd_decrypt(DecryptOptions {
+            file: env_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: Some(out_file.to_string_lossy().to_string()),
+            fields: None,
+            reveal: false,
+            value_only: true,
+            json: false,
+            no_prompt: true,
+        })
         .expect("value_only decrypt to explicit output should succeed");
 
         let content = std::fs::read_to_string(&out_file).unwrap();
