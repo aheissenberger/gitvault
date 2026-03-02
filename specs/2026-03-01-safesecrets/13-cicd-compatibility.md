@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-013"
 title: "CI/CD compatibility and auth"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:
@@ -49,4 +49,4 @@ Guarantee script-safe operation and cloud auth compatibility for automated workf
 Check mode should validate policy, access, and drift without mutation.
 
 ## Current Verification Status
-REQ-48 (non-interactive CI): done — GITVAULT_IDENTITY env var + CI auto-detection via ci_is_non_interactive(). REQ-50 (preflight check): done — gitvault check subcommand implemented in src/main.rs cmd_check. REQ-49 (AWS role-based auth): pending — AwsConfig struct prepared in src/aws_config.rs but AWS SSM backend (REQ-26..30) not yet implemented.
+REQ-48 (non-interactive CI): done — GITVAULT_IDENTITY env var + CI auto-detection via ci_is_non_interactive(). REQ-50 (preflight check): done — gitvault check subcommand implemented in src/commands/admin.rs cmd_check. REQ-49 (AWS role-based auth): done — AwsConfig::build_client() in src/aws_config.rs supports profile and role ARN via AssumeRoleProvider; SSM backend (REQ-26..30) fully implemented in src/ssm.rs.
