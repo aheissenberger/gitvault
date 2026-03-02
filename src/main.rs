@@ -142,18 +142,24 @@ fn ci_is_non_interactive() -> bool {
     std::env::var("CI").map(|v| !v.is_empty()).unwrap_or(false)
 }
 
-/// Find the repository root by walking up from cwd looking for .git
-fn find_repo_root() -> Result<PathBuf, GitvaultError> {
-    let mut dir = std::env::current_dir()?;
+/// Walk up from `start` until a `.git` directory is found, returning that directory.
+/// Falls back to `start` itself when no `.git` is found (e.g. outside any repository).
+fn find_repo_root_from(start: &Path) -> Result<PathBuf, GitvaultError> {
+    let mut dir = start.to_path_buf();
     loop {
         if dir.join(".git").exists() {
             return Ok(dir);
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
-            None => return Ok(std::env::current_dir()?),
+            None => return Ok(start.to_path_buf()),
         }
     }
+}
+
+/// Find the repository root by walking up from cwd looking for .git
+fn find_repo_root() -> Result<PathBuf, GitvaultError> {
+    find_repo_root_from(&std::env::current_dir()?)
 }
 
 /// Output a success result, optionally as JSON
@@ -458,13 +464,103 @@ fn load_identity_from_source(source: &fhsm::IdentitySource) -> Result<String, Gi
     }
 }
 
-/// Execute an ordered list of FHSM [`fhsm::Effect`]s using the real I/O functions.
+/// Injectable side-effect executor for [`execute_effects_with`].
+///
+/// Each method corresponds to one [`fhsm::Effect`] variant that requires I/O.
+/// Implementations receive the repo root and accumulated state as parameters.
+trait EffectRunner {
+    fn check_prod_barrier(
+        &self,
+        repo_root: &Path,
+        env: &str,
+        prod: bool,
+        no_prompt: bool,
+    ) -> Result<(), GitvaultError>;
+
+    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<String, GitvaultError>;
+
+    fn decrypt_secrets(
+        &self,
+        repo_root: &Path,
+        env: &str,
+        identity: &dyn age::Identity,
+    ) -> Result<Vec<(String, String)>, GitvaultError>;
+
+    fn run_command(
+        &self,
+        secrets: &[(String, String)],
+        command: &[String],
+        clear_env: bool,
+        pass_vars: &[(String, String)],
+    ) -> Result<i32, GitvaultError>;
+
+    fn materialize_secrets(
+        &self,
+        repo_root: &Path,
+        secrets: &[(String, String)],
+    ) -> Result<(), GitvaultError>;
+}
+
+/// Production implementation — delegates to the real I/O functions.
+struct RealEffectRunner;
+
+impl EffectRunner for RealEffectRunner {
+    fn check_prod_barrier(
+        &self,
+        repo_root: &Path,
+        env: &str,
+        prod: bool,
+        no_prompt: bool,
+    ) -> Result<(), GitvaultError> {
+        barrier::check_prod_barrier(repo_root, env, prod, no_prompt)
+    }
+
+    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<String, GitvaultError> {
+        load_identity_from_source(source)
+    }
+
+    fn decrypt_secrets(
+        &self,
+        repo_root: &Path,
+        env: &str,
+        identity: &dyn age::Identity,
+    ) -> Result<Vec<(String, String)>, GitvaultError> {
+        decrypt_env_secrets(repo_root, env, identity)
+    }
+
+    fn run_command(
+        &self,
+        secrets: &[(String, String)],
+        command: &[String],
+        clear_env: bool,
+        pass_vars: &[(String, String)],
+    ) -> Result<i32, GitvaultError> {
+        let cmd = &command[0];
+        let args = &command[1..];
+        // Extract var names from key-value pairs for run_command's pass-through lookup.
+        let pass_var_names: Vec<String> = pass_vars.iter().map(|(k, _)| k.clone()).collect();
+        run::run_command(secrets, cmd, args, clear_env, &pass_var_names)
+    }
+
+    fn materialize_secrets(
+        &self,
+        repo_root: &Path,
+        secrets: &[(String, String)],
+    ) -> Result<(), GitvaultError> {
+        materialize::materialize_env_file(repo_root, secrets)
+    }
+}
+
+/// Execute an ordered list of FHSM [`fhsm::Effect`]s, delegating I/O to `runner`.
 ///
 /// State (resolved identity, decrypted secrets) is accumulated across effects so
 /// that later effects can depend on earlier ones.  Returns early with the
 /// subprocess exit code for [`fhsm::Effect::RunCommand`].
-fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
-    let repo_root = find_repo_root()?;
+fn execute_effects_with(
+    effects: Vec<fhsm::Effect>,
+    repo_root: &Path,
+    runner: &dyn EffectRunner,
+) -> Result<CommandOutcome, GitvaultError> {
     let mut identity_opt: Option<Box<dyn age::Identity>> = None;
     let mut secrets_opt: Option<Vec<(String, String)>> = None;
 
@@ -475,17 +571,17 @@ fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, Gitvaul
                 prod,
                 no_prompt,
             } => {
-                barrier::check_prod_barrier(&repo_root, &env, prod, no_prompt)?;
+                runner.check_prod_barrier(repo_root, &env, prod, no_prompt)?;
             }
             fhsm::Effect::ResolveIdentity { source } => {
-                let identity_str = load_identity_from_source(&source)?;
+                let identity_str = runner.load_identity_str(&source)?;
                 identity_opt = Some(Box::new(crypto::parse_identity(&identity_str)?));
             }
             fhsm::Effect::DecryptSecrets { env } => {
                 let identity = identity_opt
                     .as_deref()
                     .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
-                secrets_opt = Some(decrypt_env_secrets(&repo_root, &env, identity)?);
+                secrets_opt = Some(runner.decrypt_secrets(repo_root, &env, identity)?);
             }
             fhsm::Effect::RunCommand {
                 command,
@@ -493,24 +589,26 @@ fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, Gitvaul
                 pass_vars,
             } => {
                 let secrets = secrets_opt.as_deref().unwrap_or(&[]);
-                let cmd = &command[0];
-                let args = &command[1..];
-                // Extract var names from key-value pairs for run_command's pass-through lookup.
-                let pass_var_names: Vec<String> = pass_vars.into_iter().map(|(k, _)| k).collect();
-                let exit_code = run::run_command(secrets, cmd, args, clear_env, &pass_var_names)?;
+                let exit_code = runner.run_command(secrets, &command, clear_env, &pass_vars)?;
                 return Ok(CommandOutcome::Exit(exit_code));
             }
             fhsm::Effect::MaterializeSecrets { env: _ } => {
                 let secrets = secrets_opt
                     .as_ref()
                     .ok_or_else(|| GitvaultError::Usage("secrets not decrypted".to_string()))?;
-                materialize::materialize_env_file(&repo_root, secrets)?;
+                runner.materialize_secrets(repo_root, secrets)?;
             }
             // DecryptFile effects are handled directly in cmd_decrypt.
             fhsm::Effect::DecryptFile { .. } => {}
         }
     }
     Ok(CommandOutcome::Success)
+}
+
+/// Execute an ordered list of FHSM [`fhsm::Effect`]s using the real I/O functions.
+fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
+    let repo_root = find_repo_root()?;
+    execute_effects_with(effects, &repo_root, &RealEffectRunner)
 }
 
 /// Materialize secrets to root .env
@@ -2210,5 +2308,202 @@ mod tests {
         assert!(!conflict);
         // BAR deleted in ours, unchanged in theirs → keep deletion
         assert!(!merged.contains("BAR=2"));
+    }
+
+    // ─── find_repo_root_from tests ───────────────────────────────────────────
+
+    #[test]
+    fn find_repo_root_from_finds_git_dir() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let found = find_repo_root_from(tmp.path()).unwrap();
+        assert_eq!(found, tmp.path());
+    }
+
+    #[test]
+    fn find_repo_root_from_walks_up() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        let sub = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&sub).unwrap();
+        let found = find_repo_root_from(&sub).unwrap();
+        assert_eq!(found, tmp.path());
+    }
+
+    #[test]
+    fn find_repo_root_from_returns_start_when_no_git() {
+        let tmp = TempDir::new().unwrap();
+        // No .git dir — should return start path
+        let found = find_repo_root_from(tmp.path()).unwrap();
+        assert_eq!(found, tmp.path());
+    }
+
+    // ─── FakeEffectRunner + execute_effects_with tests ───────────────────────
+
+    struct FakeEffectRunner {
+        /// None = Ok(()), Some(msg) = Err
+        barrier_err: Option<String>,
+        identity_str: Result<String, String>,
+        decrypt_secrets: Result<Vec<(String, String)>, String>,
+        run_exit_code: Result<i32, String>,
+        materialize_err: Option<String>,
+    }
+
+    impl FakeEffectRunner {
+        fn succeeds_with(identity: String, secrets: Vec<(String, String)>, exit_code: i32) -> Self {
+            Self {
+                barrier_err: None,
+                identity_str: Ok(identity),
+                decrypt_secrets: Ok(secrets),
+                run_exit_code: Ok(exit_code),
+                materialize_err: None,
+            }
+        }
+    }
+
+    impl EffectRunner for FakeEffectRunner {
+        fn check_prod_barrier(
+            &self,
+            _repo_root: &Path,
+            _env: &str,
+            _prod: bool,
+            _no_prompt: bool,
+        ) -> Result<(), GitvaultError> {
+            match &self.barrier_err {
+                None => Ok(()),
+                Some(msg) => Err(GitvaultError::Other(msg.clone())),
+            }
+        }
+
+        fn load_identity_str(
+            &self,
+            _source: &fhsm::IdentitySource,
+        ) -> Result<String, GitvaultError> {
+            self.identity_str
+                .as_ref()
+                .map(|s| s.clone())
+                .map_err(|e| GitvaultError::Other(e.clone()))
+        }
+
+        fn decrypt_secrets(
+            &self,
+            _repo_root: &Path,
+            _env: &str,
+            _identity: &dyn age::Identity,
+        ) -> Result<Vec<(String, String)>, GitvaultError> {
+            self.decrypt_secrets
+                .as_ref()
+                .map(|v| v.clone())
+                .map_err(|e| GitvaultError::Other(e.clone()))
+        }
+
+        fn run_command(
+            &self,
+            _secrets: &[(String, String)],
+            _command: &[String],
+            _clear_env: bool,
+            _pass_vars: &[(String, String)],
+        ) -> Result<i32, GitvaultError> {
+            self.run_exit_code
+                .as_ref()
+                .map(|c| *c)
+                .map_err(|e| GitvaultError::Other(e.clone()))
+        }
+
+        fn materialize_secrets(
+            &self,
+            _repo_root: &Path,
+            _secrets: &[(String, String)],
+        ) -> Result<(), GitvaultError> {
+            match &self.materialize_err {
+                None => Ok(()),
+                Some(msg) => Err(GitvaultError::Other(msg.clone())),
+            }
+        }
+    }
+
+    #[test]
+    fn execute_effects_run_command_returns_exit_code() {
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 42);
+        let tmp = TempDir::new().unwrap();
+        let event = fhsm::Event::Run {
+            env: Some("dev".to_string()),
+            identity: Some(age_key.to_string().expose_secret().to_string()),
+            prod: false,
+            no_prompt: true,
+            clear_env: false,
+            pass_raw: None,
+            command: vec!["true".to_string()],
+        };
+        let effects = fhsm::transition(&event).unwrap();
+        let outcome = execute_effects_with(effects, tmp.path(), &runner).unwrap();
+        assert!(matches!(outcome, CommandOutcome::Exit(42)));
+    }
+
+    #[test]
+    fn execute_effects_barrier_denied_returns_err() {
+        let runner = FakeEffectRunner {
+            barrier_err: Some("denied".to_string()),
+            identity_str: Ok(String::new()),
+            decrypt_secrets: Ok(vec![]),
+            run_exit_code: Ok(0),
+            materialize_err: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        let event = fhsm::Event::Run {
+            env: Some("prod".to_string()),
+            identity: Some("key".to_string()),
+            prod: true,
+            no_prompt: true,
+            clear_env: false,
+            pass_raw: None,
+            command: vec!["true".to_string()],
+        };
+        let effects = fhsm::transition(&event).unwrap();
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn execute_effects_materialize_uses_cached_secrets() {
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let secrets = vec![("FOO".to_string(), "bar".to_string())];
+        let runner = FakeEffectRunner::succeeds_with(key_str, secrets, 0);
+        let tmp = TempDir::new().unwrap();
+        let event = fhsm::Event::Materialize {
+            env: None,
+            identity: Some(age_key.to_string().expose_secret().to_string()),
+            prod: false,
+            no_prompt: true,
+        };
+        let effects = fhsm::transition(&event).unwrap();
+        let outcome = execute_effects_with(effects, tmp.path(), &runner).unwrap();
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    #[test]
+    fn execute_effects_decrypt_without_identity_errors() {
+        let runner = FakeEffectRunner {
+            barrier_err: None,
+            identity_str: Err("no key".to_string()),
+            decrypt_secrets: Ok(vec![]),
+            run_exit_code: Ok(0),
+            materialize_err: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        // Manually build effects to go straight to ResolveIdentity (which will fail) then DecryptSecrets.
+        let effects = vec![
+            fhsm::Effect::ResolveIdentity {
+                source: fhsm::IdentitySource::Inline(String::new()),
+            },
+            fhsm::Effect::DecryptSecrets {
+                env: "dev".to_string(),
+            },
+        ];
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err());
     }
 }
