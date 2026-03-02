@@ -3,7 +3,7 @@
 use crate::cli::RecipientAction;
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
-use crate::identity::{load_identity, resolve_recipient_keys};
+use crate::identity::{load_identity_with_selector, resolve_recipient_keys};
 use crate::{crypto, repo};
 
 /// Manage persistent recipients (REQ-37)
@@ -64,11 +64,13 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
 /// cannot be loaded, or re-encryption of any secret file fails.
 pub fn cmd_rotate(
     identity_path: Option<String>,
+    selector: Option<String>,
     json: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
-    let identity_str = load_identity(identity_path)?;
-    let identity = crypto::parse_identity(&identity_str)?;
+    let identity_str = load_identity_with_selector(identity_path, selector.as_deref())?;
+    let any_identity = crypto::parse_identity_any(&identity_str)?;
+    let identity = any_identity.as_identity();
 
     let recipient_keys = resolve_recipient_keys(&repo_root, vec![])?;
 
@@ -86,7 +88,7 @@ pub fn cmd_rotate(
         .into_iter()
         .map(|path| {
             let ciphertext = std::fs::read(&path)?;
-            let plaintext = crypto::decrypt(&identity, &ciphertext)?;
+            let plaintext = crypto::decrypt(identity, &ciphertext)?;
             Ok((path, plaintext))
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
@@ -185,7 +187,10 @@ mod tests {
         let GitvaultError::Usage(msg) = err else {
             panic!("expected Usage error, got: {err:?}")
         };
-        assert!(msg.contains("No identity provided"));
+        assert!(
+            msg.contains("No identity resolved"),
+            "expected 'No identity resolved' in: {msg}"
+        );
     }
 
     #[test]
@@ -320,7 +325,7 @@ mod tests {
 
         with_identity_env(identity_file.path(), || {
             let err =
-                cmd_rotate(None, false).expect_err("rotate with invalid recipient should fail");
+                cmd_rotate(None, None, false).expect_err("rotate with invalid recipient should fail");
             assert!(
                 matches!(err, GitvaultError::Encryption(_)),
                 "expected Encryption error, got: {err:?}"

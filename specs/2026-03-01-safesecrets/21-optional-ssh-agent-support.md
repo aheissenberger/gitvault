@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-021"
 title: "Plan: Optional SSH-agent support"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

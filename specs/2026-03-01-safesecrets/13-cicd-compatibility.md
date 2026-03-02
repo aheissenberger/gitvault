@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-013"
 title: "CI/CD compatibility and auth"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

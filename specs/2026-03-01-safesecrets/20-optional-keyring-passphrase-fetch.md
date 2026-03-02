@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-020"
 title: "Plan: Optional keyring passphrase fetch"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

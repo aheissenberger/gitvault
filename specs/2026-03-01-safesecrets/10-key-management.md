@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-010"
 title: "Recipient and key management"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

@@ -20,6 +20,8 @@ pub struct RunOptions {
     pub command: Vec<String>,
     /// Suppress interactive prompts.
     pub no_prompt: bool,
+    /// Identity selector for SSH-agent key disambiguation (REQ-39/46).
+    pub selector: Option<String>,
 }
 
 /// Run a command with secrets injected as environment variables (REQ-21..25)
@@ -39,7 +41,7 @@ pub fn cmd_run(opts: RunOptions) -> Result<CommandOutcome, GitvaultError> {
         command: opts.command,
     };
     let effects = fhsm::transition(&event)?;
-    execute_effects(effects)
+    execute_effects(effects, opts.selector.as_deref())
 }
 
 #[cfg(test)]
@@ -63,6 +65,7 @@ mod tests {
             pass_raw: None,
             command: vec![],
             no_prompt: true,
+            selector: None,
         })
         .expect_err("empty command should fail");
 
@@ -89,6 +92,7 @@ mod tests {
             pass_raw: None,
             command: vec!["sh".to_string(), "-c".to_string(), "exit 0".to_string()],
             no_prompt: true,
+            selector: None,
         })
         .expect_err("run should fail closed on decrypt error");
 

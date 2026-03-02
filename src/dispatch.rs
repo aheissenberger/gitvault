@@ -45,6 +45,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             value_only,
             json: cli.json,
             no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
         }),
         Commands::Materialize {
             env,
@@ -56,6 +57,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             prod,
             cli.json,
             cli.no_prompt,
+            cli.identity_selector.clone(),
         ),
         Commands::Status { fail_if_dirty } => {
             crate::commands::admin::cmd_status(cli.json, fail_if_dirty)
@@ -76,6 +78,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             pass_raw: pass,
             command,
             no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
         }),
         Commands::AllowProd { ttl } => crate::commands::admin::cmd_allow_prod(ttl, cli.json),
         Commands::MergeDriver { base, ours, theirs } => {
@@ -85,11 +88,11 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             crate::commands::recipients::cmd_recipient(action, cli.json)
         }
         Commands::Rotate { identity } => {
-            crate::commands::recipients::cmd_rotate(identity, cli.json)
+            crate::commands::recipients::cmd_rotate(identity, cli.identity_selector.clone(), cli.json)
         }
         Commands::Keyring { action } => crate::commands::keyring::cmd_keyring(action, cli.json),
         Commands::Check { env, identity } => {
-            crate::commands::admin::cmd_check(env, identity, cli.json)
+            crate::commands::admin::cmd_check(env, identity, cli.identity_selector.clone(), cli.json)
         }
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
         #[cfg(feature = "ssm")]
@@ -179,6 +182,7 @@ mod tests {
                 no_prompt: true,
                 aws_profile: None,
                 aws_role_arn: None,
+                identity_selector: None,
                 command: Commands::Check {
                     env: None,
                     identity: None,
@@ -192,6 +196,7 @@ mod tests {
                 no_prompt: true,
                 aws_profile: None,
                 aws_role_arn: None,
+                identity_selector: None,
                 command: Commands::Status {
                     fail_if_dirty: false,
                 },
@@ -219,6 +224,7 @@ mod tests {
                 no_prompt: true,
                 aws_profile: None,
                 aws_role_arn: None,
+                identity_selector: None,
                 command: Commands::Run {
                     env: Some("dev".to_string()),
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
@@ -252,6 +258,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::Encrypt {
                 file: plain_file.to_string_lossy().to_string(),
                 recipients: vec![identity.to_public().to_string()],
@@ -271,6 +278,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::Decrypt {
                 file: encrypted_path.to_string_lossy().to_string(),
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
@@ -306,6 +314,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::AllowProd { ttl: 60 },
         };
 
@@ -332,6 +341,7 @@ mod tests {
                 no_prompt: true,
                 aws_profile: None,
                 aws_role_arn: None,
+                identity_selector: None,
                 command: Commands::Rotate { identity: None },
             };
 
@@ -360,6 +370,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::MergeDriver {
                 base: base.to_string_lossy().to_string(),
                 ours: ours.to_string_lossy().to_string(),
@@ -378,6 +389,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::MergeDriver {
                 base: base.to_string_lossy().to_string(),
                 ours: ours.to_string_lossy().to_string(),
@@ -403,6 +415,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::Keyring {
                 action: KeyringAction::Set {
                     identity: Some("/path/that/does/not/exist".to_string()),
@@ -449,6 +462,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::AllowProd { ttl: 60 },
         };
         run(allow_cli).expect("allow-prod should succeed");
@@ -458,6 +472,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::RevokeProd,
         };
         let outcome = run(revoke_cli).expect("revoke-prod dispatch should succeed");
@@ -479,6 +494,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::Keyring {
                 action: KeyringAction::Set {
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
@@ -511,6 +527,7 @@ mod tests {
             no_prompt: true,
             aws_profile: None,
             aws_role_arn: None,
+            identity_selector: None,
             command: Commands::Decrypt {
                 file: dir
                     .path()
