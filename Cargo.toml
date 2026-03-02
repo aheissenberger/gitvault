@@ -35,8 +35,16 @@ aws-sdk-ssm = { version = "1.106.0", optional = true }
 tokio       = { version = "1",        features = ["rt-multi-thread", "macros"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# REQ-39: OS keyring (macOS Keychain) — gated with #[cfg(target_os = "macos")] in keyring_store.rs
-keyring = "3"
+# REQ-39: OS keyring — macOS Keychain via Security framework
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# REQ-39: OS keyring — Linux kernel keyutils (no external library needed)
+keyring = { version = "3", features = ["linux-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# REQ-39: OS keyring — Windows Credential Manager
+keyring = { version = "3", features = ["windows-native"] }
 
 [features]
 ssm = ["dep:aws-config", "dep:aws-sdk-ssm", "dep:tokio"]

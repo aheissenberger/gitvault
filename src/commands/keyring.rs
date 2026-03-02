@@ -255,36 +255,43 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Smoke-test the real `cmd_keyring` wrapper (not injectable).
-    /// On macOS this hits the OS keychain; on other platforms it returns a "not
-    /// supported" error from the platform stub.  Either way the wrapper code
-    /// (lines 9-17) is exercised.
-    #[cfg(not(target_os = "macos"))]
+    /// Smoke-test the real `cmd_keyring` wrapper (not injectable) on all platforms.
+    /// Uses the native OS keyring backend (kernel keyutils on Linux, Keychain on macOS,
+    /// Credential Manager on Windows).  If no keyring service is available the
+    /// functions return a Keyring error — either way the wrapper dispatch code is exercised.
     #[test]
-    fn test_cmd_keyring_real_wrapper_non_macos() {
+    fn test_cmd_keyring_real_wrapper_exercises_delegate() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, _) = setup_identity_file();
 
-        // Set: load_identity succeeds but keyring_store::keyring_set returns
-        // "not supported" → the error propagates through cmd_keyring.
-        let err = cmd_keyring(
+        // Set: may succeed (keyring available) or return a Keyring error (no backend).
+        // Either outcome exercises the dispatch path through cmd_keyring.
+        let set_result = cmd_keyring(
             KeyringAction::Set {
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
             },
             false,
-        )
-        .unwrap_err();
-        assert!(matches!(err, GitvaultError::Keyring(_)));
+        );
 
-        // Get: keyring_store::keyring_get returns "not supported" immediately.
-        let err = cmd_keyring(KeyringAction::Get, false).unwrap_err();
-        assert!(matches!(err, GitvaultError::Keyring(_)));
-
-        // Delete: keyring_store::keyring_delete returns "not supported".
-        let err = cmd_keyring(KeyringAction::Delete, false).unwrap_err();
-        assert!(matches!(err, GitvaultError::Keyring(_)));
+        match set_result {
+            Ok(()) => {
+                // Keyring is functional: also test Get and Delete.
+                let get_result = cmd_keyring(KeyringAction::Get, false);
+                assert!(
+                    get_result.is_ok(),
+                    "keyring Get should succeed after successful Set: {get_result:?}"
+                );
+                // Clean up.
+                let _ = cmd_keyring(KeyringAction::Delete, false);
+            }
+            Err(GitvaultError::Keyring(_)) => {
+                // No keyring backend available in this environment (e.g. headless CI).
+                // This is acceptable — the code path was still exercised.
+            }
+            Err(other) => panic!("Unexpected error from cmd_keyring Set: {other:?}"),
+        }
     }
 }
