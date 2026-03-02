@@ -47,7 +47,47 @@ jobs:
           components: clippy,rustfmt
 
       - name: Cache cargo artifacts
+        id: cache_verify
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: rust-${{ runner.os }}-stable
+
+      - name: Cache diagnostics (verify)
+        run: |
+          echo "rust-cache cache-hit: '${{ steps.cache_verify.outputs.cache-hit }}'"
+          echo "CARGO_HOME=$CARGO_HOME"
+          echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
+          du -sh "$CARGO_HOME/registry" "$CARGO_HOME/git" 2>/dev/null || true
+          du -sh "$CARGO_TARGET_DIR" 2>/dev/null || true
+
+      - name: Cache summary (verify)
+        run: |
+          {
+            echo "### Cache status (verify)"
+            echo "- OS: $RUNNER_OS"
+            echo "- rust-cache hit: ${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}"
+            echo "- shared-key: rust-${{ runner.os }}-stable"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Persist cache status (verify)
+        run: |
+          set -euo pipefail
+          mkdir -p cache-status
+          cat > cache-status/verify-${{ runner.os }}.tsv <<'EOF'
+verify	${{ runner.os }}	-	${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-stable
+EOF
+
+      - name: Upload cache status (verify)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cache-status-verify-${{ runner.os }}
+          path: cache-status/verify-${{ runner.os }}.tsv
+
+      - name: Prefetch workspace dependencies
+        run: cargo fetch --locked
+
+      - name: Prefetch xtask dependencies
+        run: cargo fetch --manifest-path xtask/Cargo.toml
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -185,7 +225,49 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache cargo artifacts
+        id: cache_build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          shared-key: rust-${{ runner.os }}-stable
+
+      - name: Cache diagnostics (build)
+        run: |
+          echo "rust-cache cache-hit: '${{ steps.cache_build.outputs.cache-hit }}'"
+          echo "CARGO_HOME=$CARGO_HOME"
+          echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"
+          du -sh "$CARGO_HOME/registry" "$CARGO_HOME/git" 2>/dev/null || true
+          du -sh "$CARGO_TARGET_DIR" 2>/dev/null || true
+
+      - name: Cache summary (build)
+        run: |
+          {
+            echo "### Cache status (build)"
+            echo "- OS: $RUNNER_OS"
+            echo "- target: ${{ matrix.target }}"
+            echo "- rust-cache hit: ${{ steps.cache_build.outputs.cache-hit || 'n/a' }}"
+            echo "- shared-key: rust-${{ runner.os }}-stable"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Persist cache status (build)
+        run: |
+          set -euo pipefail
+          mkdir -p cache-status
+          cat > cache-status/build-${{ matrix.target }}-${{ runner.os }}.tsv <<'EOF'
+build	${{ runner.os }}	${{ matrix.target }}	${{ steps.cache_build.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-stable
+EOF
+
+      - name: Upload cache status (build)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cache-status-build-${{ matrix.target }}-${{ runner.os }}
+          path: cache-status/build-${{ matrix.target }}-${{ runner.os }}.tsv
+
+      - name: Prefetch target dependencies
+        run: cargo fetch --locked --target ${{ matrix.target }}
+
+      - name: Prefetch xtask dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fetch --manifest-path xtask/Cargo.toml
 
       - name: Build release binary
         run: cargo build --locked --release --target ${{ matrix.target }}
@@ -309,6 +391,48 @@ jobs:
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
             dist/SHA256SUMS.pem
+
+  cache-recap:
+    name: Cache recap
+    needs:
+      - verify
+      - build
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Download cache status artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: cache-status-*
+          merge-multiple: true
+          path: cache-status
+
+      - name: Generate recap summary
+        run: |
+          set -euo pipefail
+
+          {
+            echo "### Cache recap"
+            echo
+            echo "| Job | OS | Target | Cache hit | Shared key |"
+            echo "| --- | --- | --- | --- | --- |"
+
+            shopt -s nullglob
+            files=(cache-status/*.tsv)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "| - | - | - | no data | - |"
+            else
+              for file in "${files[@]}"; do
+                while IFS=$'\t' read -r job os target cache_hit shared_key; do
+                  echo "| ${job} | ${os} | ${target} | ${cache_hit} | ${shared_key} |"
+                done < "$file"
+              done | sort
+            fi
+            echo
+            echo "_Note: First run after a key change or lockfile/toolchain update is expected to be cold (`false`/`n/a`). Subsequent runs on the same OS with unchanged inputs should trend warm (`true`)._"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   homebrew:
     name: Update Homebrew tap
