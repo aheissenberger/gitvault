@@ -1,7 +1,7 @@
 # Architecture Hotspots
 
 Curated from the 2026-03-01 multi-agent review so future agents can jump directly to high-value areas.
-Last updated: 2026-03-02 (third refactor pass — all architectural observations resolved).
+Last updated: 2026-03-02 (fourth refactor pass — pedantic clippy applied).
 
 ## Resolved Issues (no longer actionable)
 
@@ -24,10 +24,12 @@ All previously-open issues have been resolved in this session:
 - `src/ssm.rs` (902 lines) monolithic module → **split** into `ssm/{backend,refs,commands,mod}.rs`.
 - Windows CI: no `cargo test` job on `windows-latest` → **fixed**: `test-windows` job added to
   `.github/workflows/build.yml`, satisfying AC5 (spec-15) and AC4 (spec-11).
+- Pedantic clippy pass → **applied**: redundant closures, format arg inlining, implicit clone,
+  let-else patterns, unnested or-patterns, identical match arms, raw string hashes cleaned up.
 
 ## Remaining Low Priority Items
 
-These items are known but have been reviewed and deemed low-value relative to refactor risk:
+These items are known but reviewed and deemed low-value relative to refactor risk:
 
 - `src/structured/fields.rs` (628 lines): JSON/YAML/TOML handlers share `determine_encrypted_value`
   and navigation helpers. A submodule split would require restructuring all shared imports with
@@ -36,6 +38,13 @@ These items are known but have been reviewed and deemed low-value relative to re
   `execute_effects_with` are tightly coupled; extraction adds boilerplate without benefit.
 - Tests in `ssm/mod.rs` use `unsafe { std::env::set_var/remove_var }`. In Rust 1.93.1 (edition 2024),
   `set_var` is not yet unsafe on stable; the `unsafe {}` blocks are preemptive and harmless.
+- 71 `missing # Errors` doc sections + 7 `missing # Panics` + 38 missing backticks in docs
+  (pedantic clippy) — pure doc maintenance burden; not blocking CI and deferred.
+- 17 `#[must_use]` candidates (13 functions + 4 methods) — API annotation work; deferred.
+- 5 `needless_pass_by_value` — all public API `String` params; changing to `&str` would be
+  API-breaking and require updating all callers in `dispatch.rs`.
+- 2 remaining `match` → `if let` suggestions — both arms are meaningful (not single-pattern);
+  pedantic style preference only.
 
 ## Unfulfilled Acceptance Criteria
 
@@ -45,14 +54,24 @@ None. All AC across all 19 spec files are now satisfied:
 |------|----|--------|-------|
 | All 19 specs | All ACs | ✅ Done | Windows CI job added → AC5/AC4 fulfilled |
 
-## Coverage Status (2026-03-02, third refactor pass)
+## Coverage Status (2026-03-02, fourth refactor pass)
 
-- Overall line coverage: **95.31%** (gate: ≥95%) ✅  
+- Overall line coverage: **95.37%** (gate: ≥95%) ✅  
 - Overall region coverage: **90.40%** (gate: n/a in CI)
 - `ssm/backend.rs` and `aws_config.rs` are excluded from CI coverage gate
   (both require live AWS credentials — cannot be unit tested without real AWS infra)
 - Lowest covered file (included in gate): `dispatch.rs` at 83.85%
 - Total tests: **346 unit + 18 integration = 364** passing
+
+## CI Status
+
+| Job | Status |
+|-----|--------|
+| `cargo fmt --check` | ✅ clean |
+| `cargo clippy -- -D warnings` | ✅ clean (0 warnings) |
+| `cargo test --all-features` | ✅ 364/364 pass |
+| `cargo llvm-cov --fail-under-lines 95` | ✅ 95.37% |
+| `test-windows` (windows-latest) | ✅ job added |
 
 ## Architecture Summary (current state)
 
