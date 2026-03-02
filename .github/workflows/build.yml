@@ -14,6 +14,9 @@ on:
       tap_formula_path:
         description: "Formula path in tap repo (optional override)"
         required: false
+      tap_branch:
+        description: "Branch in tap repo to update (optional override; defaults to main)"
+        required: false
   push:
     tags:
       - 'v*'
@@ -244,8 +247,10 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           INPUT_TAP_REPO: ${{ github.event.inputs.tap_repo }}
           INPUT_FORMULA_PATH: ${{ github.event.inputs.tap_formula_path }}
+          INPUT_TAP_BRANCH: ${{ github.event.inputs.tap_branch }}
           DEFAULT_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
           DEFAULT_FORMULA_PATH: ${{ vars.HOMEBREW_TAP_FORMULA_PATH }}
+          DEFAULT_TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH }}
         run: |
           set -euo pipefail
           [[ -n "${GH_TOKEN:-}" ]] || { echo "Missing HOMEBREW_TAP_TOKEN" >&2; exit 1; }
@@ -255,8 +260,13 @@ jobs:
 
           tap_push_allowed="$(gh api "/repos/${tap_repo}" --jq '.permissions.push' || true)"
           [[ "${tap_push_allowed}" == "true" ]] || { echo "HOMEBREW_TAP_TOKEN cannot push to ${tap_repo}" >&2; exit 1; }
-          tap_default_branch="$(gh api "/repos/${tap_repo}" --jq '.default_branch')"
-          [[ -n "${tap_default_branch}" ]] || { echo "Unable to resolve default branch for ${tap_repo}" >&2; exit 1; }
+          tap_branch="${INPUT_TAP_BRANCH:-${DEFAULT_TAP_BRANCH:-main}}"
+          [[ -n "${tap_branch}" ]] || { echo "Missing tap branch (set workflow input tap_branch or repo variable HOMEBREW_TAP_BRANCH)" >&2; exit 1; }
+
+          if ! gh api "/repos/${tap_repo}/branches/${tap_branch}" >/dev/null 2>&1; then
+            echo "Tap branch not found: ${tap_repo}@${tap_branch}" >&2
+            exit 1
+          fi
 
           formula_path="${INPUT_FORMULA_PATH:-${DEFAULT_FORMULA_PATH:-Formula/gitvault.rb}}"
           release_tag="${GITHUB_REF_NAME}"
@@ -264,7 +274,7 @@ jobs:
           release_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}"
 
           echo "tap_repo=${tap_repo}" >> "$GITHUB_OUTPUT"
-          echo "tap_default_branch=${tap_default_branch}" >> "$GITHUB_OUTPUT"
+          echo "tap_branch=${tap_branch}" >> "$GITHUB_OUTPUT"
           echo "formula_path=${formula_path}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -293,7 +303,7 @@ jobs:
         with:
           repository: ${{ steps.meta.outputs.tap_repo }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          ref: ${{ steps.meta.outputs.tap_default_branch }}
+          ref: ${{ steps.meta.outputs.tap_branch }}
           path: tap
 
       - name: Create or update formula
@@ -352,7 +362,7 @@ jobs:
 
       - name: Commit and push formula update
         env:
-          TAP_DEFAULT_BRANCH: ${{ steps.meta.outputs.tap_default_branch }}
+          TAP_BRANCH: ${{ steps.meta.outputs.tap_branch }}
           VERSION: ${{ steps.meta.outputs.version }}
           FORMULA_PATH: ${{ steps.meta.outputs.formula_path }}
         run: |
@@ -369,4 +379,4 @@ jobs:
 
           git add "${FORMULA_PATH}"
           git commit -m "chore: update formula for ${VERSION}"
-          git push origin "HEAD:${TAP_DEFAULT_BRANCH}"
+          git push origin "HEAD:${TAP_BRANCH}"
