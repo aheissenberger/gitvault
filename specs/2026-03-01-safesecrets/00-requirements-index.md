@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**"]
 acceptance:
   - id: "AC1"
-    text: "Each REQ identifier from REQ-1 to REQ-58 maps to exactly one individual spec file."
+    text: "Each REQ identifier from REQ-1 to REQ-60 maps to exactly one individual spec file."
   - id: "AC2"
     text: "All individual spec files contain valid frontmatter accepted by spec verifier."
 verification:
@@ -48,11 +48,11 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-31..REQ-32 -> `08-git-integration.md`
 - REQ-33..REQ-35 -> `09-merge-optimization.md`
 - REQ-36..REQ-39 -> `10-key-management.md`
-- REQ-40..REQ-44, REQ-57 -> `11-security-requirements.md`
+- REQ-40..REQ-44, REQ-57, REQ-60 -> `11-security-requirements.md`
 - REQ-45..REQ-47 -> `12-cli-automation.md`
 - REQ-48..REQ-50 -> `13-cicd-compatibility.md`
 - REQ-51..REQ-53 -> `14-performance.md`
-- Testing matrix section + Rust full-coverage requirement for `*.rs` -> `15-testing-matrix.md`
+- Testing matrix section + Rust full-coverage requirement for `*.rs` + REQ-59 (mock external dependencies with `mockall`) -> `15-testing-matrix.md`
 - REQ-54..REQ-55, REQ-58 -> `16-release-integrity.md`
 - REQ-56 -> `18-requirement-governance.md`
 
@@ -67,4 +67,4 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 This index is the canonical source for requirement-to-spec traceability.
 
 ## Current Verification Status
-cargo xtask spec-verify passes (79 files). Coverage map is complete for REQ-1..REQ-58.
+cargo xtask spec-verify passes (81 files). Coverage map is complete for REQ-1..REQ-60.

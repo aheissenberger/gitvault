@@ -65,7 +65,7 @@ jobs:
         # ssm.rs and aws_config.rs are gated by the `ssm` feature and require
         # live AWS credentials to exercise; exclude them so the threshold
         # reflects coverage of code that can actually run in CI.
-        run: cargo llvm-cov --workspace --all-features --ignore-filename-regex "(ssm|aws_config)\.rs" --fail-under-lines 95
+        run: cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs" --fail-under-lines 95
 
       - name: Release tag consistency check
         if: startsWith(github.ref, 'refs/tags/v')
