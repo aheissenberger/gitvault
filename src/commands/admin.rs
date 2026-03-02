@@ -17,7 +17,7 @@ pub(crate) fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<(), Gitvault
 
     // REQ-32: drift check
     if fail_if_dirty && repo::has_secrets_drift(&repo_root)? {
-        return Err(GitvaultError::PlaintextLeak(
+        return Err(GitvaultError::Drift(
             "secrets/ has uncommitted changes (drift detected)".to_string(),
         ));
     }
@@ -214,7 +214,7 @@ mod tests {
         std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
 
         let err = cmd_status(true, true).unwrap_err();
-        assert!(matches!(err, GitvaultError::PlaintextLeak(_)));
+        assert!(matches!(err, GitvaultError::Drift(_)));
     }
 
     #[test]

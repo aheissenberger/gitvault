@@ -24,20 +24,18 @@ pub(crate) fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
     keyring_delete_fn: DeleteFn,
 ) -> Result<(), GitvaultError>
 where
-    SetFn: Fn(&str) -> Result<(), String>,
-    GetFn: Fn() -> Result<String, String>,
-    DeleteFn: Fn() -> Result<(), String>,
+    SetFn: Fn(&str) -> Result<(), GitvaultError>,
+    GetFn: Fn() -> Result<String, GitvaultError>,
+    DeleteFn: Fn() -> Result<(), GitvaultError>,
 {
     match action {
         KeyringAction::Set { identity } => {
             let key = load_identity(identity)?;
-            keyring_set_fn(&key)
-                .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
+            keyring_set_fn(&key)?;
             crate::output::output_success("Identity stored in OS keyring.", json);
         }
         KeyringAction::Get => {
-            let key = keyring_get_fn()
-                .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
+            let key = keyring_get_fn()?;
             let identity = crypto::parse_identity(&key)?;
             let pubkey = identity.to_public().to_string();
             if json {
@@ -47,7 +45,7 @@ where
             }
         }
         KeyringAction::Delete => {
-            keyring_delete_fn().map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
+            keyring_delete_fn()?;
             crate::output::output_success("Identity removed from OS keyring.", json);
         }
     }
@@ -114,32 +112,32 @@ mod tests {
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
             },
             true,
-            |_value| Err("set-failed".to_string()),
+            |_value| Err(GitvaultError::Keyring("set-failed".to_string())),
             || Ok("unused".to_string()),
             || Ok(()),
         )
         .unwrap_err();
-        assert!(matches!(set_err, GitvaultError::Other(_)));
+        assert!(matches!(set_err, GitvaultError::Keyring(_)));
 
         let get_err = cmd_keyring_with_ops(
             KeyringAction::Get,
             true,
             |_value| Ok(()),
-            || Err("get-failed".to_string()),
+            || Err(GitvaultError::Keyring("get-failed".to_string())),
             || Ok(()),
         )
         .unwrap_err();
-        assert!(matches!(get_err, GitvaultError::Other(_)));
+        assert!(matches!(get_err, GitvaultError::Keyring(_)));
 
         let delete_err = cmd_keyring_with_ops(
             KeyringAction::Delete,
             true,
             |_value| Ok(()),
             || Ok("unused".to_string()),
-            || Err("delete-failed".to_string()),
+            || Err(GitvaultError::Keyring("delete-failed".to_string())),
         )
         .unwrap_err();
-        assert!(matches!(delete_err, GitvaultError::Other(_)));
+        assert!(matches!(delete_err, GitvaultError::Keyring(_)));
     }
 
     #[test]
@@ -156,8 +154,8 @@ mod tests {
                 *stored_clone.lock().unwrap() = key.to_string();
                 Ok(())
             },
-            || Err("not used".to_string()),
-            || Err("not used".to_string()),
+            || Err(GitvaultError::Keyring("not used".to_string())),
+            || Err(GitvaultError::Keyring("not used".to_string())),
         );
         assert!(result.is_ok());
         assert!(stored.lock().unwrap().starts_with("AGE-SECRET-KEY-"));
@@ -171,9 +169,9 @@ mod tests {
         let result = cmd_keyring_with_ops(
             KeyringAction::Get,
             false,
-            |_| Err("not used".to_string()),
+            |_| Err(GitvaultError::Keyring("not used".to_string())),
             move || Ok(key_str.clone()),
-            || Err("not used".to_string()),
+            || Err(GitvaultError::Keyring("not used".to_string())),
         );
         assert!(result.is_ok());
     }
@@ -185,8 +183,8 @@ mod tests {
         let result = cmd_keyring_with_ops(
             KeyringAction::Delete,
             false,
-            |_| Err("not used".to_string()),
-            || Err("not used".to_string()),
+            |_| Err(GitvaultError::Keyring("not used".to_string())),
+            || Err(GitvaultError::Keyring("not used".to_string())),
             move || {
                 *called_clone.lock().unwrap() = true;
                 Ok(())
@@ -204,10 +202,10 @@ mod tests {
                 identity: Some(tmp_file.path().to_string_lossy().to_string()),
             },
             false,
-            |_| Err("store failed".to_string()),
-            || Err("not used".to_string()),
-            || Err("not used".to_string()),
+            |_| Err(GitvaultError::Keyring("store failed".to_string())),
+            || Err(GitvaultError::Keyring("not used".to_string())),
+            || Err(GitvaultError::Keyring("not used".to_string())),
         );
-        assert!(matches!(result, Err(GitvaultError::Other(_))));
+        assert!(matches!(result, Err(GitvaultError::Keyring(_))));
     }
 }

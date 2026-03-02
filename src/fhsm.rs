@@ -123,8 +123,8 @@ pub enum Effect {
         command: Vec<String>,
         /// Whether to start the subprocess with a clean environment.
         clear_env: bool,
-        /// Additional raw variables to pass through unchanged.
-        pass_vars: Vec<(String, String)>,
+        /// Names of environment variables to pass through unchanged from the caller's environment.
+        pass_vars: Vec<String>,
     },
 
     /// Write decrypted secrets to the working directory for the named environment.
@@ -174,17 +174,18 @@ pub fn resolve_identity_source(
     IdentitySource::Unresolved
 }
 
-/// Parse raw `KEY=VALUE` pairs from an optional string.
+/// Parse raw `KEY=VALUE` pairs from an optional string, returning only the variable names.
 ///
 /// Silently ignores entries that contain no `=`.
-fn parse_pass_vars(raw: Option<&str>) -> Vec<(String, String)> {
+fn parse_pass_vars(raw: Option<&str>) -> Vec<String> {
     raw.map(|s| {
         s.split(',')
             .filter_map(|pair| {
                 let mut parts = pair.splitn(2, '=');
                 let key = parts.next()?.trim().to_owned();
-                let val = parts.next()?.trim().to_owned();
-                Some((key, val))
+                // Require at least one '=' to be present; silently skip entries without one.
+                parts.next()?;
+                Some(key)
             })
             .collect()
     })
@@ -474,10 +475,7 @@ mod tests {
         });
         assert_eq!(
             run_cmd,
-            Some(vec![
-                ("KEY".to_string(), "value".to_string()),
-                ("OTHER".to_string(), "x".to_string()),
-            ])
+            Some(vec!["KEY".to_string(), "OTHER".to_string()])
         );
     }
 
@@ -503,7 +501,7 @@ mod tests {
         // "NOEQUALS" has no '=' so it should be silently skipped.
         assert_eq!(
             pass_vars,
-            Some(vec![("KEY".to_string(), "val".to_string())])
+            Some(vec!["KEY".to_string()])
         );
     }
 
