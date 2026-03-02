@@ -323,7 +323,7 @@ mod tests {
         // Manually build effects to go straight to ResolveIdentity (which will fail) then DecryptSecrets.
         let effects = vec![
             fhsm::Effect::ResolveIdentity {
-                source: fhsm::IdentitySource::Inline(String::new()),
+                source: fhsm::IdentitySource::Unresolved,
             },
             fhsm::Effect::DecryptSecrets {
                 env: "dev".to_string(),

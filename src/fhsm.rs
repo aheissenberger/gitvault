@@ -20,26 +20,6 @@ pub enum FhsmError {
 
 // ─── Orthogonal region enums ──────────────────────────────────────────────────
 
-/// Whether interactive prompts are permitted.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PromptMode {
-    /// Interactive prompts are allowed.
-    Allow,
-    /// Interactive prompts must not be shown (CI / `--no-prompt`).
-    Deny,
-}
-
-/// Desired output format.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OutputMode {
-    /// Human-readable text output.
-    Human,
-    /// Machine-readable JSON output.
-    Json,
-}
-
 /// Where the identity key should come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentitySource {
@@ -50,18 +30,11 @@ pub enum IdentitySource {
     /// Read from the OS keyring (`GITVAULT_KEYRING=1`).
     Keyring,
     /// A raw inline key value (e.g. supplied directly as a string).
+    #[allow(dead_code)]
     Inline(String),
-}
-
-/// Where a secret value comes from within the repository.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SecretSource {
-    /// An encrypted `.env`-style file for the named environment.
-    RepoEnv {
-        /// The environment name (e.g. `"dev"`, `"prod"`).
-        env: String,
-    },
+    /// No source was configured at the FHSM level; the executor must resolve
+    /// using the full priority chain (GITVAULT_IDENTITY env var, keyring, etc.).
+    Unresolved,
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────────
@@ -196,10 +169,9 @@ pub fn resolve_identity_source(
     if gitvault_keyring_env == Some("1") {
         return IdentitySource::Keyring;
     }
-    // Callers that reach here must surface an error themselves; we return a
-    // sentinel Inline variant so that the transition still produces a complete
-    // effect list and error handling stays in the executor layer.
-    IdentitySource::Inline(String::new())
+    // No source configured at the FHSM level — executor must resolve
+    // using the full priority chain (GITVAULT_IDENTITY env var, keyring, etc.)
+    IdentitySource::Unresolved
 }
 
 /// Parse raw `KEY=VALUE` pairs from an optional string.
@@ -247,7 +219,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
                 ));
             }
 
-            let resolved_env = env.clone().unwrap_or_else(|| "dev".to_string());
+            let resolved_env = env.as_deref().unwrap_or("dev").to_owned();
             let source = resolve_identity_source(
                 identity.as_deref(),
                 None, // real env vars resolved by the executor
@@ -277,7 +249,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
             prod,
             no_prompt,
         } => {
-            let resolved_env = env.clone().unwrap_or_else(|| "dev".to_string());
+            let resolved_env = env.as_deref().unwrap_or("dev").to_owned();
             let source = resolve_identity_source(identity.as_deref(), None, None);
 
             Ok(vec![
@@ -297,7 +269,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
         Event::Decrypt {
             file,
             identity,
-            no_prompt: _,
+            no_prompt: _, // decrypt is always non-interactive; no_prompt is not applicable
             output,
         } => {
             let source = resolve_identity_source(identity.as_deref(), None, None);
@@ -536,8 +508,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_identity_source_none_inputs_returns_inline_empty() {
+    fn resolve_identity_source_none_inputs_returns_unresolved() {
         let source = resolve_identity_source(None, None, None);
-        assert_eq!(source, IdentitySource::Inline(String::new()));
+        assert_eq!(source, IdentitySource::Unresolved);
     }
 }

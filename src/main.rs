@@ -469,10 +469,10 @@ mod tests {
     }
 
     #[test]
-    fn load_identity_from_source_inline_empty_falls_back_to_env_var() {
+    fn load_identity_from_source_unresolved_falls_back_to_env_var() {
         let _lock = global_test_lock().lock().unwrap();
         let (tmp_file, _) = setup_identity_file();
-        let source = fhsm::IdentitySource::Inline(String::new());
+        let source = fhsm::IdentitySource::Unresolved;
         // Provide GITVAULT_IDENTITY so load_identity(None) can resolve it.
         let result = with_env_var(
             "GITVAULT_IDENTITY",

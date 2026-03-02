@@ -68,7 +68,7 @@ where
 
 /// Map an [`fhsm::IdentitySource`] to a raw identity key string.
 ///
-/// The `Inline("")` sentinel (emitted by the FHSM when no path was supplied)
+/// The `Unresolved` variant (emitted by the FHSM when no path was supplied)
 /// triggers the standard env-var / keyring fallback via [`load_identity`].
 pub(crate) fn load_identity_from_source(
     source: &fhsm::IdentitySource,
@@ -79,8 +79,9 @@ pub(crate) fn load_identity_from_source(
         fhsm::IdentitySource::Keyring => keyring_store::keyring_get()
             .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}"))),
         fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(s.clone()),
-        // Empty Inline is the FHSM sentinel meaning "executor must resolve from env vars".
         fhsm::IdentitySource::Inline(_) => load_identity(None),
+        // Unresolved: executor must run the full priority chain at runtime
+        fhsm::IdentitySource::Unresolved => load_identity(None),
     }
 }
 
