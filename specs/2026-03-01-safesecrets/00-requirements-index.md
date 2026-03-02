@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**"]
 acceptance:
   - id: "AC1"
-    text: "Each REQ identifier from REQ-1 to REQ-56 maps to exactly one individual spec file."
+    text: "Each REQ identifier from REQ-1 to REQ-57 maps to exactly one individual spec file."
   - id: "AC2"
     text: "All individual spec files contain valid frontmatter accepted by spec verifier."
 verification:
@@ -48,7 +48,7 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-31..REQ-32 -> `08-git-integration.md`
 - REQ-33..REQ-35 -> `09-merge-optimization.md`
 - REQ-36..REQ-39 -> `10-key-management.md`
-- REQ-40..REQ-44 -> `11-security-requirements.md`
+- REQ-40..REQ-44, REQ-57 -> `11-security-requirements.md`
 - REQ-45..REQ-47 -> `12-cli-automation.md`
 - REQ-48..REQ-50 -> `13-cicd-compatibility.md`
 - REQ-51..REQ-53 -> `14-performance.md`

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::Engine;
 /// REQ-4: Field-level encryption for JSON, YAML, and TOML.
 /// REQ-5: Deterministic encryption — existing ciphertext is preserved when plaintext unchanged.
 use std::io::{Read, Write};
@@ -14,6 +15,36 @@ pub fn is_age_armor(value: &str) -> bool {
 
 fn is_env_encrypted(value: &str) -> bool {
     value.starts_with(ENV_ENC_PREFIX)
+}
+
+fn parse_env_pair_from_line(line: &str) -> Option<(String, String)> {
+    let input = format!("{line}\n");
+    let mut iter = dotenvy::from_read_iter(input.as_bytes());
+    match iter.next() {
+        Some(Ok((key, value))) => Some((key, value)),
+        _ => None,
+    }
+}
+
+fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
+    let Some(eq_index) = original_line.find('=') else {
+        return original_line.to_string();
+    };
+
+    let prefix = &original_line[..=eq_index];
+    let rhs = &original_line[eq_index + 1..];
+    let ws_len: usize = rhs
+        .chars()
+        .take_while(|ch| ch.is_whitespace())
+        .map(char::len_utf8)
+        .sum();
+    let leading_ws = &rhs[..ws_len];
+    let suffix = rhs
+        .find(" #")
+        .filter(|idx| *idx >= ws_len)
+        .map(|idx| &rhs[idx..])
+        .unwrap_or("");
+    format!("{prefix}{leading_ws}{new_value}{suffix}")
 }
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
@@ -98,87 +129,13 @@ fn encrypt_binary_b64(plaintext: &[u8], recipient_keys: &[String]) -> Result<Str
         .finish()
         .map_err(|e| anyhow::anyhow!("Encrypt finish: {e}"))?;
 
-    Ok(base64_encode(&output))
-}
-
-fn base64_encode(data: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-    let mut i = 0;
-    while i < data.len() {
-        let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() {
-            data[i + 1] as u32
-        } else {
-            0
-        };
-        let b2 = if i + 2 < data.len() {
-            data[i + 2] as u32
-        } else {
-            0
-        };
-        result.push(CHARS[((b0 >> 2) & 0x3f) as usize] as char);
-        result.push(CHARS[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
-        if i + 1 < data.len() {
-            result.push(CHARS[(((b1 << 2) | (b2 >> 6)) & 0x3f) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        if i + 2 < data.len() {
-            result.push(CHARS[(b2 & 0x3f) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        i += 3;
-    }
-    result
-}
-
-fn base64_decode(s: &str) -> Result<Vec<u8>> {
-    let s: Vec<u8> = s.bytes().filter(|&b| b != b'=').collect();
-    let mut result = Vec::new();
-    let mut i = 0;
-    while i + 3 < s.len() || (i < s.len() && s.len() - i >= 2) {
-        let b64_val = |c: u8| -> Result<u32> {
-            match c {
-                b'A'..=b'Z' => Ok((c - b'A') as u32),
-                b'a'..=b'z' => Ok((c - b'a' + 26) as u32),
-                b'0'..=b'9' => Ok((c - b'0' + 52) as u32),
-                b'+' => Ok(62),
-                b'/' => Ok(63),
-                _ => Err(anyhow::anyhow!("Invalid base64 char: {c}")),
-            }
-        };
-        if i + 3 < s.len() {
-            let v0 = b64_val(s[i])?;
-            let v1 = b64_val(s[i + 1])?;
-            let v2 = b64_val(s[i + 2])?;
-            let v3 = b64_val(s[i + 3])?;
-            result.push(((v0 << 2) | (v1 >> 4)) as u8);
-            result.push(((v1 << 4) | (v2 >> 2)) as u8);
-            result.push(((v2 << 6) | v3) as u8);
-            i += 4;
-        } else if i + 2 < s.len() {
-            let v0 = b64_val(s[i])?;
-            let v1 = b64_val(s[i + 1])?;
-            let v2 = b64_val(s[i + 2])?;
-            result.push(((v0 << 2) | (v1 >> 4)) as u8);
-            result.push(((v1 << 4) | (v2 >> 2)) as u8);
-            i += 3;
-        } else if i + 1 < s.len() {
-            let v0 = b64_val(s[i])?;
-            let v1 = b64_val(s[i + 1])?;
-            result.push(((v0 << 2) | (v1 >> 4)) as u8);
-            i += 2;
-        } else {
-            break;
-        }
-    }
-    Ok(result)
+    Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
 
 fn decrypt_binary_b64(encoded: &str, identity: &dyn age::Identity) -> Result<Vec<u8>> {
-    let ciphertext = base64_decode(encoded)?;
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .context("Invalid base64 payload")?;
     let decryptor = age::Decryptor::new(ciphertext.as_slice())
         .map_err(|e| anyhow::anyhow!("Decryptor create: {e}"))?;
     let mut reader = match decryptor {
@@ -425,18 +382,14 @@ pub fn encrypt_env_values(
             lines_out.push(line.to_string());
             continue;
         }
-        if let Some((key, value)) = trimmed.split_once('=') {
-            let key = key.trim();
-            let value = value.trim();
-            let new_value = if is_env_encrypted(value) {
+        if let Some((_key, value)) = parse_env_pair_from_line(line) {
+            let new_value = if is_env_encrypted(&value) {
                 // REQ-5: check if existing encrypted value decrypts to same plaintext
                 let encoded = &value[ENV_ENC_PREFIX.len()..];
                 if let Ok(existing_plain) = decrypt_binary_b64(encoded, identity) {
                     // We don't have a "new plaintext" in encrypt_env_values;
                     // this function always re-encrypts. For idempotency, keep existing.
-                    format!("{ENV_ENC_PREFIX}{}", base64_encode(&existing_plain))
-                        .replace(&base64_encode(&existing_plain), encoded)
-                        .to_string();
+                    let _ = existing_plain;
                     value.to_string()
                 } else {
                     let enc = encrypt_binary_b64(value.as_bytes(), recipient_keys)?;
@@ -446,7 +399,12 @@ pub fn encrypt_env_values(
                 let enc = encrypt_binary_b64(value.as_bytes(), recipient_keys)?;
                 format!("{ENV_ENC_PREFIX}{enc}")
             };
-            lines_out.push(format!("{key}={new_value}"));
+
+            if new_value == value {
+                lines_out.push(line.to_string());
+            } else {
+                lines_out.push(rewrite_env_assignment_line(line, &new_value));
+            }
         } else {
             lines_out.push(line.to_string());
         }
@@ -468,13 +426,12 @@ pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result
             lines_out.push(line.to_string());
             continue;
         }
-        if let Some((key, value)) = trimmed.split_once('=') {
-            let key = key.trim();
-            let value = value.trim();
-            if is_env_encrypted(value) {
+        if let Some((_key, value)) = parse_env_pair_from_line(line) {
+            if is_env_encrypted(&value) {
                 let encoded = &value[ENV_ENC_PREFIX.len()..];
                 let plain = decrypt_binary_b64(encoded, identity)?;
-                lines_out.push(format!("{key}={}", String::from_utf8(plain)?));
+                let plain_text = String::from_utf8(plain)?;
+                lines_out.push(rewrite_env_assignment_line(line, &plain_text));
             } else {
                 lines_out.push(line.to_string());
             }
@@ -689,5 +646,32 @@ mod tests {
 
         let decrypted = decrypt_env_values(&encrypted, &identity).unwrap();
         assert_eq!(decrypted, content);
+    }
+
+    #[test]
+    fn test_env_value_only_preserves_formatting_and_inline_comments() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+
+        let content = "API_KEY = mysecret # keep-comment\nDB_HOST=localhost\n";
+        let encrypted = encrypt_env_values(content, &identity, &keys).unwrap();
+        assert!(
+            encrypted.contains("API_KEY = age:"),
+            "lhs spacing should be preserved on encrypt"
+        );
+        assert!(
+            encrypted.contains(" # keep-comment"),
+            "inline comment should be preserved on encrypt"
+        );
+
+        let decrypted = decrypt_env_values(&encrypted, &identity).unwrap();
+        assert!(
+            decrypted.contains("API_KEY = mysecret # keep-comment"),
+            "lhs spacing and inline comment should be preserved on decrypt"
+        );
+        assert!(
+            decrypted.contains("DB_HOST=localhost"),
+            "other assignment formatting should remain stable"
+        );
     }
 }

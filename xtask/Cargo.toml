@@ -6,7 +6,10 @@ publish = false
 
 [dependencies]
 age = "0.10"
+cargo_metadata = "0.23"
+markdown-frontmatter = { version = "0.4", default-features = false, features = ["yaml"] }
 regex = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
+toml = "0.8"
 walkdir = "2.5"

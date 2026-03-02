@@ -1,4 +1,5 @@
 use age::secrecy::ExposeSecret;
+use cargo_metadata::MetadataCommand;
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -131,7 +132,7 @@ fn run_verify() -> Result<(), String> {
     Task::Fmt.run()?;
     Task::Clippy.run()?;
     Task::InstructionsLint.run()?;
-    Task::Test.run()?;
+    run("cargo", &["test", "--workspace", "--all-features", "--quiet"])?;
     Task::Build.run()?;
     Ok(())
 }
@@ -140,7 +141,15 @@ fn run_release_check() -> Result<(), String> {
     let version = read_package_version(Path::new("Cargo.toml"))?;
     let expected_tag = format!("v{version}");
 
-    let current_tag = run_output("git", &["describe", "--tags", "--exact-match"])?;
+    let current_tag = match run_output("git", &["describe", "--tags", "--exact-match"]) {
+        Ok(tag) => tag,
+        Err(error) if error.contains("no tag exactly matches") => {
+            return Err(format!(
+                "Release check failed: HEAD is not on a tag. Create annotated tag '{expected_tag}' and rerun."
+            ));
+        }
+        Err(error) => return Err(error),
+    };
     if current_tag != expected_tag {
         return Err(format!(
             "Release check failed: current HEAD tag is '{current_tag}', expected '{expected_tag}' from Cargo.toml version {version}"
@@ -176,35 +185,15 @@ fn read_package_version(path: &Path) -> Result<String, String> {
     let content = fs::read_to_string(path)
         .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
 
-    let mut in_package = false;
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
+    let parsed: toml::Value = toml::from_str(&content)
+        .map_err(|error| format!("Failed to parse {} as TOML: {error}", path.display()))?;
 
-        if line.starts_with('[') && line.ends_with(']') {
-            in_package = line == "[package]";
-            continue;
-        }
-
-        if !in_package || line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        if let Some(rest) = line.strip_prefix("version") {
-            let Some(rest) = rest.strip_prefix('=') else {
-                continue;
-            };
-
-            let value = rest.trim();
-            if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                return Ok(value[1..value.len() - 1].to_string());
-            }
-        }
-    }
-
-    Err(format!(
-        "Failed to locate [package].version in {}",
-        path.display()
-    ))
+    parsed
+        .get("package")
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Failed to locate [package].version in {}", path.display()))
 }
 
 fn run_spec_init(spec_name: &str) -> Result<(), String> {
@@ -538,24 +527,18 @@ BANNER
 
 /// Find the gitvault debug binary by asking cargo for the target directory.
 fn find_gitvault_bin() -> Result<PathBuf, String> {
-    // cargo metadata gives us the actual target directory, respecting .cargo/config.toml overrides.
-    let output = Command::new("cargo")
-        .args(["metadata", "--format-version=1", "--no-deps"])
-        .output()
+    let metadata = MetadataCommand::new()
+        .no_deps()
+        .exec()
         .map_err(|e| format!("Failed to run cargo metadata: {e}"))?;
 
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let re = Regex::new(r#""target_directory"\s*:\s*"([^"]+)""#)
-            .map_err(|e| format!("Regex error: {e}"))?;
-        if let Some(caps) = re.captures(&stdout) {
-            // JSON strings may have escaped forward-slashes
-            let target_dir = caps[1].replace("\\/", "/");
-            let candidate = PathBuf::from(&target_dir).join("debug").join("gitvault");
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
+    let candidate = metadata
+        .target_directory
+        .into_std_path_buf()
+        .join("debug")
+        .join("gitvault");
+    if candidate.exists() {
+        return Ok(candidate);
     }
 
     // Fallback: check well-known locations
@@ -717,10 +700,8 @@ fn verify_specs_frontmatter(root_path: &Path) -> Result<usize, String> {
         if entry.file_type().is_file() && is_spec_markdown(path) {
             let markdown = fs::read_to_string(path)
                 .map_err(|error| format!("Failed reading {}: {error}", path.display()))?;
-            let (yaml, _) = extract_frontmatter(&markdown)
+            let (frontmatter, _) = markdown_frontmatter::parse::<SpecFrontmatter>(&markdown)
                 .map_err(|error| format!("{}: frontmatter parse error: {error}", path.display()))?;
-            let frontmatter: SpecFrontmatter = serde_yaml::from_str(yaml)
-                .map_err(|error| format!("{}: invalid YAML frontmatter: {error}", path.display()))?;
 
             let _ = &frontmatter.scope;
             let _ = &frontmatter.links;
@@ -737,21 +718,6 @@ fn is_spec_markdown(path: &Path) -> bool {
         && !path
             .components()
             .any(|component| component.as_os_str() == "_templates")
-}
-
-fn extract_frontmatter(markdown: &str) -> Result<(&str, &str), String> {
-    let content = markdown.strip_prefix('\u{feff}').unwrap_or(markdown);
-    if !content.starts_with("---\n") {
-        return Err("Missing frontmatter: file must start with '---'".to_string());
-    }
-
-    let end = content[4..]
-        .find("\n---\n")
-        .ok_or_else(|| "Unterminated frontmatter: missing closing '---'".to_string())?;
-    let yaml = &content[4..4 + end];
-    let body = &content[4 + end + "\n---\n".len()..];
-
-    Ok((yaml, body))
 }
 
 fn validate_frontmatter(frontmatter: &SpecFrontmatter, file: &Path) -> Result<(), String> {
@@ -839,7 +805,7 @@ fn validate_frontmatter(frontmatter: &SpecFrontmatter, file: &Path) -> Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::{lint_instructions, validate_spec_name, Task};
+    use super::{lint_instructions, read_package_version, validate_spec_name, Task};
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -971,5 +937,20 @@ mod tests {
         let result = lint_instructions(&root);
         fs::remove_dir_all(&root).expect("temp directory should be removable");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_package_version_accepts_standard_toml_spacing() {
+        let root = unique_temp_dir("read-package-version");
+        let cargo_toml = root.join("Cargo.toml");
+        write_file(
+            &cargo_toml,
+            "[package]\nname = \"gitvault\"\nversion = \"0.2.0\"\nedition = \"2024\"\n",
+        );
+
+        let parsed = read_package_version(&cargo_toml);
+        fs::remove_dir_all(&root).expect("temp directory should be removable");
+
+        assert!(matches!(parsed, Ok(version) if version == "0.2.0"));
     }
 }

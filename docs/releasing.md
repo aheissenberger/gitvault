@@ -8,10 +8,11 @@ This runbook documents maintainer-owned release and CI/CD workflows.
 - [1) Bump crate version](#1-bump-crate-version)
 - [2) Run local verification](#2-run-local-verification)
 - [3) Create and push annotated tag](#3-create-and-push-annotated-tag)
+- [4) Run release gate check](#4-run-release-gate-check)
 - [Versioning and tags policy](#versioning-and-tags-policy)
-- [4) Confirm CI workflows](#4-confirm-ci-workflows)
+- [5) Confirm CI workflows](#5-confirm-ci-workflows)
 - [CI/CD overview](#cicd-overview)
-- [5) Validate published binary version output](#5-validate-published-binary-version-output)
+- [6) Validate published binary version output](#6-validate-published-binary-version-output)
 - [Troubleshooting](#troubleshooting)
 
 ## Preconditions
@@ -30,7 +31,23 @@ Example: `0.1.0` -> `0.1.1`.
 
 ```bash
 cargo verify
+```
+
+`cargo verify` must pass before tagging.
+
+## 3) Create and push annotated tag
+
+```bash
+git tag -a vX.Y.Z -m "vX.Y.Z"
+```
+
+Use the exact crate version for `X.Y.Z`.
+
+## 4) Run release gate check
+
+```bash
 cargo xtask release-check
+git push origin vX.Y.Z
 ```
 
 `cargo xtask release-check` enforces:
@@ -38,22 +55,13 @@ cargo xtask release-check
 - working tree is clean
 - tag is annotated (not lightweight)
 
-## 3) Create and push annotated tag
-
-```bash
-git tag -a vX.Y.Z -m "vX.Y.Z"
-git push origin vX.Y.Z
-```
-
-Use the exact crate version for `X.Y.Z`.
-
 ## Versioning and tags policy
 
 - `Cargo.toml` is the single source of truth for the CLI semantic version.
 - Git tags must use `v<version>` format (example: `v0.1.0`).
 - Tag builds must pass `cargo xtask release-check`.
 
-## 4) Confirm CI workflows
+## 5) Confirm CI workflows
 
 After tag push, verify these workflows:
 - [build.yml](../.github/workflows/build.yml) runs and passes release consistency checks.
@@ -130,7 +138,7 @@ For this repository:
 - `HOMEBREW_TAP_REPO=aheissenberger/homebrew-tools`
 - `HOMEBREW_TAP_FORMULA_PATH=Formula/gitvault.rb`
 
-## 5) Validate published binary version output
+## 6) Validate published binary version output
 
 Confirm released binary reports expected version and metadata:
 
@@ -146,6 +154,7 @@ Long output includes:
 
 ## Troubleshooting
 
+- `release-check` fails with `no tag exactly matches`: create the local annotated tag first (`git tag -a v<version> -m "v<version>"`).
 - `release-check` fails on tag mismatch: create the correct `v<version>` tag for current `Cargo.toml`.
 - `release-check` fails on lightweight tag: recreate as annotated (`git tag -a ...`).
 - `release-check` fails on dirty tree: commit or discard local changes before tagging.

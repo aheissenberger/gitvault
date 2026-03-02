@@ -1,7 +1,9 @@
 use crate::error::GitvaultError;
+use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 /// Directory for encrypted artifacts (REQ-7)
 pub const SECRETS_DIR: &str = "secrets";
@@ -56,12 +58,39 @@ pub fn read_recipients(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
         return Ok(vec![]);
     }
     let content = std::fs::read_to_string(&path)?;
-    Ok(content
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(String::from)
-        .collect())
+    let mut recipients = Vec::new();
+    for (line_no, line) in content.lines().enumerate() {
+        if let Some(recipient) = parse_recipient_line(line).map_err(|message| {
+            GitvaultError::Usage(format!(
+                "Invalid recipient entry in {}:{}: {message}",
+                RECIPIENTS_FILE,
+                line_no + 1
+            ))
+        })? {
+            recipients.push(recipient);
+        }
+    }
+    Ok(recipients)
+}
+
+fn parse_recipient_line(line: &str) -> Result<Option<String>, &'static str> {
+    static BLANK_OR_COMMENT_RE: OnceLock<Regex> = OnceLock::new();
+    static RECIPIENT_RE: OnceLock<Regex> = OnceLock::new();
+
+    let blank_or_comment = BLANK_OR_COMMENT_RE
+        .get_or_init(|| Regex::new(r"^\s*(?:#.*)?$").expect("blank/comment regex must compile"));
+    if blank_or_comment.is_match(line) {
+        return Ok(None);
+    }
+
+    let recipient_re = RECIPIENT_RE.get_or_init(|| {
+        Regex::new(r"^\s*(age1[0-9a-z]+)\s*(?:#.*)?$").expect("recipient regex must compile")
+    });
+    if let Some(captures) = recipient_re.captures(line) {
+        return Ok(Some(captures[1].to_string()));
+    }
+
+    Err("expected age recipient key")
 }
 
 /// Write recipients to .secrets/recipients atomically.
@@ -365,6 +394,41 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let recipients = read_recipients(dir.path()).unwrap();
         assert!(recipients.is_empty());
+    }
+
+    #[test]
+    fn test_read_recipients_supports_inline_comment() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(RECIPIENTS_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p # laptop\n",
+        )
+        .unwrap();
+
+        let recipients = read_recipients(dir.path()).unwrap();
+        assert_eq!(
+            recipients,
+            vec!["age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_read_recipients_rejects_invalid_line() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(RECIPIENTS_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not-a-recipient\n").unwrap();
+
+        let result = read_recipients(dir.path());
+        match result {
+            Err(GitvaultError::Usage(message)) => {
+                assert!(message.contains("Invalid recipient entry"));
+                assert!(message.contains(".secrets/recipients:1"));
+            }
+            other => panic!("expected usage error, got: {other:?}"),
+        }
     }
 
     #[test]

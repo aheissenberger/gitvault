@@ -13,8 +13,10 @@ mod structured;
 use clap::Parser;
 use cli::{Cli, Commands, KeyringAction, RecipientAction};
 use error::GitvaultError;
+use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::OnceLock;
 
 fn main() {
     let cli = Cli::parse();
@@ -120,6 +122,42 @@ fn output_success(message: &str, json: bool) {
     } else {
         println!("{message}");
     }
+}
+
+fn parse_env_pairs(content: &str) -> Result<Vec<(String, String)>, GitvaultError> {
+    dotenvy::from_read_iter(content.as_bytes())
+        .map(|pair| pair.map_err(|e| GitvaultError::Usage(format!("Invalid .env content: {e}"))))
+        .collect()
+}
+
+fn parse_env_key_from_line(line: &str) -> Option<String> {
+    let input = format!("{line}\n");
+    let mut iter = dotenvy::from_read_iter(input.as_bytes());
+    match iter.next() {
+        Some(Ok((key, _))) => Some(key),
+        _ => None,
+    }
+}
+
+fn rewrite_env_assignment_line(original_line: &str, new_value: &str) -> String {
+    let Some(eq_index) = original_line.find('=') else {
+        return original_line.to_string();
+    };
+
+    let prefix = &original_line[..=eq_index];
+    let rhs = &original_line[eq_index + 1..];
+    let ws_len: usize = rhs
+        .chars()
+        .take_while(|ch| ch.is_whitespace())
+        .map(char::len_utf8)
+        .sum();
+    let leading_ws = &rhs[..ws_len];
+    let suffix = rhs
+        .find(" #")
+        .filter(|idx| *idx >= ws_len)
+        .map(|idx| &rhs[idx..])
+        .unwrap_or("");
+    format!("{prefix}{leading_ws}{new_value}{suffix}")
 }
 
 /// Encrypt a file and write the .age output under secrets/
@@ -343,15 +381,7 @@ fn cmd_materialize(
                 match crypto::decrypt(&identity, &ciphertext) {
                     Ok(plaintext) => {
                         let text = String::from_utf8_lossy(&plaintext);
-                        for line in text.lines() {
-                            let line = line.trim();
-                            if line.is_empty() || line.starts_with('#') {
-                                continue;
-                            }
-                            if let Some((k, v)) = line.split_once('=') {
-                                secrets.push((k.trim().to_string(), v.trim().to_string()));
-                            }
-                        }
+                        secrets.extend(parse_env_pairs(&text)?);
                     }
                     // REQ-40: fail closed on any decryption error
                     Err(e) => {
@@ -461,15 +491,7 @@ fn cmd_run(
                 match crypto::decrypt(&identity, &ciphertext) {
                     Ok(plaintext) => {
                         let text = String::from_utf8_lossy(&plaintext);
-                        for line in text.lines() {
-                            let line = line.trim();
-                            if line.is_empty() || line.starts_with('#') {
-                                continue;
-                            }
-                            if let Some((k, v)) = line.split_once('=') {
-                                secrets.push((k.trim().to_string(), v.trim().to_string()));
-                            }
-                        }
+                        secrets.extend(parse_env_pairs(&text)?);
                     }
                     // REQ-40: fail closed on any decryption error
                     Err(e) => {
@@ -510,27 +532,19 @@ fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
 
 /// Run as git merge driver for .env files (REQ-34)
 fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), GitvaultError> {
-    fn parse_env(content: &str) -> std::collections::HashMap<String, String> {
-        let mut map = std::collections::HashMap::new();
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((k, v)) = line.split_once('=') {
-                map.insert(k.trim().to_string(), v.trim().to_string());
-            }
-        }
-        map
+    fn parse_env(
+        content: &str,
+    ) -> Result<std::collections::HashMap<String, String>, GitvaultError> {
+        Ok(parse_env_pairs(content)?.into_iter().collect())
     }
 
     let base_content = std::fs::read_to_string(&base)?;
     let ours_content = std::fs::read_to_string(&ours)?;
     let theirs_content = std::fs::read_to_string(&theirs)?;
 
-    let base_map = parse_env(&base_content);
-    let ours_map = parse_env(&ours_content);
-    let theirs_map = parse_env(&theirs_content);
+    let base_map = parse_env(&base_content)?;
+    let ours_map = parse_env(&ours_content)?;
+    let theirs_map = parse_env(&theirs_content)?;
 
     // Collect all keys
     let mut all_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -588,17 +602,20 @@ fn cmd_merge_driver(base: String, ours: String, theirs: String) -> Result<(), Gi
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             output_lines.push(line.to_string());
-        } else if let Some((k, _)) = trimmed.split_once('=') {
-            let k = k.trim().to_string();
+        } else if let Some(k) = parse_env_key_from_line(line) {
             if let Some(Some(val)) = merged_map.get(&k) {
                 if val.starts_with("<<<<<<") {
                     output_lines.push(val.clone());
+                } else if ours_map.get(&k).map(String::as_str) == Some(val.as_str()) {
+                    output_lines.push(line.to_string());
                 } else {
-                    output_lines.push(format!("{k}={val}"));
+                    output_lines.push(rewrite_env_assignment_line(line, val));
                 }
                 // If None → key was deleted, skip it
             }
             processed_keys.insert(k);
+        } else {
+            output_lines.push(line.to_string());
         }
     }
 
@@ -839,11 +856,15 @@ fn load_identity_source(source: &str, source_name: &str) -> Result<String, Gitva
 }
 
 fn extract_identity_key(content: &str) -> Option<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("AGE-SECRET-KEY-"))
-        .map(|line| line.to_string())
+    static IDENTITY_LINE_RE: OnceLock<Regex> = OnceLock::new();
+    let identity_line_re = IDENTITY_LINE_RE.get_or_init(|| {
+        Regex::new(r"(?m)^\s*(AGE-SECRET-KEY-[A-Z0-9]+)\s*(?:#.*)?$")
+            .expect("identity regex must compile")
+    });
+
+    identity_line_re
+        .captures(content)
+        .map(|captures| captures[1].to_string())
 }
 
 #[cfg(test)]
@@ -1020,6 +1041,25 @@ mod tests {
     }
 
     #[test]
+    fn test_load_identity_source_accepts_inline_comment_after_key() {
+        let identity = x25519::Identity::generate();
+        let identity_secret = identity.to_string();
+        let identity_file = NamedTempFile::new().expect("temp file should be created");
+
+        std::fs::write(
+            identity_file.path(),
+            format!("{} # local-dev\n", identity_secret.expose_secret()),
+        )
+        .expect("identity should be written to temp file");
+
+        let loaded =
+            load_identity_source(&identity_file.path().to_string_lossy(), "GITVAULT_IDENTITY")
+                .expect("identity file with inline comment should parse");
+
+        assert_eq!(loaded.as_str(), identity_secret.expose_secret().as_str());
+    }
+
+    #[test]
     fn test_merge_driver_clean_merge() {
         let dir = TempDir::new().unwrap();
         let base = dir.path().join("base.env");
@@ -1050,6 +1090,57 @@ mod tests {
 
         assert_eq!(kv.get("A"), Some(&"2"), "A should be taken from theirs");
         assert_eq!(kv.get("B"), Some(&"3"), "B should be kept from ours");
+    }
+
+    #[test]
+    fn test_merge_driver_preserves_unchanged_line_formatting() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().join("base.env");
+        let ours = dir.path().join("ours.env");
+        let theirs = dir.path().join("theirs.env");
+
+        let line = "A = 1 # keep-comment";
+        std::fs::write(&base, format!("{line}\n")).unwrap();
+        std::fs::write(&ours, format!("{line}\n")).unwrap();
+        std::fs::write(&theirs, format!("{line}\n")).unwrap();
+
+        cmd_merge_driver(
+            base.to_string_lossy().to_string(),
+            ours.to_string_lossy().to_string(),
+            theirs.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&ours).unwrap();
+        assert!(
+            result.contains(line),
+            "unchanged assignment line should be preserved byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn test_merge_driver_preserves_prefix_and_inline_comment_on_change() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().join("base.env");
+        let ours = dir.path().join("ours.env");
+        let theirs = dir.path().join("theirs.env");
+
+        std::fs::write(&base, "A = 1 # keep-comment\n").unwrap();
+        std::fs::write(&ours, "A = 1 # keep-comment\n").unwrap();
+        std::fs::write(&theirs, "A = 2\n").unwrap();
+
+        cmd_merge_driver(
+            base.to_string_lossy().to_string(),
+            ours.to_string_lossy().to_string(),
+            theirs.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&ours).unwrap();
+        assert!(
+            result.contains("A = 2 # keep-comment"),
+            "changed assignment should keep original lhs spacing and inline comment"
+        );
     }
 
     #[test]
