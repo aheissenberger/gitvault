@@ -151,6 +151,8 @@ pub enum Commands {
         #[arg(short, long)]
         identity: Option<String>,
     },
+    /// Revoke the production allow token immediately [REQ-14].
+    RevokeProd,
 }
 
 #[derive(Subcommand)]

@@ -132,7 +132,6 @@ fn enforce_restricted_token_permissions(path: &Path) -> Result<(), GitvaultError
     permissions::enforce_owner_rw(path, "production token")
 }
 
-#[allow(dead_code)]
 /// Revoke the allow token by removing the token file.
 pub fn revoke_prod(repo_root: &Path) -> Result<(), GitvaultError> {
     let token_path = repo_root.join(TOKEN_PATH);

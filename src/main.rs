@@ -58,7 +58,6 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
                 fields,
                 value_only,
                 cli.json,
-                cli.no_prompt,
             )?;
             Ok(CommandOutcome::Success)
         }
@@ -134,6 +133,10 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cmd_check(env, identity, cli.json)?;
             Ok(CommandOutcome::Success)
         }
+        Commands::RevokeProd => {
+            cmd_revoke_prod(cli.json)?;
+            Ok(CommandOutcome::Success)
+        }
     }
 }
 
@@ -184,7 +187,6 @@ fn cmd_encrypt(
     fields: Option<String>,
     value_only: bool,
     json: bool,
-    _no_prompt: bool,
 ) -> Result<(), GitvaultError> {
     let repo_root = find_repo_root()?;
     let input_path = PathBuf::from(&file);
@@ -639,6 +641,14 @@ fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
         &format!("Production access allowed for {ttl}s (expires at Unix time {expiry})"),
         json,
     );
+    Ok(())
+}
+
+/// Immediately revoke the production allow token (REQ-14)
+fn cmd_revoke_prod(json: bool) -> Result<(), GitvaultError> {
+    let repo_root = find_repo_root()?;
+    barrier::revoke_prod(&repo_root)?;
+    output_success("Production allow token revoked.", json);
     Ok(())
 }
 
@@ -1435,7 +1445,6 @@ mod tests {
             None,
             false,
             true,
-            true,
         )
         .expect_err("encrypting .age input should fail");
 
@@ -1459,7 +1468,6 @@ mod tests {
                 env_file.to_string_lossy().to_string(),
                 vec![recipient],
                 None,
-                true,
                 true,
                 true,
             )
@@ -1488,7 +1496,6 @@ mod tests {
                 vec![recipient.clone()],
                 Some("secret".to_string()),
                 false,
-                true,
                 true,
             )
             .expect("field encryption should succeed");
