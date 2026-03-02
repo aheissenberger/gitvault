@@ -532,10 +532,10 @@ EOF
 
           {
             printf 'class %s < Formula\n' "$class_name"
-            printf '  desc "A secure, distributed vault for managing secrets and sensitive data with Git"\n'
+            printf '  desc "Secure, Git-native vault for managing age-encrypted secrets"\n'
             printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
+            printf '  license "MIT"\n'
             printf '  version "%s"\n' "$VERSION"
-            printf '  depends_on :macos\n'
             printf '\n'
             printf '  on_macos do\n'
             printf '    on_arm do\n'
@@ -558,7 +558,7 @@ EOF
             printf '  end\n'
             printf '\n'
             printf '  test do\n'
-            printf '    system "#{bin}/gitvault", "--help"\n'
+            printf '    system bin/"gitvault", "--help"\n'
             printf '  end\n'
             printf 'end\n'
           } > "$file"
