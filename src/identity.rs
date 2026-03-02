@@ -169,8 +169,13 @@ mod tests {
 
     #[test]
     fn load_identity_from_source_keyring_without_setup_errors() {
+        // Install a fresh mock backend with an empty store so the test is
+        // deterministic: no previously stored key can leak from another test
+        // that already wrote to the shared mock store (e.g. keyring_store tests
+        // install the mock globally, which persists across test threads).
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
         let source = fhsm::IdentitySource::Keyring;
-        // Without the OS keyring configured this call returns an error.
+        // Fresh mock store has no entry for gitvault/age-identity → must error.
         assert!(load_identity_from_source(&source).is_err());
     }
 
