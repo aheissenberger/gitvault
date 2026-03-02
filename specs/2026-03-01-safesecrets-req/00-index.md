@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-R000"
 title: "SafeSecrets REQ-by-REQ index"
-status: "done"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**"]
 acceptance:
   - id: "AC1"
-    text: "Contains exactly one individual spec per REQ-1..REQ-60."
+    text: "Contains exactly one individual spec per baseline REQ-1..REQ-60 and one individual spec per approved extension REQ."
 verification:
   commands: ["cargo xtask spec-verify"]
 risk:
@@ -79,3 +79,8 @@ links: { issue: "", pr: "" }
 - `req-058.md` -> REQ-58
 - `req-059.md` -> REQ-59
 - `req-060.md` -> REQ-60
+
+## Extension Coverage
+- `req-061.md` -> REQ-61
+- `req-062.md` -> REQ-62
+- `req-063.md` -> REQ-63

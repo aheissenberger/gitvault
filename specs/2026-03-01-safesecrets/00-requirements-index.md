@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-000"
 title: "SafeSecrets requirements index and traceability"
-status: "done"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:
@@ -10,7 +10,7 @@ scope:
   avoid: ["src/**"]
 acceptance:
   - id: "AC1"
-    text: "Each REQ identifier from REQ-1 to REQ-60 maps to exactly one individual spec file."
+    text: "Each baseline REQ identifier from REQ-1 to REQ-60 maps to exactly one individual spec file; approved extension REQs map to dedicated extension spec files."
   - id: "AC2"
     text: "All individual spec files contain valid frontmatter accepted by spec verifier."
 verification:
@@ -56,6 +56,16 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-54..REQ-55, REQ-58 -> `16-release-integrity.md`
 - REQ-56 -> `18-requirement-governance.md`
 
+## Extension Requirement Coverage Map
+- REQ-61 -> `19-ssh-identity-requirements.md`
+- REQ-62 -> `20-optional-keyring-passphrase-fetch.md`
+- REQ-63 -> `21-optional-ssh-agent-support.md`
+
+## Plan Specs (Additive)
+- `19-ssh-identity-requirements.md` -> Plan: SSH identity requirements
+- `20-optional-keyring-passphrase-fetch.md` -> Plan: Optional keyring passphrase fetch
+- `21-optional-ssh-agent-support.md` -> Plan: Optional SSH-agent support
+
 ## Acceptance Criteria
 - AC1: Coverage map exists and is complete.
 - AC2: Files validate with spec verifier.
@@ -67,4 +77,4 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 This index is the canonical source for requirement-to-spec traceability.
 
 ## Current Verification Status
-cargo xtask spec-verify passes (81 files). Coverage map is complete for REQ-1..REQ-60.
+cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-63.
