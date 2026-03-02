@@ -567,7 +567,6 @@ name = "gitvault"
 version = "0.2.12"
 dependencies = [
  "age",
- "anyhow",
  "base64 0.22.1",
  "clap",
  "dotenvy",
