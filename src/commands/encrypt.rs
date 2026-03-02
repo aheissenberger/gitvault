@@ -14,7 +14,7 @@ pub(crate) fn cmd_encrypt(
     value_only: bool,
     json: bool,
 ) -> Result<(), GitvaultError> {
-    let repo_root = crate::find_repo_root()?;
+    let repo_root = crate::repo::find_repo_root()?;
     let input_path = PathBuf::from(&file);
 
     // REQ-33: each source file maps to exactly one .age artifact
@@ -33,7 +33,7 @@ pub(crate) fn cmd_encrypt(
         let identity = crypto::parse_identity(&identity_str)?;
         structured::encrypt_fields(&input_path, &fields, &identity, &recipient_keys)
             .map_err(|e| GitvaultError::Encryption(e.to_string()))?;
-        crate::output_success(
+        crate::output::output_success(
             &format!(
                 "Encrypted fields [{fields_str}] in {}",
                 input_path.display()
@@ -68,7 +68,7 @@ pub(crate) fn cmd_encrypt(
         std::fs::write(tmp.path(), encrypted)?;
         tmp.persist(&input_path)
             .map_err(|e| GitvaultError::Io(e.error))?;
-        crate::output_success(
+        crate::output::output_success(
             &format!("Encrypted .env values in {}", input_path.display()),
             json,
         );
@@ -107,7 +107,7 @@ pub(crate) fn cmd_encrypt(
     tmp.persist(&out_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
 
-    crate::output_success(&format!("Encrypted to {}", out_path.display()), json);
+    crate::output::output_success(&format!("Encrypted to {}", out_path.display()), json);
     Ok(())
 }
 

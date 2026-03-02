@@ -43,7 +43,7 @@ pub(crate) fn cmd_decrypt(
         let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
         structured::decrypt_fields(&input_path, &fields, &identity)
             .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
-        crate::output_success(
+        crate::output::output_success(
             &format!(
                 "Decrypted fields [{fields_str}] in {}",
                 input_path.display()
@@ -73,7 +73,7 @@ pub(crate) fn cmd_decrypt(
     };
 
     // REQ-42: prevent path traversal
-    let repo_root = crate::find_repo_root()?;
+    let repo_root = crate::repo::find_repo_root()?;
     repo::validate_write_path(&repo_root, &out_path)?;
 
     // REQ-51: streaming decryption
@@ -87,7 +87,7 @@ pub(crate) fn cmd_decrypt(
     tmp.persist(&out_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
 
-    crate::output_success(&format!("Decrypted to {}", out_path.display()), json);
+    crate::output::output_success(&format!("Decrypted to {}", out_path.display()), json);
     Ok(())
 }
 

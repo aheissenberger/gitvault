@@ -7,7 +7,7 @@ use crate::{crypto, repo};
 
 /// Manage persistent recipients (REQ-37)
 pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), GitvaultError> {
-    let repo_root = crate::find_repo_root()?;
+    let repo_root = crate::repo::find_repo_root()?;
     match action {
         RecipientAction::Add { pubkey } => {
             // Validate it's a valid age public key
@@ -20,7 +20,7 @@ pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), G
             }
             recipients.push(pubkey.clone());
             repo::write_recipients(&repo_root, &recipients)?;
-            crate::output_success(&format!("Added recipient: {pubkey}"), json);
+            crate::output::output_success(&format!("Added recipient: {pubkey}"), json);
         }
         RecipientAction::Remove { pubkey } => {
             let mut recipients = repo::read_recipients(&repo_root)?;
@@ -32,7 +32,7 @@ pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), G
                 )));
             }
             repo::write_recipients(&repo_root, &recipients)?;
-            crate::output_success(&format!("Removed recipient: {pubkey}"), json);
+            crate::output::output_success(&format!("Removed recipient: {pubkey}"), json);
         }
         RecipientAction::List => {
             let recipients = repo::read_recipients(&repo_root)?;
@@ -52,7 +52,7 @@ pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), G
 
 /// Re-encrypt all secrets with the current recipients list (REQ-38)
 pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<(), GitvaultError> {
-    let repo_root = crate::find_repo_root()?;
+    let repo_root = crate::repo::find_repo_root()?;
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
 
@@ -74,7 +74,7 @@ pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<()
         tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
         rotated += 1;
     }
-    crate::output_success(
+    crate::output::output_success(
         &format!(
             "Rotated {rotated} secret(s) to {} recipient(s)",
             recipient_keys.len()

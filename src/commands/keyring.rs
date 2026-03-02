@@ -33,7 +33,7 @@ where
             let key = load_identity(identity)?;
             keyring_set_fn(&key)
                 .map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
-            crate::output_success("Identity stored in OS keyring.", json);
+            crate::output::output_success("Identity stored in OS keyring.", json);
         }
         KeyringAction::Get => {
             let key = keyring_get_fn()
@@ -48,7 +48,7 @@ where
         }
         KeyringAction::Delete => {
             keyring_delete_fn().map_err(|e| GitvaultError::Other(format!("Keyring error: {e}")))?;
-            crate::output_success("Identity removed from OS keyring.", json);
+            crate::output::output_success("Identity removed from OS keyring.", json);
         }
     }
     Ok(())
