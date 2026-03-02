@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::GitvaultError;
 use base64::Engine;
 /// REQ-4: Field-level encryption for JSON, YAML, and TOML.
 /// REQ-5: Deterministic encryption — existing ciphertext is preserved when plaintext unchanged.
@@ -19,115 +19,115 @@ fn is_env_encrypted(value: &str) -> bool {
 }
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
-fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<String> {
+fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<String, GitvaultError> {
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
             let r: age::x25519::Recipient = k
                 .parse()
-                .map_err(|e| anyhow::anyhow!("Invalid recipient key {k}: {e}"))?;
+                .map_err(|e| GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}")))?;
             Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, GitvaultError>>()?;
 
     let encryptor = age::Encryptor::with_recipients(recipients)
-        .ok_or_else(|| anyhow::anyhow!("At least one recipient required"))?;
+        .ok_or_else(|| GitvaultError::Encryption("At least one recipient required".to_string()))?;
 
     let mut output = Vec::new();
     {
         let armor =
             age::armor::ArmoredWriter::wrap_output(&mut output, age::armor::Format::AsciiArmor)
-                .map_err(|e| anyhow::anyhow!("Armor writer: {e}"))?;
+                .map_err(|e| GitvaultError::Encryption(format!("Armor writer: {e}")))?;
         let mut writer = encryptor
             .wrap_output(armor)
-            .map_err(|e| anyhow::anyhow!("Encrypt wrap: {e}"))?;
+            .map_err(|e| GitvaultError::Encryption(format!("Encrypt wrap: {e}")))?;
         writer
             .write_all(plaintext)
-            .map_err(|e| anyhow::anyhow!("Encrypt write: {e}"))?;
+            .map_err(|e| GitvaultError::Encryption(format!("Encrypt write: {e}")))?;
         let armor = writer
             .finish()
-            .map_err(|e| anyhow::anyhow!("Encrypt finish: {e}"))?;
+            .map_err(|e| GitvaultError::Encryption(format!("Encrypt finish: {e}")))?;
         armor
             .finish()
-            .map_err(|e| anyhow::anyhow!("Armor finish: {e}"))?;
+            .map_err(|e| GitvaultError::Encryption(format!("Armor finish: {e}")))?;
     }
-    Ok(String::from_utf8(output)?)
+    Ok(String::from_utf8(output).map_err(|e| GitvaultError::Encryption(format!("UTF-8 error: {e}")))?)
 }
 
 /// Decrypt an age armor string using the given identity.
-fn decrypt_armor(armored: &str, identity: &dyn age::Identity) -> Result<Vec<u8>> {
+fn decrypt_armor(armored: &str, identity: &dyn age::Identity) -> Result<Vec<u8>, GitvaultError> {
     let armor = age::armor::ArmoredReader::new(armored.as_bytes());
     let decryptor =
-        age::Decryptor::new(armor).map_err(|e| anyhow::anyhow!("Decryptor create: {e}"))?;
+        age::Decryptor::new(armor).map_err(|e| GitvaultError::Decryption(format!("Decryptor create: {e}")))?;
     let mut reader = match decryptor {
         age::Decryptor::Recipients(d) => d
             .decrypt(std::iter::once(identity))
-            .map_err(|e| anyhow::anyhow!("Decrypt: {e}"))?,
+            .map_err(|e| GitvaultError::Decryption(format!("Decrypt: {e}")))?,
         age::Decryptor::Passphrase(_) => {
-            return Err(anyhow::anyhow!("Passphrase-encrypted files not supported"));
+            return Err(GitvaultError::Decryption("Passphrase-encrypted files not supported".to_string()));
         }
     };
     let mut plaintext = Vec::new();
     reader
         .read_to_end(&mut plaintext)
-        .map_err(|e| anyhow::anyhow!("Read decrypted: {e}"))?;
+        .map_err(|e| GitvaultError::Decryption(format!("Read decrypted: {e}")))?;
     Ok(plaintext)
 }
 
 /// Encrypt plaintext bytes using binary age (no armor), returning base64-encoded result.
-fn encrypt_binary_b64(plaintext: &[u8], recipient_keys: &[String]) -> Result<String> {
+fn encrypt_binary_b64(plaintext: &[u8], recipient_keys: &[String]) -> Result<String, GitvaultError> {
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
             let r: age::x25519::Recipient = k
                 .parse()
-                .map_err(|e| anyhow::anyhow!("Invalid recipient key {k}: {e}"))?;
+                .map_err(|e| GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}")))?;
             Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, GitvaultError>>()?;
 
     let encryptor = age::Encryptor::with_recipients(recipients)
-        .ok_or_else(|| anyhow::anyhow!("At least one recipient required"))?;
+        .ok_or_else(|| GitvaultError::Encryption("At least one recipient required".to_string()))?;
 
     let mut output = Vec::new();
     let mut writer = encryptor
         .wrap_output(&mut output)
-        .map_err(|e| anyhow::anyhow!("Encrypt wrap: {e}"))?;
+        .map_err(|e| GitvaultError::Encryption(format!("Encrypt wrap: {e}")))?;
     writer
         .write_all(plaintext)
-        .map_err(|e| anyhow::anyhow!("Encrypt write: {e}"))?;
+        .map_err(|e| GitvaultError::Encryption(format!("Encrypt write: {e}")))?;
     writer
         .finish()
-        .map_err(|e| anyhow::anyhow!("Encrypt finish: {e}"))?;
+        .map_err(|e| GitvaultError::Encryption(format!("Encrypt finish: {e}")))?;
 
     Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
 
-fn decrypt_binary_b64(encoded: &str, identity: &dyn age::Identity) -> Result<Vec<u8>> {
+fn decrypt_binary_b64(encoded: &str, identity: &dyn age::Identity) -> Result<Vec<u8>, GitvaultError> {
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .context("Invalid base64 payload")?;
+        .map_err(|e| GitvaultError::Decryption(format!("Invalid base64 payload: {e}")))?;
     let decryptor = age::Decryptor::new(ciphertext.as_slice())
-        .map_err(|e| anyhow::anyhow!("Decryptor create: {e}"))?;
+        .map_err(|e| GitvaultError::Decryption(format!("Decryptor create: {e}")))?;
     let mut reader = match decryptor {
         age::Decryptor::Recipients(d) => d
             .decrypt(std::iter::once(identity))
-            .map_err(|e| anyhow::anyhow!("Decrypt: {e}"))?,
+            .map_err(|e| GitvaultError::Decryption(format!("Decrypt: {e}")))?,
         age::Decryptor::Passphrase(_) => {
-            return Err(anyhow::anyhow!("Passphrase-encrypted not supported"));
+            return Err(GitvaultError::Decryption("Passphrase-encrypted not supported".to_string()));
         }
     };
     let mut plaintext = Vec::new();
     reader
         .read_to_end(&mut plaintext)
-        .map_err(|e| anyhow::anyhow!("Read decrypted: {e}"))?;
+        .map_err(|e| GitvaultError::Decryption(format!("Read decrypted: {e}")))?;
     Ok(plaintext)
 }
 
 /// Determine the new encrypted value for a field, applying REQ-5 determinism:
 /// if the current value is already age armor, keep it unchanged.
 /// Otherwise, encrypt the current plaintext value.
-fn determine_encrypted_value(current: &str, recipient_keys: &[String]) -> Result<String> {
+fn determine_encrypted_value(current: &str, recipient_keys: &[String]) -> Result<String, GitvaultError> {
     if is_age_armor(current) {
         return Ok(current.to_string());
     }
@@ -188,20 +188,20 @@ pub fn encrypt_fields(
     fields: &[&str],
     _identity: &dyn age::Identity,
     recipient_keys: &[String],
-) -> Result<()> {
+) -> Result<(), GitvaultError> {
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
     let content = std::fs::read_to_string(file_path)
-        .with_context(|| format!("Reading {}", file_path.display()))?;
+        .map_err(|e| GitvaultError::Encryption(format!("Reading {}: {e}", file_path.display())))?;
 
     let new_content = match ext.as_str() {
         "json" => encrypt_fields_json(&content, fields, recipient_keys)?,
         "yaml" | "yml" => encrypt_fields_yaml(&content, fields, recipient_keys)?,
         "toml" => encrypt_fields_toml(&content, fields, recipient_keys)?,
-        _ => return Err(anyhow::anyhow!("Unsupported file format: .{ext}")),
+        _ => return Err(GitvaultError::Other(format!("Unsupported file format: .{ext}"))),
     };
 
     atomic_write(file_path, new_content.as_bytes())
@@ -211,8 +211,9 @@ fn encrypt_fields_json(
     content: &str,
     fields: &[&str],
     recipient_keys: &[String],
-) -> Result<String> {
-    let mut value: serde_json::Value = serde_json::from_str(content)?;
+) -> Result<String, GitvaultError> {
+    let mut value: serde_json::Value = serde_json::from_str(content)
+        .map_err(|e| GitvaultError::Encryption(format!("JSON parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = json_field_mut(&mut value, &path) {
@@ -221,15 +222,17 @@ fn encrypt_fields_json(
             *v = serde_json::Value::String(encrypted);
         }
     }
-    Ok(serde_json::to_string_pretty(&value)? + "\n")
+    Ok(serde_json::to_string_pretty(&value)
+        .map_err(|e| GitvaultError::Encryption(format!("JSON serialize error: {e}")))? + "\n")
 }
 
 fn encrypt_fields_yaml(
     content: &str,
     fields: &[&str],
     recipient_keys: &[String],
-) -> Result<String> {
-    let mut value: serde_yaml::Value = serde_yaml::from_str(content)?;
+) -> Result<String, GitvaultError> {
+    let mut value: serde_yaml::Value = serde_yaml::from_str(content)
+        .map_err(|e| GitvaultError::Encryption(format!("YAML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = yaml_field_mut(&mut value, &path) {
@@ -238,15 +241,17 @@ fn encrypt_fields_yaml(
             *v = serde_yaml::Value::String(encrypted);
         }
     }
-    Ok(serde_yaml::to_string(&value)?)
+    Ok(serde_yaml::to_string(&value)
+        .map_err(|e| GitvaultError::Encryption(format!("YAML serialize error: {e}")))?)
 }
 
 fn encrypt_fields_toml(
     content: &str,
     fields: &[&str],
     recipient_keys: &[String],
-) -> Result<String> {
-    let mut value: toml::Value = content.parse::<toml::Value>()?;
+) -> Result<String, GitvaultError> {
+    let mut value: toml::Value = content.parse::<toml::Value>()
+        .map_err(|e| GitvaultError::Encryption(format!("TOML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = toml_field_mut(&mut value, &path) {
@@ -255,7 +260,8 @@ fn encrypt_fields_toml(
             *v = toml::Value::String(encrypted);
         }
     }
-    Ok(toml::to_string_pretty(&value)?)
+    Ok(toml::to_string_pretty(&value)
+        .map_err(|e| GitvaultError::Encryption(format!("TOML serialize error: {e}")))?)
 }
 
 /// REQ-4: Decrypt specified fields in a JSON, YAML, or TOML file.
@@ -263,20 +269,20 @@ pub fn decrypt_fields(
     file_path: &Path,
     fields: &[&str],
     identity: &dyn age::Identity,
-) -> Result<()> {
+) -> Result<(), GitvaultError> {
     let ext = file_path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
     let content = std::fs::read_to_string(file_path)
-        .with_context(|| format!("Reading {}", file_path.display()))?;
+        .map_err(|e| GitvaultError::Decryption(format!("Reading {}: {e}", file_path.display())))?;
 
     let new_content = match ext.as_str() {
         "json" => decrypt_fields_json(&content, fields, identity)?,
         "yaml" | "yml" => decrypt_fields_yaml(&content, fields, identity)?,
         "toml" => decrypt_fields_toml(&content, fields, identity)?,
-        _ => return Err(anyhow::anyhow!("Unsupported file format: .{ext}")),
+        _ => return Err(GitvaultError::Other(format!("Unsupported file format: .{ext}"))),
     };
 
     atomic_write(file_path, new_content.as_bytes())
@@ -286,8 +292,9 @@ fn decrypt_fields_json(
     content: &str,
     fields: &[&str],
     identity: &dyn age::Identity,
-) -> Result<String> {
-    let mut value: serde_json::Value = serde_json::from_str(content)?;
+) -> Result<String, GitvaultError> {
+    let mut value: serde_json::Value = serde_json::from_str(content)
+        .map_err(|e| GitvaultError::Decryption(format!("JSON parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = json_field_mut(&mut value, &path)
@@ -295,18 +302,20 @@ fn decrypt_fields_json(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = serde_json::Value::String(String::from_utf8(plain)?);
+            *v = serde_json::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
         }
     }
-    Ok(serde_json::to_string_pretty(&value)? + "\n")
+    Ok(serde_json::to_string_pretty(&value)
+        .map_err(|e| GitvaultError::Decryption(format!("JSON serialize error: {e}")))? + "\n")
 }
 
 fn decrypt_fields_yaml(
     content: &str,
     fields: &[&str],
     identity: &dyn age::Identity,
-) -> Result<String> {
-    let mut value: serde_yaml::Value = serde_yaml::from_str(content)?;
+) -> Result<String, GitvaultError> {
+    let mut value: serde_yaml::Value = serde_yaml::from_str(content)
+        .map_err(|e| GitvaultError::Decryption(format!("YAML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = yaml_field_mut(&mut value, &path)
@@ -314,18 +323,20 @@ fn decrypt_fields_yaml(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = serde_yaml::Value::String(String::from_utf8(plain)?);
+            *v = serde_yaml::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
         }
     }
-    Ok(serde_yaml::to_string(&value)?)
+    Ok(serde_yaml::to_string(&value)
+        .map_err(|e| GitvaultError::Decryption(format!("YAML serialize error: {e}")))?)
 }
 
 fn decrypt_fields_toml(
     content: &str,
     fields: &[&str],
     identity: &dyn age::Identity,
-) -> Result<String> {
-    let mut value: toml::Value = content.parse::<toml::Value>()?;
+) -> Result<String, GitvaultError> {
+    let mut value: toml::Value = content.parse::<toml::Value>()
+        .map_err(|e| GitvaultError::Decryption(format!("TOML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
         if let Some(v) = toml_field_mut(&mut value, &path)
@@ -333,10 +344,11 @@ fn decrypt_fields_toml(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = toml::Value::String(String::from_utf8(plain)?);
+            *v = toml::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
         }
     }
-    Ok(toml::to_string_pretty(&value)?)
+    Ok(toml::to_string_pretty(&value)
+        .map_err(|e| GitvaultError::Decryption(format!("TOML serialize error: {e}")))?)
 }
 
 /// REQ-6: Encrypt each VALUE in a .env file individually (KEY=enc:base64).
@@ -345,7 +357,7 @@ pub fn encrypt_env_values(
     content: &str,
     identity: &dyn age::Identity,
     recipient_keys: &[String],
-) -> Result<String> {
+) -> Result<String, GitvaultError> {
     let mut lines_out = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
@@ -389,7 +401,7 @@ pub fn encrypt_env_values(
 
 #[allow(dead_code)]
 /// REQ-6: Decrypt each VALUE in a .env file that was encrypted with encrypt_env_values.
-pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result<String> {
+pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result<String, GitvaultError> {
     let mut lines_out = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
@@ -401,7 +413,7 @@ pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result
             if is_env_encrypted(&value) {
                 let encoded = &value[ENV_ENC_PREFIX.len()..];
                 let plain = decrypt_binary_b64(encoded, identity)?;
-                let plain_text = String::from_utf8(plain)?;
+                let plain_text = String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?;
                 lines_out.push(rewrite_env_assignment_line(line, &plain_text));
             } else {
                 lines_out.push(line.to_string());
@@ -418,11 +430,11 @@ pub fn decrypt_env_values(content: &str, identity: &dyn age::Identity) -> Result
 }
 
 /// Write bytes to file atomically using a temp file + rename.
-fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
+fn atomic_write(path: &Path, data: &[u8]) -> Result<(), GitvaultError> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(data)?;
-    tmp.persist(path)?;
+    tmp.persist(path).map_err(|e| GitvaultError::Io(e.error))?;
     Ok(())
 }
 
