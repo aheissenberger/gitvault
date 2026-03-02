@@ -33,7 +33,7 @@ Materialize `.env` safely and deterministically without enabling accidental sour
 - Fileless runtime execution behavior.
 
 ## Constraints
-- POSIX mode `0600` and Windows restricted ACL semantics are required.
+- POSIX mode `0600` is enforced; Windows restricted ACL is applied via `icacls` with platform-specific verification limits.
 
 ## Requirement Coverage
 - REQ-16, REQ-17, REQ-18, REQ-19, REQ-20.
@@ -43,7 +43,7 @@ Materialize `.env` safely and deterministically without enabling accidental sour
 - AC2: Staging `.env` is prevented by repository hardening controls.
 
 ## Test Plan
-- Permission and atomic-write tests across OS-specific CI runners.
+- Permission and atomic-write tests in current CI (Unix validated), with Windows ACL behavior implemented and tracked for expanded CI validation.
 
 ## Notes
 Quoting/canonicalization logic must be fully deterministic.
