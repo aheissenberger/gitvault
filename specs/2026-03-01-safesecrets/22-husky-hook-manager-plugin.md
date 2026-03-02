@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-022"
 title: "Plan: Husky hook manager plugin integration"
-status: "done"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:
@@ -43,7 +43,7 @@ Define Husky integration as an optional external command plugin that can be inst
 
 ## Common Adapter Contract (Normative)
 - Adapter integration is additive to REQ-31 hardening protections and does not remove existing safety guarantees.
-- Manager mode selection is deterministic: manager configuration + discoverable adapter enables manager integration path.
+- Manager mode selection is deterministic: effective gitvault config (`.gitvault/config.toml` with optional user-global fallback per REQ-68) + discoverable adapter enables manager integration path.
 - In CI/`--no-prompt`, missing adapter/runtime prerequisites fail deterministically with actionable diagnostics.
 - Failure signaling must remain machine-consumable and aligned with existing automation contracts (REQ-47/REQ-48), without requiring new exit-code semantics in this requirement.
 - Repeated harden/status/integration checks are idempotent and must not duplicate managed hook content.
@@ -62,9 +62,9 @@ Define Husky integration as an optional external command plugin that can be inst
 - Regression tests confirming plaintext and drift protections remain enforced.
 
 ## Implementation-facing Acceptance Scenarios
-- Scenario H1 (discovery success): Given Husky is configured and adapter binary is on PATH, when `harden` or manager integration check runs, then adapter is discovered and selected without prompts.
+- Scenario H1 (selection success): Given effective gitvault config selects `husky` and adapter binary is on PATH, when `harden` or manager integration check runs, then adapter is discovered and selected without prompts.
 - Scenario H2 (install-later flow): Given core is installed without Husky adapter, when adapter is installed later and command is re-run, then integration activates without core rebuild.
-- Scenario H3 (missing adapter in CI): Given Husky config exists and adapter is missing, when run with `--no-prompt` or CI env, then command fails with stable exit code and actionable install message.
+- Scenario H3 (missing adapter in CI): Given effective gitvault config selects `husky` and adapter is missing, when run with `--no-prompt` or CI env, then command fails with stable exit code and actionable install message.
 - Scenario H4 (pre-commit parity): Given staged plaintext secret material, when Husky pre-commit path invokes gitvault checks, then commit is blocked with deterministic diagnostics.
 - Scenario H5 (pre-push parity): Given repository drift relative to protected expectations, when Husky pre-push path invokes gitvault checks, then push is blocked deterministically.
 - Scenario H6 (idempotent repeats): Given integration already configured, when hardening/check commands run repeatedly, then outcomes and managed markers remain stable and non-duplicative.

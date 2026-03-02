@@ -64,6 +64,7 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - REQ-65 -> `23-pre-commit-hook-manager-plugin.md`
 - REQ-66 -> `24-lefthook-hook-manager-plugin.md`
 - REQ-67 -> `25-hook-adapter-config.md`
+- REQ-68 -> `26-global-config-layer.md`
 
 ## Plan Specs (Additive)
 - `19-ssh-identity-requirements.md` -> Plan: SSH identity requirements
@@ -73,6 +74,7 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - `23-pre-commit-hook-manager-plugin.md` -> Plan: pre-commit hook manager plugin integration
 - `24-lefthook-hook-manager-plugin.md` -> Plan: lefthook hook manager plugin integration
 - `25-hook-adapter-config.md` -> Plan: .gitvault/config.toml canonical config and hook-adapter selection
+- `26-global-config-layer.md` -> Plan: optional user-global config fallback and precedence
 
 ## Acceptance Criteria
 - AC1: Coverage map exists and is complete.
@@ -85,4 +87,4 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 This index is the canonical source for requirement-to-spec traceability.
 
 ## Current Verification Status
-cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-66.
+cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-68.

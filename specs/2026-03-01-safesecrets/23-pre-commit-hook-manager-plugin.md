@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-023"
 title: "Plan: pre-commit hook manager plugin integration"
-status: "done"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:
@@ -43,7 +43,7 @@ Specify `pre-commit` integration through an optional external command adapter wi
 
 ## Common Adapter Contract (Normative)
 - Adapter integration is additive to REQ-31 hardening protections and does not remove existing safety guarantees.
-- Manager mode selection is deterministic: manager configuration + discoverable adapter enables manager integration path.
+- Manager mode selection is deterministic: effective gitvault config (`.gitvault/config.toml` with optional user-global fallback per REQ-68) + discoverable adapter enables manager integration path.
 - In CI/`--no-prompt`, missing adapter/runtime prerequisites fail deterministically with actionable diagnostics.
 - Failure signaling must remain machine-consumable and aligned with existing automation contracts (REQ-47/REQ-48), without requiring new exit-code semantics in this requirement.
 - Repeated harden/status/integration checks are idempotent and must not duplicate managed hook content.
@@ -62,7 +62,7 @@ Specify `pre-commit` integration through an optional external command adapter wi
 - Regression coverage for plaintext and drift enforcement paths.
 
 ## Implementation-facing Acceptance Scenarios
-- Scenario P1 (discovery success): Given `.pre-commit-config.yaml` integration entry and adapter on PATH, when integration check runs, then adapter is selected deterministically.
+- Scenario P1 (selection success): Given effective gitvault config selects `pre-commit` and adapter on PATH, when integration check runs, then adapter is selected deterministically.
 - Scenario P2 (missing python/runtime in CI): Given adapter or Python runtime prerequisites are unavailable, when run in CI/`--no-prompt`, then failure is machine-parseable and includes remediation steps.
 - Scenario P3 (install-later activation): Given core was shipped without adapter, when adapter is installed later, then next run enables manager integration without recompiling gitvault.
 - Scenario P4 (pre-commit parity): Given staged plaintext secret content, when `pre-commit` invokes gitvault check hook, then commit is blocked with stable diagnostics.
