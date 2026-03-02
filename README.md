@@ -397,5 +397,9 @@ Priority order for loading the age identity:
 
 - Development workflows (sandbox, verification commands, xtask, worktrees, local environment):
   [docs/development.md](docs/development.md)
+- AI agent onboarding and architecture hotspots:
+  [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md), [docs/ai/hotspots.md](docs/ai/hotspots.md)
+- Regenerate AI code index map:
+  `cargo xtask ai-index` → `docs/ai/code-index.json`
 - Maintainer release and CI/CD runbook (versioning/tags, release checklist, workflows, secrets):
   [docs/releasing.md](docs/releasing.md)

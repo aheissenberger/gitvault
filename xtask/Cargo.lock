@@ -1346,6 +1346,7 @@ dependencies = [
  "markdown-frontmatter",
  "regex",
  "serde",
+ "serde_json",
  "serde_yaml",
  "toml 0.8.23",
  "walkdir",

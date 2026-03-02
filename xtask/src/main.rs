@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 fn main() -> ExitCode {
@@ -36,6 +36,7 @@ enum Task {
     SpecInit { spec_name: String },
     SpecVerify,
     InstructionsLint,
+    AiIndex,
     WtList,
     WtCreate { branch: String, dir: String },
     WtRemove { dir: String },
@@ -66,6 +67,7 @@ impl Task {
             }
             "spec-verify" => Self::SpecVerify,
             "instructions-lint" => Self::InstructionsLint,
+            "ai-index" => Self::AiIndex,
             "wt-list" => Self::WtList,
             "wt-create" => {
                 let branch = args.get(1).cloned();
@@ -112,6 +114,7 @@ impl Task {
             Self::SpecInit { spec_name } => run_spec_init(&spec_name),
             Self::SpecVerify => run_spec_verify(),
             Self::InstructionsLint => run_instructions_lint(),
+            Self::AiIndex => run_ai_index(),
             Self::WtList => run_worktree_list(),
             Self::WtCreate { branch, dir } => run_worktree_create(&branch, &dir),
             Self::WtRemove { dir } => run_worktree_remove(&dir),
@@ -261,6 +264,138 @@ fn run_spec_verify() -> Result<(), String> {
 fn run_instructions_lint() -> Result<(), String> {
     lint_instructions(Path::new("."))?;
     println!("✅ Agent instructions lint passed");
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiCodeIndex {
+    package_name: String,
+    package_version: String,
+    files_scanned: usize,
+    entries: Vec<AiCodeIndexEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiCodeIndexEntry {
+    path: String,
+    public_functions: Vec<String>,
+    public_types: Vec<String>,
+    public_constants: Vec<String>,
+}
+
+fn run_ai_index() -> Result<(), String> {
+    let metadata = MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .map_err(|error| format!("Failed to read cargo metadata: {error}"))?;
+
+    let root = Path::new(metadata.workspace_root.as_str());
+    let src_root = root.join("src");
+    if !src_root.exists() {
+        return Err(format!("Missing source directory: {}", src_root.display()));
+    }
+
+    let package = metadata
+        .root_package()
+        .ok_or_else(|| "Unable to resolve root package from metadata".to_string())?;
+
+    let fn_regex = Regex::new(
+        r"^\s*pub(?:\([^\)]*\))?\s+(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)",
+    )
+    .map_err(|error| format!("Failed to compile public fn regex: {error}"))?;
+    let type_regex = Regex::new(
+        r"^\s*pub(?:\([^\)]*\))?\s+(?:struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    )
+    .map_err(|error| format!("Failed to compile public type regex: {error}"))?;
+    let const_regex = Regex::new(
+        r"^\s*pub(?:\([^\)]*\))?\s+(?:const|static)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    )
+    .map_err(|error| format!("Failed to compile public const regex: {error}"))?;
+
+    let mut entries: Vec<AiCodeIndexEntry> = Vec::new();
+
+    for entry in WalkDir::new(&src_root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+
+        let content = fs::read_to_string(path)
+            .map_err(|error| format!("Failed reading {}: {error}", path.display()))?;
+
+        let mut public_functions: Vec<String> = Vec::new();
+        let mut public_types: Vec<String> = Vec::new();
+        let mut public_constants: Vec<String> = Vec::new();
+
+        for line in content.lines() {
+            if let Some(captures) = fn_regex.captures(line)
+                && let Some(name) = captures.get(1)
+            {
+                public_functions.push(name.as_str().to_string());
+                continue;
+            }
+
+            if let Some(captures) = type_regex.captures(line)
+                && let Some(name) = captures.get(1)
+            {
+                public_types.push(name.as_str().to_string());
+                continue;
+            }
+
+            if let Some(captures) = const_regex.captures(line)
+                && let Some(name) = captures.get(1)
+            {
+                public_constants.push(name.as_str().to_string());
+            }
+        }
+
+        public_functions.sort();
+        public_functions.dedup();
+        public_types.sort();
+        public_types.dedup();
+        public_constants.sort();
+        public_constants.dedup();
+
+        let rel_path = path
+            .strip_prefix(root)
+            .map_err(|error| format!("Failed to relativize {}: {error}", path.display()))?
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        entries.push(AiCodeIndexEntry {
+            path: rel_path,
+            public_functions,
+            public_types,
+            public_constants,
+        });
+    }
+
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+
+    let index = AiCodeIndex {
+        package_name: package.name.to_string(),
+        package_version: package.version.to_string(),
+        files_scanned: entries.len(),
+        entries,
+    };
+
+    let out_dir = root.join("docs").join("ai");
+    fs::create_dir_all(&out_dir)
+        .map_err(|error| format!("Failed to create {}: {error}", out_dir.display()))?;
+    let out_path = out_dir.join("code-index.json");
+    let json = serde_json::to_string_pretty(&index)
+        .map_err(|error| format!("Failed to serialize AI code index: {error}"))?;
+    fs::write(&out_path, format!("{json}\n"))
+        .map_err(|error| format!("Failed writing {}: {error}", out_path.display()))?;
+
+    println!("✅ Wrote AI code index: {}", out_path.display());
+    println!("   files scanned: {}", index.files_scanned);
     Ok(())
 }
 
@@ -630,6 +765,7 @@ fn print_help() {
     println!("  spec-init <SPEC_FOLDER_NAME>");
     println!("  spec-verify");
     println!("  instructions-lint");
+    println!("  ai-index: generate docs/ai/code-index.json for agent reuse");
     println!("  wt-list");
     println!("  wt-create <branch> <dir>");
     println!("  wt-remove <dir>");
@@ -861,6 +997,12 @@ mod tests {
     fn from_args_parses_instructions_lint() {
         let parsed = Task::from_args(&args(&["instructions-lint"]));
         assert!(matches!(parsed, Task::InstructionsLint));
+    }
+
+    #[test]
+    fn from_args_parses_ai_index() {
+        let parsed = Task::from_args(&args(&["ai-index"]));
+        assert!(matches!(parsed, Task::AiIndex));
     }
 
     #[test]

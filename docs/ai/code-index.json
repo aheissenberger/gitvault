@@ -1,0 +1,414 @@
+{
+  "packageName": "gitvault",
+  "packageVersion": "0.2.21",
+  "filesScanned": 38,
+  "entries": [
+    {
+      "path": "src/aws_config.rs",
+      "publicFunctions": [
+        "build_client",
+        "from_cli",
+        "is_configured"
+      ],
+      "publicTypes": [
+        "AwsConfig"
+      ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/barrier.rs",
+      "publicFunctions": [
+        "allow_prod",
+        "check_prod_barrier",
+        "revoke_prod"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "DEFAULT_TOKEN_TTL_SECS"
+      ]
+    },
+    {
+      "path": "src/cli.rs",
+      "publicFunctions": [],
+      "publicTypes": [
+        "Cli",
+        "Commands",
+        "KeyringAction",
+        "RecipientAction",
+        "SsmAction"
+      ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/admin.rs",
+      "publicFunctions": [
+        "cmd_allow_prod",
+        "cmd_check",
+        "cmd_harden",
+        "cmd_merge_driver",
+        "cmd_revoke_prod",
+        "cmd_status"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/decrypt.rs",
+      "publicFunctions": [
+        "cmd_decrypt"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/effects.rs",
+      "publicFunctions": [
+        "execute_effects",
+        "execute_effects_with"
+      ],
+      "publicTypes": [
+        "CommandOutcome",
+        "DefaultRunner",
+        "EffectRunner"
+      ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/encrypt.rs",
+      "publicFunctions": [
+        "cmd_encrypt"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/keyring.rs",
+      "publicFunctions": [
+        "cmd_keyring",
+        "cmd_keyring_with_ops"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/materialize.rs",
+      "publicFunctions": [
+        "cmd_materialize"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/mod.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/recipients.rs",
+      "publicFunctions": [
+        "cmd_recipient",
+        "cmd_rotate"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/run_cmd.rs",
+      "publicFunctions": [
+        "cmd_run"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/test_helpers.rs",
+      "publicFunctions": [
+        "enter",
+        "global_test_lock",
+        "init_git_repo",
+        "setup_identity_file",
+        "with_env_var",
+        "with_identity_env",
+        "write_encrypted_env_file"
+      ],
+      "publicTypes": [
+        "CwdGuard"
+      ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/crypto.rs",
+      "publicFunctions": [
+        "decrypt",
+        "decrypt_stream",
+        "encrypt",
+        "encrypt_stream",
+        "parse_identity",
+        "parse_recipient"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "GITVAULT_FORMAT_VERSION"
+      ]
+    },
+    {
+      "path": "src/dispatch.rs",
+      "publicFunctions": [
+        "run"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/env.rs",
+      "publicFunctions": [
+        "resolve_env",
+        "validate_env_name"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/error.rs",
+      "publicFunctions": [
+        "exit_code"
+      ],
+      "publicTypes": [
+        "GitvaultError"
+      ],
+      "publicConstants": [
+        "EXIT_BARRIER",
+        "EXIT_DECRYPT_ERROR",
+        "EXIT_DRIFT",
+        "EXIT_ERROR",
+        "EXIT_PLAINTEXT_LEAK",
+        "EXIT_SUCCESS",
+        "EXIT_USAGE"
+      ]
+    },
+    {
+      "path": "src/fhsm.rs",
+      "publicFunctions": [
+        "resolve_identity_source",
+        "transition"
+      ],
+      "publicTypes": [
+        "Effect",
+        "Event",
+        "FhsmError",
+        "IdentitySource"
+      ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/identity.rs",
+      "publicFunctions": [
+        "extract_identity_key",
+        "load_identity",
+        "load_identity_from_source",
+        "load_identity_source",
+        "load_identity_with",
+        "resolve_recipient_keys"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/keyring_store.rs",
+      "publicFunctions": [
+        "keyring_delete",
+        "keyring_delete_with",
+        "keyring_get",
+        "keyring_get_with",
+        "keyring_set",
+        "keyring_set_with"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/lib.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/main.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/materialize.rs",
+      "publicFunctions": [
+        "ensure_gitattributes",
+        "ensure_gitignored",
+        "materialize_env_file"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "GITATTRIBUTES_MERGE_DRIVER_ENTRY",
+        "REQUIRED_GITIGNORE_ENTRIES"
+      ]
+    },
+    {
+      "path": "src/merge.rs",
+      "publicFunctions": [
+        "merge_env_content",
+        "parse_env_key_from_line",
+        "parse_env_pair_from_line",
+        "parse_env_pairs",
+        "rewrite_env_assignment_line"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/output.rs",
+      "publicFunctions": [
+        "ci_is_non_interactive",
+        "output_success",
+        "resolve_no_prompt"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/permissions.rs",
+      "publicFunctions": [
+        "enforce_owner_rw",
+        "enforce_windows_acl_with"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/repo/drift.rs",
+      "publicFunctions": [
+        "check_no_tracked_plaintext",
+        "has_secrets_drift"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/repo/hooks.rs",
+      "publicFunctions": [
+        "install_git_hooks"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/repo/mod.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/repo/paths.rs",
+      "publicFunctions": [
+        "decrypt_env_secrets",
+        "ensure_dirs",
+        "find_repo_root",
+        "find_repo_root_from",
+        "get_encrypted_path",
+        "get_env_encrypted_dir",
+        "get_env_encrypted_path",
+        "get_plain_path",
+        "list_all_encrypted_files",
+        "list_encrypted_files_for_env",
+        "validate_write_path"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "PLAIN_BASE_DIR",
+        "SECRETS_DIR"
+      ]
+    },
+    {
+      "path": "src/repo/recipients.rs",
+      "publicFunctions": [
+        "read_recipients",
+        "write_recipients"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "RECIPIENTS_FILE"
+      ]
+    },
+    {
+      "path": "src/run.rs",
+      "publicFunctions": [
+        "run_command"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/ssm.rs",
+      "publicFunctions": [
+        "cmd_ssm_diff",
+        "cmd_ssm_pull",
+        "cmd_ssm_push",
+        "cmd_ssm_set",
+        "refs_file_path",
+        "ssm_path"
+      ],
+      "publicTypes": [
+        "RealSsmBackend",
+        "SsmBackend"
+      ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/structured/armor.rs",
+      "publicFunctions": [
+        "decrypt_armor",
+        "decrypt_binary_b64",
+        "encrypt_armor",
+        "encrypt_binary_b64"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/structured/env_values.rs",
+      "publicFunctions": [
+        "decrypt_env_values",
+        "encrypt_env_values"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/structured/fields.rs",
+      "publicFunctions": [
+        "decrypt_fields",
+        "encrypt_fields"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/structured/helpers.rs",
+      "publicFunctions": [
+        "atomic_write",
+        "is_age_armor",
+        "is_env_encrypted"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "AGE_ARMOR_HEADER",
+        "ENV_ENC_PREFIX"
+      ]
+    },
+    {
+      "path": "src/structured/mod.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    }
+  ]
+}
