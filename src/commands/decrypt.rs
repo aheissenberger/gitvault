@@ -151,4 +151,48 @@ mod tests {
         let plain = std::fs::read_to_string(dir.path().join("app.env")).unwrap();
         assert!(plain.contains("X=42"));
     }
+
+    #[test]
+    fn test_cmd_decrypt_fields_wrong_identity_propagates_error() {
+        // Covers the `|e| GitvaultError::Decryption(e.to_string())` closure in the fields branch.
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let (wrong_identity_file, _) = setup_identity_file();
+
+        // Encrypt a field to `identity`.
+        let json_file = dir.path().join("config.json");
+        std::fs::write(&json_file, r#"{"secret":"abc","name":"demo"}"#).unwrap();
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                json_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                Some("secret".to_string()),
+                false,
+                false,
+            )
+            .expect("field encrypt should succeed");
+        });
+
+        // Try to decrypt with the wrong identity → map_err closure fires.
+        let err = with_identity_env(wrong_identity_file.path(), || {
+            cmd_decrypt(
+                json_file.to_string_lossy().to_string(),
+                None,
+                None,
+                Some("secret".to_string()),
+                false,
+                false,
+                true,
+            )
+        })
+        .expect_err("field decrypt with wrong identity should fail");
+
+        assert!(
+            matches!(err, GitvaultError::Decryption(_)),
+            "expected Decryption error, got: {err:?}"
+        );
+    }
 }

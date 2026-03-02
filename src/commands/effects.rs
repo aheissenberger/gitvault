@@ -409,4 +409,165 @@ mod tests {
             "DecryptFile without identity should return an error"
         );
     }
+
+    #[test]
+    fn default_runner_run_command_empty_command_returns_usage_error() {
+        // Covers the empty-command error path in DefaultRunner::run_command (lines 89-90).
+        let runner = DefaultRunner;
+        let result = runner.run_command(&[], &[], false, &[]);
+        assert!(
+            result.is_err(),
+            "empty command should produce a Usage error"
+        );
+        assert!(matches!(result.unwrap_err(), crate::error::GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn execute_effects_with_decrypt_file_to_stdout() {
+        // Covers DecryptFile with output=None → decrypt to stdout (lines 170-171).
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner::succeeds_with(key_str.clone(), vec![], 0);
+        let tmp = TempDir::new().unwrap();
+
+        // Create a real encrypted file.
+        let plaintext = b"STDOUT_DECRYPT=1\n";
+        let recipients: Vec<Box<dyn age::Recipient + Send>> =
+            vec![Box::new(age_key.to_public()) as Box<dyn age::Recipient + Send>];
+        let ciphertext = crate::crypto::encrypt(recipients, plaintext).unwrap();
+        let enc_path = tmp.path().join("stdout.env.age");
+        std::fs::write(&enc_path, &ciphertext).unwrap();
+
+        // output=None → DecryptFile decrypts to stdout.
+        let effects = vec![
+            fhsm::Effect::ResolveIdentity {
+                source: fhsm::IdentitySource::Inline(key_str),
+            },
+            fhsm::Effect::DecryptFile {
+                file: enc_path,
+                output: None,
+            },
+        ];
+        let outcome = execute_effects_with(effects, tmp.path(), &runner)
+            .expect("DecryptFile to stdout should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    #[test]
+    fn fake_runner_materialize_error_propagates() {
+        // Covers the Some(msg) error branch in FakeEffectRunner::materialize_secrets (line 267).
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner {
+            barrier_err: None,
+            identity_str: Ok(key_str.clone()),
+            decrypt_secrets: Ok(vec![]),
+            run_exit_code: Ok(0),
+            materialize_err: Some("forced materialize error".to_string()),
+        };
+        let tmp = TempDir::new().unwrap();
+        let event = fhsm::Event::Materialize {
+            env: None,
+            identity: Some(key_str),
+            prod: false,
+            no_prompt: true,
+        };
+        let effects = fhsm::transition(&event).unwrap();
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err(), "materialize error should propagate");
+    }
+
+    #[test]
+    fn execute_effects_decrypt_secrets_without_prior_identity_errors() {
+        // Covers the ok_or_else "identity not resolved" closure in DecryptSecrets arm.
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
+        let tmp = TempDir::new().unwrap();
+
+        // DecryptSecrets without prior ResolveIdentity → identity_opt is None.
+        let effects = vec![fhsm::Effect::DecryptSecrets {
+            env: "dev".to_string(),
+        }];
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err(), "DecryptSecrets without identity should fail");
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::GitvaultError::Usage(_)
+        ));
+    }
+
+    #[test]
+    fn execute_effects_materialize_without_prior_decrypt_errors() {
+        // Covers the ok_or_else "secrets not decrypted" closure in MaterializeSecrets arm.
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner::succeeds_with(key_str, vec![], 0);
+        let tmp = TempDir::new().unwrap();
+
+        // MaterializeSecrets without prior DecryptSecrets → secrets_opt is None.
+        let effects = vec![fhsm::Effect::MaterializeSecrets {
+            env: "dev".to_string(),
+        }];
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err(), "MaterializeSecrets without secrets should fail");
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::error::GitvaultError::Usage(_)
+        ));
+    }
+
+    #[test]
+    fn fake_runner_run_command_error_propagates() {
+        // Covers the map_err error closure in FakeEffectRunner::run_command.
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner {
+            barrier_err: None,
+            identity_str: Ok(key_str.clone()),
+            decrypt_secrets: Ok(vec![]),
+            run_exit_code: Err("forced run error".to_string()),
+            materialize_err: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        let event = fhsm::Event::Run {
+            env: Some("dev".to_string()),
+            identity: Some(key_str),
+            prod: false,
+            no_prompt: true,
+            clear_env: false,
+            pass_raw: None,
+            command: vec!["true".to_string()],
+        };
+        let effects = fhsm::transition(&event).unwrap();
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err(), "run command error should propagate");
+    }
+
+    #[test]
+    fn fake_runner_decrypt_secrets_error_propagates() {
+        // Covers the map_err error closure in FakeEffectRunner::decrypt_secrets.
+        let age_key = age::x25519::Identity::generate();
+        let key_str = age_key.to_string().expose_secret().to_string();
+        let runner = FakeEffectRunner {
+            barrier_err: None,
+            identity_str: Ok(key_str.clone()),
+            decrypt_secrets: Err("forced decrypt error".to_string()),
+            run_exit_code: Ok(0),
+            materialize_err: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        let event = fhsm::Event::Run {
+            env: Some("dev".to_string()),
+            identity: Some(key_str),
+            prod: false,
+            no_prompt: true,
+            clear_env: false,
+            pass_raw: None,
+            command: vec!["true".to_string()],
+        };
+        let effects = fhsm::transition(&event).unwrap();
+        let result = execute_effects_with(effects, tmp.path(), &runner);
+        assert!(result.is_err(), "decrypt secrets error should propagate");
+    }
 }
