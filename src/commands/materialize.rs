@@ -17,6 +17,7 @@ pub fn cmd_materialize(
     prod: bool,
     json: bool,
     no_prompt: bool,
+    selector: Option<String>,
 ) -> Result<CommandOutcome, GitvaultError> {
     let event = fhsm::Event::Materialize {
         env: env_override,
@@ -25,7 +26,7 @@ pub fn cmd_materialize(
         no_prompt,
     };
     let effects = fhsm::transition(&event)?;
-    execute_effects(effects)?;
+    execute_effects(effects, selector.as_deref())?;
     crate::output::output_success("Materialized secrets to .env", json);
     Ok(CommandOutcome::Success)
 }
@@ -54,9 +55,9 @@ mod tests {
         );
 
         with_identity_env(identity_file.path(), || {
-            cmd_materialize(None, None, false, false, true)
+            cmd_materialize(None, None, false, false, true, None)
                 .expect("materialize should decrypt env-scoped secrets");
-            crate::commands::recipients::cmd_rotate(None, true)
+            crate::commands::recipients::cmd_rotate(None, None, true)
                 .expect("rotate should process env-scoped files");
         });
 
@@ -84,6 +85,7 @@ mod tests {
             false,
             true,
             true,
+            None,
         )
         .expect_err("invalid ciphertext must fail closed");
 

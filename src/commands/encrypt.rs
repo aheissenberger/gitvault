@@ -254,6 +254,7 @@ mod tests {
                 value_only: false,
                 json: true,
                 no_prompt: true,
+                selector: None,
             })
             .expect("field decryption should succeed");
         });

@@ -26,6 +26,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_prompt: bool,
 
+    /// Explicit identity selector for SSH-agent key disambiguation (REQ-39/46)
+    #[arg(long, global = true, env = "GITVAULT_IDENTITY_SELECTOR")]
+    pub identity_selector: Option<String>,
+
     /// AWS profile name for SSM backend (REQ-49)
     #[arg(long, global = true, env = "AWS_PROFILE")]
     pub aws_profile: Option<String>,

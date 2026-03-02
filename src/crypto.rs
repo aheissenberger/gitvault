@@ -28,6 +28,61 @@ pub fn parse_identity(privkey: &str) -> Result<x25519::Identity, GitvaultError> 
         .map_err(|e| GitvaultError::Decryption(format!("Invalid identity key: {e}")))
 }
 
+/// A type-erased identity that supports both age X25519 and SSH private keys.
+///
+/// This enum lets callers use a single type for identity-bearing operations
+/// without needing trait objects. Use [`AnyIdentity::as_identity`] to obtain
+/// a `&dyn age::Identity` for decryption.
+pub enum AnyIdentity {
+    /// Age X25519 (native) private key.
+    X25519(x25519::Identity),
+    /// OpenSSH private key (ED25519 or ECDSA).
+    Ssh(age::ssh::Identity),
+}
+
+impl AnyIdentity {
+    /// Return a reference to the underlying [`age::Identity`] implementation.
+    pub fn as_identity(&self) -> &dyn age::Identity {
+        match self {
+            AnyIdentity::X25519(id) => id,
+            AnyIdentity::Ssh(id) => id,
+        }
+    }
+}
+
+/// Parse any supported age identity from a string.
+///
+/// Handles two formats:
+/// - `AGE-SECRET-KEY-…` → parsed as an age X25519 identity.
+/// - OpenSSH private key PEM (`-----BEGIN OPENSSH PRIVATE KEY-----`) → parsed via
+///   [`age::ssh::Identity::from_buffer`].
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if the string does not match a supported
+/// identity format or the key material is invalid.
+pub fn parse_identity_any(s: &str) -> Result<AnyIdentity, GitvaultError> {
+    let trimmed = s.trim();
+
+    if trimmed.starts_with("AGE-SECRET-KEY-") {
+        return Ok(AnyIdentity::X25519(parse_identity(trimmed)?));
+    }
+
+    // SSH private key (OpenSSH or PEM format)
+    if trimmed.starts_with("-----BEGIN") {
+        let identity = age::ssh::Identity::from_buffer(
+            std::io::BufReader::new(trimmed.as_bytes()),
+            None,
+        )
+        .map_err(|e| GitvaultError::Decryption(format!("Invalid SSH private key: {e}")))?;
+        return Ok(AnyIdentity::Ssh(identity));
+    }
+
+    Err(GitvaultError::Decryption(
+        "Unknown identity format: expected AGE-SECRET-KEY-… or OpenSSH private key".to_string(),
+    ))
+}
+
 /// Encrypt plaintext bytes using age format with multiple recipients.
 /// REQ-1: uses age file format. REQ-2: native Rust. REQ-3: multi-recipient.
 ///

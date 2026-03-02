@@ -6,7 +6,7 @@ use std::process::Command;
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
-use crate::identity::load_identity;
+use crate::identity::{load_identity_with_selector, probe_identity_sources};
 use crate::merge::merge_env_content;
 use crate::{barrier, crypto, env, repo};
 
@@ -202,6 +202,7 @@ pub fn cmd_merge_driver(
 pub fn cmd_check(
     env_override: Option<String>,
     identity_path: Option<String>,
+    selector: Option<String>,
     json: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
@@ -210,9 +211,13 @@ pub fn cmd_check(
     // Check 1: no tracked plaintext (REQ-10)
     repo::check_no_tracked_plaintext(&repo_root)?;
 
+    // Probe identity source states for reporting (REQ-50)
+    let source_states =
+        probe_identity_sources(identity_path.as_deref(), selector.as_deref());
+
     // Check 2: identity is loadable
-    let identity_str = load_identity(identity_path)?;
-    crypto::parse_identity(&identity_str)?;
+    let identity_str = load_identity_with_selector(identity_path, selector.as_deref())?;
+    crypto::parse_identity_any(&identity_str)?;
 
     // Check 3: recipients file is readable and all keys are valid
     let recipients = repo::read_recipients(&repo_root)?;
@@ -234,6 +239,7 @@ pub fn cmd_check(
                 "status": "ok",
                 "env": env,
                 "identity": "valid",
+                "identity_sources": source_states,
                 "recipients": recipients.len(),
                 "secrets": secrets_count,
                 "format_version": crypto::GITVAULT_FORMAT_VERSION,
@@ -245,6 +251,20 @@ pub fn cmd_check(
         println!("   Identity    : valid");
         println!("   Recipients  : {}", recipients.len());
         println!("   Secrets     : {secrets_count} encrypted file(s)");
+        println!("   Sources:");
+        for state in &source_states {
+            match state {
+                crate::identity::IdentitySourceState::Resolved { source } => {
+                    println!("     ✓ {source}: resolved");
+                }
+                crate::identity::IdentitySourceState::SourceNotAvailable { source, reason } => {
+                    println!("     - {source}: not available ({reason})");
+                }
+                crate::identity::IdentitySourceState::Ambiguous { source, count } => {
+                    println!("     ⚠ {source}: ambiguous ({count} keys)");
+                }
+            }
+        }
     }
     Ok(CommandOutcome::Success)
 }
@@ -373,7 +393,7 @@ mod tests {
 
         with_identity_env(identity_file.path(), || {
             cmd_allow_prod(30, false).expect("allow-prod should succeed");
-            cmd_check(None, None, true).expect("check should succeed with identity and clean repo");
+            cmd_check(None, None, None, true).expect("check should succeed with identity and clean repo");
         });
     }
 
@@ -412,7 +432,7 @@ mod tests {
         let (identity_file, _identity) = setup_identity_file();
 
         with_identity_env(identity_file.path(), || {
-            cmd_check(None, None, false).expect("plain check should succeed");
+            cmd_check(None, None, None, false).expect("plain check should succeed");
         });
     }
 
@@ -429,7 +449,7 @@ mod tests {
         std::fs::write(&recipients_path, "not-a-valid-recipient\n").unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err = cmd_check(None, None, true).unwrap_err();
+            let err = cmd_check(None, None, None, true).unwrap_err();
             assert!(matches!(err, GitvaultError::Usage(_)));
         });
     }
@@ -447,7 +467,7 @@ mod tests {
         repo::write_recipients(dir.path(), &[pubkey]).expect("write_recipients should succeed");
 
         with_identity_env(identity_file.path(), || {
-            cmd_check(None, None, false).expect("check with valid recipient should succeed");
+            cmd_check(None, None, None, false).expect("check with valid recipient should succeed");
         });
     }
 
@@ -621,7 +641,7 @@ mod tests {
         std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err = cmd_check(None, None, false).unwrap_err();
+            let err = cmd_check(None, None, None, false).unwrap_err();
             // The error should come from the parse_recipient call in the for loop.
             assert!(
                 matches!(err, GitvaultError::Usage(_)),

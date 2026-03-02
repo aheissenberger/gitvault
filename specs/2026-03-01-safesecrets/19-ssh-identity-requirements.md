@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-019"
 title: "Plan: SSH identity requirements"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-bg"]
 scope:

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
-use crate::identity::{load_identity, load_identity_from_source};
+use crate::identity::{load_identity_from_source_with_selector, load_identity_with_selector};
 use crate::{crypto, fhsm, repo, structured};
 
 /// Options for the [`cmd_decrypt`] command.
@@ -28,6 +28,8 @@ pub struct DecryptOptions {
     pub json: bool,
     /// Suppress interactive prompts.
     pub no_prompt: bool,
+    /// Identity selector to narrow the identity source.
+    pub selector: Option<String>,
 }
 
 /// Decrypt a .age file and write plaintext
@@ -49,15 +51,19 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         .iter()
         .find_map(|e| {
             if let fhsm::Effect::ResolveIdentity { source } = e {
-                Some(load_identity_from_source(source))
+                Some(load_identity_from_source_with_selector(
+                    source,
+                    opts.selector.as_deref(),
+                ))
             } else {
                 None
             }
         })
-        .unwrap_or_else(|| load_identity(None))?;
+        .unwrap_or_else(|| load_identity_with_selector(None, opts.selector.as_deref()))?;
 
     let input_path = PathBuf::from(&opts.file);
-    let identity = crypto::parse_identity(&identity_str)?;
+    let any_identity = crypto::parse_identity_any(&identity_str)?;
+    let identity = any_identity.as_identity();
     let repo_root = crate::repo::find_repo_root()?;
 
     // REQ-6: value-only mode: decrypt each VALUE in a .env file individually
@@ -65,7 +71,7 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         use crate::structured::decrypt_env_values;
         use std::io::Write;
         let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
-        let decrypted = decrypt_env_values(&content, &identity)?;
+        let decrypted = decrypt_env_values(&content, identity)?;
         if opts.reveal {
             print!("{decrypted}");
             return Ok(CommandOutcome::Success);
@@ -99,7 +105,7 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
         // REQ-42: prevent path traversal for in-place field writes
         repo::validate_write_path(&repo_root, &input_path)?;
-        structured::decrypt_fields(&input_path, &fields, &identity)
+        structured::decrypt_fields(&input_path, &fields, identity)
             .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
         crate::output::output_success(
             &format!(
@@ -115,7 +121,7 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
     if opts.reveal {
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut stdout = std::io::BufWriter::new(std::io::stdout());
-        crypto::decrypt_stream(&identity, in_file, &mut stdout)?;
+        crypto::decrypt_stream(identity, in_file, &mut stdout)?;
         return Ok(CommandOutcome::Success);
     }
 
@@ -139,7 +145,7 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
     {
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut out_file = std::io::BufWriter::new(tmp.as_file());
-        crypto::decrypt_stream(&identity, in_file, &mut out_file)?;
+        crypto::decrypt_stream(identity, in_file, &mut out_file)?;
     }
     tmp.persist(&out_path)
         .map_err(|e| GitvaultError::Io(e.error))?;
@@ -244,6 +250,7 @@ mod tests {
             value_only: false,
             json: true,
             no_prompt: true,
+                    selector: None,
         })
         .expect("reveal mode should decrypt to stdout without error");
     }
@@ -271,6 +278,7 @@ mod tests {
             value_only: false,
             json: true,
             no_prompt: true,
+                    selector: None,
         })
         .expect("default output decrypt should succeed");
 
@@ -314,6 +322,7 @@ mod tests {
                 value_only: false,
                 json: false,
                 no_prompt: true,
+                        selector: None,
             })
         })
         .expect_err("field decrypt with wrong identity should fail");
@@ -370,6 +379,7 @@ mod tests {
             value_only: true,
             json: false,
             no_prompt: true,
+                    selector: None,
         })
         .expect("value-only decrypt should succeed");
 
@@ -416,6 +426,7 @@ mod tests {
             value_only: true,
             json: false,
             no_prompt: true,
+                    selector: None,
         })
         .expect("reveal + value_only should succeed");
         assert!(matches!(outcome, CommandOutcome::Success));
@@ -456,6 +467,7 @@ mod tests {
             value_only: true,
             json: false,
             no_prompt: true,
+                    selector: None,
         })
         .expect("value_only decrypt to explicit output should succeed");
 
@@ -505,6 +517,7 @@ mod tests {
             value_only: false,
             json: false,
             no_prompt: true,
+                    selector: None,
         })
         .expect("decrypt with bare --output should succeed");
 

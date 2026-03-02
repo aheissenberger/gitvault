@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::error::GitvaultError;
-use crate::identity::load_identity_from_source;
+use crate::identity::load_identity_from_source_with_selector;
 use crate::repo::decrypt_env_secrets;
 use crate::{barrier, crypto, fhsm, materialize, run};
 use zeroize::Zeroizing;
@@ -81,8 +81,25 @@ pub trait EffectRunner {
 }
 
 /// Production implementation — delegates to the real I/O functions.
-#[derive(Debug)]
-pub struct DefaultRunner;
+#[derive(Debug, Default)]
+pub struct DefaultRunner {
+    /// Optional identity selector for SSH-agent key disambiguation (REQ-39/46).
+    pub selector: Option<String>,
+}
+
+impl DefaultRunner {
+    /// Create a `DefaultRunner` with no selector.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a `DefaultRunner` with an explicit selector.
+    #[must_use]
+    pub fn with_selector(selector: Option<String>) -> Self {
+        Self { selector }
+    }
+}
 
 impl EffectRunner for DefaultRunner {
     fn check_prod_barrier(
@@ -99,7 +116,7 @@ impl EffectRunner for DefaultRunner {
         &self,
         source: &fhsm::IdentitySource,
     ) -> Result<Zeroizing<String>, GitvaultError> {
-        load_identity_from_source(source)
+        load_identity_from_source_with_selector(source, self.selector.as_deref())
     }
 
     fn decrypt_secrets(
@@ -147,7 +164,7 @@ pub fn execute_effects_with(
     repo_root: &Path,
     runner: &dyn EffectRunner,
 ) -> Result<CommandOutcome, GitvaultError> {
-    let mut identity_opt: Option<Box<dyn age::Identity>> = None;
+    let mut identity_opt: Option<crate::crypto::AnyIdentity> = None;
     let mut secrets_opt: Option<Vec<(String, String)>> = None;
 
     for effect in effects {
@@ -161,11 +178,12 @@ pub fn execute_effects_with(
             }
             fhsm::Effect::ResolveIdentity { source } => {
                 let identity_str = runner.load_identity_str(&source)?;
-                identity_opt = Some(Box::new(crypto::parse_identity(&identity_str)?));
+                identity_opt = Some(crate::crypto::parse_identity_any(&identity_str)?);
             }
             fhsm::Effect::DecryptSecrets { env } => {
                 let identity = identity_opt
-                    .as_deref()
+                    .as_ref()
+                    .map(|id| id.as_identity())
                     .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
                 secrets_opt = Some(runner.decrypt_secrets(repo_root, &env, identity)?);
             }
@@ -186,9 +204,14 @@ pub fn execute_effects_with(
             }
             // Decrypt a single ciphertext file to an output path or stdout.
             fhsm::Effect::DecryptFile { file, output } => {
-                let identity = identity_opt.as_deref().ok_or_else(|| {
-                    GitvaultError::Usage("identity not resolved before DecryptFile".to_string())
-                })?;
+                let identity = identity_opt
+                    .as_ref()
+                    .map(|id| id.as_identity())
+                    .ok_or_else(|| {
+                        GitvaultError::Usage(
+                            "identity not resolved before DecryptFile".to_string(),
+                        )
+                    })?;
                 let in_file =
                     std::io::BufReader::new(std::fs::File::open(&file).map_err(GitvaultError::Io)?);
                 if let Some(out_path) = output {
@@ -219,9 +242,16 @@ pub fn execute_effects_with(
 ///
 /// Returns [`GitvaultError`] if the repository root cannot be found or any
 /// effect execution fails.
-pub fn execute_effects(effects: Vec<fhsm::Effect>) -> Result<CommandOutcome, GitvaultError> {
+pub fn execute_effects(
+    effects: Vec<fhsm::Effect>,
+    selector: Option<&str>,
+) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
-    execute_effects_with(effects, &repo_root, &DefaultRunner)
+    execute_effects_with(
+        effects,
+        &repo_root,
+        &DefaultRunner::with_selector(selector.map(str::to_owned)),
+    )
 }
 
 #[cfg(test)]
@@ -451,7 +481,7 @@ mod tests {
     #[test]
     fn default_runner_run_command_empty_command_returns_usage_error() {
         // Covers the empty-command error path in DefaultRunner::run_command (lines 89-90).
-        let runner = DefaultRunner;
+        let runner = DefaultRunner::new();
         let result = runner.run_command(&[], &[], false, &[]);
         assert!(
             result.is_err(),
