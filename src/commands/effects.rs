@@ -28,7 +28,10 @@ pub trait EffectRunner {
         no_prompt: bool,
     ) -> Result<(), GitvaultError>;
 
-    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<Zeroizing<String>, GitvaultError>;
+    fn load_identity_str(
+        &self,
+        source: &fhsm::IdentitySource,
+    ) -> Result<Zeroizing<String>, GitvaultError>;
 
     fn decrypt_secrets(
         &self,
@@ -67,7 +70,10 @@ impl EffectRunner for DefaultRunner {
         barrier::check_prod_barrier(repo_root, env, prod, no_prompt)
     }
 
-    fn load_identity_str(&self, source: &fhsm::IdentitySource) -> Result<Zeroizing<String>, GitvaultError> {
+    fn load_identity_str(
+        &self,
+        source: &fhsm::IdentitySource,
+    ) -> Result<Zeroizing<String>, GitvaultError> {
         load_identity_from_source(source)
     }
 

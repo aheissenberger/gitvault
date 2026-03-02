@@ -358,8 +358,10 @@ mod tests {
 
     #[test]
     fn test_merge_gitattributes_entries_returns_none_when_unchanged() {
-        let merged =
-            merge_gitattributes_entries("*.env merge=gitvault-env\n", &["*.env merge=gitvault-env"]);
+        let merged = merge_gitattributes_entries(
+            "*.env merge=gitvault-env\n",
+            &["*.env merge=gitvault-env"],
+        );
         assert!(merged.is_none());
     }
 

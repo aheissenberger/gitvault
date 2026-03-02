@@ -49,7 +49,14 @@ pub fn run_command(
         .status()
         .map_err(|e| GitvaultError::Other(format!("Failed to execute '{cmd}': {e}")))?;
 
-    // REQ-23: propagate exit code
+    // REQ-23: propagate exit code; on Unix, signal-killed processes return 128 + signal number.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            return Ok(128 + sig);
+        }
+    }
     Ok(status.code().unwrap_or(crate::error::EXIT_ERROR))
 }
 
@@ -194,5 +201,26 @@ mod tests {
     fn test_invalid_command_returns_error() {
         let result = run_command(&[], "this-binary-does-not-exist-gitvault", &[], false, &[]);
         assert!(result.is_err());
+    }
+
+    /// REQ-23: a process killed by a signal must return 128 + signal_number, not EXIT_ERROR(1).
+    #[cfg(unix)]
+    #[test]
+    fn test_signal_killed_process_returns_128_plus_signal() {
+        // SIGTERM = 15; `/bin/sh -c 'kill -TERM $$'` sends SIGTERM to the shell itself.
+        let result = run_command(
+            &[],
+            "sh",
+            &["-c".to_string(), "kill -TERM $$".to_string()],
+            false,
+            &[],
+        );
+        // SIGTERM is signal 15, so expect 128 + 15 = 143.
+        let code = result.expect("run_command should succeed even for signal-killed child");
+        assert_eq!(
+            code,
+            128 + 15,
+            "signal-killed process should return 128 + signal"
+        );
     }
 }

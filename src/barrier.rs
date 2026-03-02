@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_token_token_path_is_gitignored_after_ensure() {
+    fn token_path_constant_is_under_secrets_dir() {
         // The token path itself: just verify the constant is sane
         assert!(TOKEN_PATH.starts_with(".secrets/"));
     }

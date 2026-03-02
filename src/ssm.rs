@@ -26,9 +26,23 @@ pub fn refs_file_path(repo_root: &Path, env: &str) -> PathBuf {
     repo_root.join("secrets").join(env).join(".ssm-refs.json")
 }
 
+/// Validate that an SSM app name only contains safe path characters.
+fn validate_app_name(app_name: &str) -> Result<(), GitvaultError> {
+    if !app_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+    {
+        return Err(GitvaultError::Usage(format!(
+            "SSM app name '{app_name}' contains invalid characters (must match [A-Za-z0-9_.-])"
+        )));
+    }
+    Ok(())
+}
+
 /// Derive the application name from the git remote URL, falling back to the
-/// repository directory name.
-async fn get_app_name(repo_root: &Path) -> String {
+/// repository directory name.  Returns an error if the derived name contains
+/// characters that are unsafe in an SSM parameter path.
+async fn get_app_name(repo_root: &Path) -> Result<String, GitvaultError> {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(repo_root)
@@ -44,16 +58,19 @@ async fn get_app_name(repo_root: &Path) -> String {
         if let Some(name) = url.split('/').next_back() {
             let name = name.trim_end_matches(".git").trim();
             if !name.is_empty() {
-                return name.to_string();
+                validate_app_name(name)?;
+                return Ok(name.to_string());
             }
         }
     }
 
-    repo_root
+    let name = repo_root
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("app")
-        .to_string()
+        .to_string();
+    validate_app_name(&name)?;
+    Ok(name)
 }
 
 /// Load the refs map from disk.  Returns an empty map when the file does not
@@ -140,7 +157,7 @@ pub async fn cmd_ssm_pull(
     aws: &AwsConfig,
     json: bool,
 ) -> Result<(), GitvaultError> {
-    let app = get_app_name(repo_root).await;
+    let app = get_app_name(repo_root).await?;
     let client = aws.build_client().await?;
     let prefix = format!("/{app}/{env}/");
 
@@ -183,7 +200,7 @@ pub async fn cmd_ssm_diff(
     reveal: bool,
     json: bool,
 ) -> Result<(), GitvaultError> {
-    let app = get_app_name(repo_root).await;
+    let app = get_app_name(repo_root).await?;
     let client = aws.build_client().await?;
     let prefix = format!("/{app}/{env}/");
 
@@ -276,7 +293,7 @@ pub async fn cmd_ssm_set(
     // REQ-29: prod barrier
     crate::barrier::check_prod_barrier(repo_root, env, true, false)?;
 
-    let app = get_app_name(repo_root).await;
+    let app = get_app_name(repo_root).await?;
     let path = ssm_path(&app, env, key);
     let client = aws.build_client().await?;
 

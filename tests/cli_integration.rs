@@ -531,7 +531,10 @@ fn removed_recipient_cannot_decrypt_after_rotate() {
     );
 
     let age_file = repo.path().join("secrets/dev/app.env.age");
-    assert!(age_file.exists(), "encrypted file should exist after encrypt");
+    assert!(
+        age_file.exists(),
+        "encrypted file should exist after encrypt"
+    );
 
     // Register the new public key as a persistent recipient.
     let add_new = bin()
@@ -635,7 +638,8 @@ fn encrypt_decrypt_dotenv_whole_file() {
     let (_id_tmp, identity_path, pubkey) = write_identity_file();
 
     // Create a .env file with multiple key=value pairs.
-    let dotenv_content = "DATABASE_URL=postgres://localhost/mydb\nAPI_KEY=supersecret\nDEBUG=false\n";
+    let dotenv_content =
+        "DATABASE_URL=postgres://localhost/mydb\nAPI_KEY=supersecret\nDEBUG=false\n";
     let dotenv_path = repo.path().join(".env");
     std::fs::write(&dotenv_path, dotenv_content).unwrap();
 
@@ -663,13 +667,21 @@ fn encrypt_decrypt_dotenv_whole_file() {
     // The encrypted file must NOT expose the original plaintext.
     let age_bytes = std::fs::read(&age_path).unwrap();
     assert!(
-        !age_bytes.windows(dotenv_content.len()).any(|w| w == dotenv_content.as_bytes()),
+        !age_bytes
+            .windows(dotenv_content.len())
+            .any(|w| w == dotenv_content.as_bytes()),
         "encrypted file must not contain plaintext content"
     );
 
     // Decrypt with --reveal; output must contain every original key=value pair.
     let dec = bin()
-        .args(["decrypt", "secrets/dev/.env.age", "--identity", &identity_path, "--reveal"])
+        .args([
+            "decrypt",
+            "secrets/dev/.env.age",
+            "--identity",
+            &identity_path,
+            "--reveal",
+        ])
         .current_dir(repo.path())
         .output()
         .expect("decrypt should run");

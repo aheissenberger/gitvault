@@ -1,5 +1,4 @@
 //! AWS authentication configuration for the SSM backend (REQ-49).
-#![allow(dead_code)]
 
 /// AWS authentication settings resolved from CLI flags or environment variables.
 #[derive(Debug, Clone)]
