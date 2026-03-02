@@ -191,7 +191,11 @@ fn parse_pass_vars(raw: Option<&str>) -> Vec<String> {
                 // If the entry is in KEY=value form take only the key; otherwise
                 // the whole trimmed string is already the variable name.
                 let key = trimmed.split('=').next().unwrap_or(trimmed).trim();
-                if key.is_empty() { None } else { Some(key.to_owned()) }
+                if key.is_empty() {
+                    None
+                } else {
+                    Some(key.to_owned())
+                }
             })
             .collect()
     })
@@ -502,7 +506,10 @@ mod tests {
                 None
             }
         });
-        assert_eq!(pass_vars, Some(vec!["PATH".to_string(), "HOME".to_string()]));
+        assert_eq!(
+            pass_vars,
+            Some(vec!["PATH".to_string(), "HOME".to_string()])
+        );
     }
 
     #[test]
@@ -527,7 +534,10 @@ mod tests {
             }
         });
         // Both entries should be present: "NOEQUALS" as a plain name, "KEY" extracted from "KEY=val".
-        assert_eq!(pass_vars, Some(vec!["NOEQUALS".to_string(), "KEY".to_string()]));
+        assert_eq!(
+            pass_vars,
+            Some(vec!["NOEQUALS".to_string(), "KEY".to_string()])
+        );
     }
 
     #[test]

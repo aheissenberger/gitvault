@@ -59,9 +59,7 @@ pub fn merge_env_content(
     ours: &str,
     theirs: &str,
 ) -> Result<(String, bool), GitvaultError> {
-    fn to_map(
-        content: &str,
-    ) -> Result<std::collections::HashMap<String, String>, GitvaultError> {
+    fn to_map(content: &str) -> Result<std::collections::HashMap<String, String>, GitvaultError> {
         Ok(parse_env_pairs(content)?.into_iter().collect())
     }
 

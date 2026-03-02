@@ -21,9 +21,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             recipients,
             fields,
             value_only,
-        } => {
-            crate::commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json)
-        }
+        } => crate::commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json),
         Commands::Decrypt {
             file,
             identity,
@@ -88,8 +86,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
-            let aws =
-                crate::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);
+            let aws = crate::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);
             let repo_root = crate::repo::find_repo_root()?;
             tokio::runtime::Runtime::new()
                 .map_err(|e| GitvaultError::Other(e.to_string()))?
@@ -101,15 +98,12 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
                         }
                         SsmAction::Diff { env, reveal } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal, cli.json)
-                                .await
+                            crate::ssm::cmd_ssm_diff(&repo_root, &env, &aws, reveal, cli.json).await
                         }
                         SsmAction::Set { key, value, env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
-                            crate::ssm::cmd_ssm_set(
-                                &repo_root, &env, &key, &value, &aws, cli.json,
-                            )
-                            .await
+                            crate::ssm::cmd_ssm_set(&repo_root, &env, &key, &value, &aws, cli.json)
+                                .await
                         }
                         SsmAction::Push { env } => {
                             let env = env.unwrap_or_else(|| "dev".to_string());
@@ -126,8 +120,8 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
 mod tests {
     use super::run;
     use crate::cli::{Cli, Commands, KeyringAction};
-    use crate::commands::test_helpers::*;
     use crate::commands::CommandOutcome;
+    use crate::commands::test_helpers::*;
     use crate::error::GitvaultError;
     use tempfile::TempDir;
 

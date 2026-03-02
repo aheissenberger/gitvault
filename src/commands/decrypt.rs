@@ -71,10 +71,7 @@ pub fn cmd_decrypt(
         let name = input_path
             .file_name()
             .ok_or_else(|| {
-                GitvaultError::Usage(format!(
-                    "path has no file name: {}",
-                    input_path.display()
-                ))
+                GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
             })?
             .to_string_lossy();
         let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();

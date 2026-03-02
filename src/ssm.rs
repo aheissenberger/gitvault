@@ -160,10 +160,7 @@ pub async fn cmd_ssm_pull(
     if json {
         let mut keys: Vec<&String> = refs.keys().collect();
         keys.sort();
-        println!(
-            "{}",
-            serde_json::json!({ "pulled": keys, "status": "ok" })
-        );
+        println!("{}", serde_json::json!({ "pulled": keys, "status": "ok" }));
     } else {
         println!(
             "Pulled {} parameter(s) from SSM path prefix '{}'",

@@ -1,7 +1,7 @@
 ---
 id: "S-20260301-007"
 title: "Optional AWS SSM backend"
-status: "draft"
+status: "active"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 scope:

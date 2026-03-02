@@ -413,7 +413,10 @@ mod tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&secrets, perms).unwrap();
 
-        assert!(result.is_err(), "allow_prod should fail with read-only .secrets dir");
+        assert!(
+            result.is_err(),
+            "allow_prod should fail with read-only .secrets dir"
+        );
     }
 
     /// Covers the `fs::remove_file(&token_path)?` error branch in `revoke_prod`

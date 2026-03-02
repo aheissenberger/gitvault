@@ -283,14 +283,8 @@ mod tests {
         // The path "." has no meaningful filename (file_name() returns Some(".")).
         // Use "/" which has no file_name().
         with_identity_env(identity_file.path(), || {
-            let err = cmd_encrypt(
-                "/".to_string(),
-                vec![recipient],
-                None,
-                false,
-                false,
-            )
-            .expect_err("root path should fail with no filename");
+            let err = cmd_encrypt("/".to_string(), vec![recipient], None, false, false)
+                .expect_err("root path should fail with no filename");
             // Either Usage (no filename) or Io (can't read /) is acceptable.
             assert!(
                 matches!(err, GitvaultError::Usage(_) | GitvaultError::Io(_)),

@@ -371,8 +371,7 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
     let files: Vec<&str> = staged
         .lines()
         .filter(|l| {
-            !l.is_empty()
-                && (l.contains(".secrets/plain/") || *l == ".env" || l.ends_with("/.env"))
+            !l.is_empty() && (l.contains(".secrets/plain/") || *l == ".env" || l.ends_with("/.env"))
         })
         .collect();
     if !files.is_empty() {

@@ -42,9 +42,8 @@ pub fn resolve_env(worktree_root: &Path) -> String {
 /// Returns [`GitvaultError::Usage`] if the name is invalid.
 pub fn validate_env_name(env: &str) -> Result<(), GitvaultError> {
     static ENV_RE: OnceLock<Regex> = OnceLock::new();
-    let re = ENV_RE.get_or_init(|| {
-        Regex::new(r"^[A-Za-z0-9_-]+$").expect("env name regex must compile")
-    });
+    let re = ENV_RE
+        .get_or_init(|| Regex::new(r"^[A-Za-z0-9_-]+$").expect("env name regex must compile"));
     if re.is_match(env) {
         Ok(())
     } else {
