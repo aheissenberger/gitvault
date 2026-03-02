@@ -282,6 +282,12 @@ jobs:
           tar -C dist -czf dist/gitvault-macos-aarch64.tar.gz gitvault-macos-aarch64
           tar -C dist -czf dist/gitvault-macos-x86_64.tar.gz gitvault-macos-x86_64
 
+          rm -f \
+            dist/gitvault-linux-x86_64 \
+            dist/gitvault-windows-x86_64.exe \
+            dist/gitvault-macos-aarch64 \
+            dist/gitvault-macos-x86_64
+
           {
             find dist -type f -name 'gitvault-*' -print0 \
               | while IFS= read -r -d '' file; do
@@ -300,13 +306,9 @@ jobs:
           shopt -s nullglob
 
           assets=(
-            dist/gitvault-linux-x86_64
             dist/gitvault-linux-x86_64.tar.gz
-            dist/gitvault-windows-x86_64.exe
             dist/gitvault-windows-x86_64.zip
-            dist/gitvault-macos-aarch64
             dist/gitvault-macos-aarch64.tar.gz
-            dist/gitvault-macos-x86_64
             dist/gitvault-macos-x86_64.tar.gz
             dist/SHA256SUMS
           )
@@ -330,13 +332,9 @@ jobs:
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
-            dist/gitvault-linux-x86_64
             dist/gitvault-linux-x86_64.tar.gz
-            dist/gitvault-windows-x86_64.exe
             dist/gitvault-windows-x86_64.zip
-            dist/gitvault-macos-aarch64
             dist/gitvault-macos-aarch64.tar.gz
-            dist/gitvault-macos-x86_64
             dist/gitvault-macos-x86_64.tar.gz
             dist/SHA256SUMS
 
@@ -344,30 +342,18 @@ jobs:
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           files: |
-            dist/gitvault-linux-x86_64
             dist/gitvault-linux-x86_64.tar.gz
             dist/gitvault-linux-x86_64.tar.gz.sig
             dist/gitvault-linux-x86_64.tar.gz.pem
-            dist/gitvault-linux-x86_64.sig
-            dist/gitvault-linux-x86_64.pem
-            dist/gitvault-windows-x86_64.exe
             dist/gitvault-windows-x86_64.zip
             dist/gitvault-windows-x86_64.zip.sig
             dist/gitvault-windows-x86_64.zip.pem
-            dist/gitvault-windows-x86_64.exe.sig
-            dist/gitvault-windows-x86_64.exe.pem
-            dist/gitvault-macos-aarch64
             dist/gitvault-macos-aarch64.tar.gz
             dist/gitvault-macos-aarch64.tar.gz.sig
             dist/gitvault-macos-aarch64.tar.gz.pem
-            dist/gitvault-macos-aarch64.sig
-            dist/gitvault-macos-aarch64.pem
-            dist/gitvault-macos-x86_64
             dist/gitvault-macos-x86_64.tar.gz
             dist/gitvault-macos-x86_64.tar.gz.sig
             dist/gitvault-macos-x86_64.tar.gz.pem
-            dist/gitvault-macos-x86_64.sig
-            dist/gitvault-macos-x86_64.pem
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
             dist/SHA256SUMS.pem
