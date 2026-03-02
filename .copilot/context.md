@@ -4,6 +4,7 @@
 - Keep diffs minimal and aligned with existing patterns.
 - Do not edit generated/vendor files unless the spec explicitly allows it.
 - Add or update tests for changed behavior.
+- Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Run required verification commands from spec frontmatter.
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 

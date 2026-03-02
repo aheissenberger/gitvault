@@ -8,6 +8,7 @@ Rules:
 - After implementing a requirement, update the corresponding requirement spec status to reflect completion.
 - Use `cargo xtask`/aliases for spec and worktree tasks.
 - For Rust changes, ensure full test coverage.
+- Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - If verification fails, apply the smallest viable fix.
 

@@ -8,6 +8,7 @@ Hard rules:
 - Do not implement new requirements without an approved spec entry.
 - After implementing a requirement, update the corresponding requirement spec status to reflect completion.
 - Write/update tests (Rust changes require full test coverage).
+- Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Run `cargo xtask spec-verify` (or `cargo spec-verify`) and fix failures.
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - Use `cargo xtask wt-*` for worktree operations only.
