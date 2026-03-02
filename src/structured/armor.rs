@@ -35,7 +35,7 @@ pub(crate) fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Resu
             .finish()
             .map_err(|e| GitvaultError::Encryption(format!("Armor finish: {e}")))?;
     }
-    Ok(String::from_utf8(output).map_err(|e| GitvaultError::Encryption(format!("UTF-8 error: {e}")))?)
+    String::from_utf8(output).map_err(|e| GitvaultError::Encryption(format!("UTF-8 error: {e}")))
 }
 
 /// Decrypt an age armor string using the given identity.

@@ -121,8 +121,8 @@ fn encrypt_fields_yaml(
             *v = serde_yaml::Value::String(encrypted);
         }
     }
-    Ok(serde_yaml::to_string(&value)
-        .map_err(|e| GitvaultError::Encryption(format!("YAML serialize error: {e}")))?)
+    serde_yaml::to_string(&value)
+        .map_err(|e| GitvaultError::Encryption(format!("YAML serialize error: {e}")))
 }
 
 fn encrypt_fields_toml(
@@ -140,8 +140,8 @@ fn encrypt_fields_toml(
             *v = toml::Value::String(encrypted);
         }
     }
-    Ok(toml::to_string_pretty(&value)
-        .map_err(|e| GitvaultError::Encryption(format!("TOML serialize error: {e}")))?)
+    toml::to_string_pretty(&value)
+        .map_err(|e| GitvaultError::Encryption(format!("TOML serialize error: {e}")))
 }
 
 /// REQ-4: Decrypt specified fields in a JSON, YAML, or TOML file.
@@ -206,8 +206,8 @@ fn decrypt_fields_yaml(
             *v = serde_yaml::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
         }
     }
-    Ok(serde_yaml::to_string(&value)
-        .map_err(|e| GitvaultError::Decryption(format!("YAML serialize error: {e}")))?)
+    serde_yaml::to_string(&value)
+        .map_err(|e| GitvaultError::Decryption(format!("YAML serialize error: {e}")))
 }
 
 fn decrypt_fields_toml(
@@ -227,8 +227,8 @@ fn decrypt_fields_toml(
             *v = toml::Value::String(String::from_utf8(plain).map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?);
         }
     }
-    Ok(toml::to_string_pretty(&value)
-        .map_err(|e| GitvaultError::Decryption(format!("TOML serialize error: {e}")))?)
+    toml::to_string_pretty(&value)
+        .map_err(|e| GitvaultError::Decryption(format!("TOML serialize error: {e}")))
 }
 
 #[cfg(test)]
