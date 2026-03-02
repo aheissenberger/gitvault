@@ -108,8 +108,8 @@ pub fn cmd_harden(json: bool, no_prompt: bool) -> Result<CommandOutcome, Gitvaul
     )?;
     ensure_merge_driver_git_config(&repo_root)?;
 
-    // REQ-64/65/66/67: external hook-manager adapter
-    let config = crate::config::load_config(&repo_root)?;
+    // REQ-64/65/66/67/68: external hook-manager adapter (repo config + global fallback)
+    let config = crate::config::effective_config(&repo_root)?;
     if let Some(adapter) = &config.hooks.adapter {
         match crate::repo::find_adapter_binary(adapter) {
             crate::repo::AdapterLookup::Found(path) => {
