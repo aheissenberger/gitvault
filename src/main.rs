@@ -49,44 +49,31 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             recipients,
             fields,
             value_only,
-        } => {
-            commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json)?;
-            Ok(CommandOutcome::Success)
-        }
+        } => commands::encrypt::cmd_encrypt(file, recipients, fields, value_only, cli.json),
         Commands::Decrypt {
             file,
             identity,
             output,
             fields,
             reveal,
-        } => {
-            commands::decrypt::cmd_decrypt(
-                file,
-                identity,
-                output,
-                fields,
-                reveal,
-                cli.json,
-                cli.no_prompt,
-            )?;
-            Ok(CommandOutcome::Success)
-        }
+        } => commands::decrypt::cmd_decrypt(
+            file,
+            identity,
+            output,
+            fields,
+            reveal,
+            cli.json,
+            cli.no_prompt,
+        ),
         Commands::Materialize {
             env,
             identity,
             prod,
-        } => {
-            commands::materialize::cmd_materialize(env, identity, prod, cli.json, cli.no_prompt)?;
-            Ok(CommandOutcome::Success)
-        }
+        } => commands::materialize::cmd_materialize(env, identity, prod, cli.json, cli.no_prompt),
         Commands::Status { fail_if_dirty } => {
-            commands::admin::cmd_status(cli.json, fail_if_dirty)?;
-            Ok(CommandOutcome::Success)
+            commands::admin::cmd_status(cli.json, fail_if_dirty)
         }
-        Commands::Harden => {
-            commands::admin::cmd_harden(cli.json)?;
-            Ok(CommandOutcome::Success)
-        }
+        Commands::Harden => commands::admin::cmd_harden(cli.json),
         Commands::Run {
             env,
             identity,
@@ -104,33 +91,21 @@ fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cli.json,
             cli.no_prompt,
         ),
-        Commands::AllowProd { ttl } => {
-            commands::admin::cmd_allow_prod(ttl, cli.json)?;
-            Ok(CommandOutcome::Success)
-        }
+        Commands::AllowProd { ttl } => commands::admin::cmd_allow_prod(ttl, cli.json),
         Commands::MergeDriver { base, ours, theirs } => {
             commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
         }
         Commands::Recipient { action } => {
-            commands::recipients::cmd_recipient(action, cli.json)?;
-            Ok(CommandOutcome::Success)
+            commands::recipients::cmd_recipient(action, cli.json)
         }
         Commands::Rotate { identity } => {
-            commands::recipients::cmd_rotate(identity, cli.json)?;
-            Ok(CommandOutcome::Success)
+            commands::recipients::cmd_rotate(identity, cli.json)
         }
-        Commands::Keyring { action } => {
-            commands::keyring::cmd_keyring(action, cli.json)?;
-            Ok(CommandOutcome::Success)
-        }
+        Commands::Keyring { action } => commands::keyring::cmd_keyring(action, cli.json),
         Commands::Check { env, identity } => {
-            commands::admin::cmd_check(env, identity, cli.json)?;
-            Ok(CommandOutcome::Success)
+            commands::admin::cmd_check(env, identity, cli.json)
         }
-        Commands::RevokeProd => {
-            commands::admin::cmd_revoke_prod(cli.json)?;
-            Ok(CommandOutcome::Success)
-        }
+        Commands::RevokeProd => commands::admin::cmd_revoke_prod(cli.json),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
             let aws = crate::aws_config::AwsConfig::from_cli(cli.aws_profile, cli.aws_role_arn);

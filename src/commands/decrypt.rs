@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::{load_identity, load_identity_from_source};
 use crate::{crypto, fhsm, repo, structured};
@@ -15,7 +16,7 @@ pub(crate) fn cmd_decrypt(
     reveal: bool,
     json: bool,
     no_prompt: bool,
-) -> Result<(), GitvaultError> {
+) -> Result<CommandOutcome, GitvaultError> {
     // Use FHSM to resolve the identity source; file I/O remains here.
     let event = fhsm::Event::Decrypt {
         file: file.clone(),
@@ -50,7 +51,7 @@ pub(crate) fn cmd_decrypt(
             ),
             json,
         );
-        return Ok(());
+        return Ok(CommandOutcome::Success);
     }
 
     // REQ-41: if --reveal, print to stdout and never write to file
@@ -58,7 +59,7 @@ pub(crate) fn cmd_decrypt(
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
         let mut stdout = std::io::BufWriter::new(std::io::stdout());
         crypto::decrypt_stream(&identity, in_file, &mut stdout)?;
-        return Ok(());
+        return Ok(CommandOutcome::Success);
     }
 
     let out_path = if let Some(out) = output {
@@ -88,7 +89,7 @@ pub(crate) fn cmd_decrypt(
         .map_err(|e| GitvaultError::Io(e.error))?;
 
     crate::output::output_success(&format!("Decrypted to {}", out_path.display()), json);
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 #[cfg(test)]

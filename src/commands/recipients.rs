@@ -1,12 +1,13 @@
 //! `gitvault recipient` and `gitvault rotate` command implementations.
 
 use crate::cli::RecipientAction;
+use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, repo};
 
 /// Manage persistent recipients (REQ-37)
-pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     match action {
         RecipientAction::Add { pubkey } => {
@@ -47,11 +48,11 @@ pub(crate) fn cmd_recipient(action: RecipientAction, json: bool) -> Result<(), G
             }
         }
     }
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 /// Re-encrypt all secrets with the current recipients list (REQ-38)
-pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
@@ -81,7 +82,7 @@ pub(crate) fn cmd_rotate(identity_path: Option<String>, json: bool) -> Result<()
         ),
         json,
     );
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 #[cfg(test)]

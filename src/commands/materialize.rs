@@ -1,6 +1,7 @@
 //! `gitvault materialize` command implementation.
 
 use crate::commands::effects::execute_effects;
+use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::fhsm;
 
@@ -11,7 +12,7 @@ pub(crate) fn cmd_materialize(
     prod: bool,
     json: bool,
     no_prompt: bool,
-) -> Result<(), GitvaultError> {
+) -> Result<CommandOutcome, GitvaultError> {
     let event = fhsm::Event::Materialize {
         env: env_override,
         identity: identity_path,
@@ -21,7 +22,7 @@ pub(crate) fn cmd_materialize(
     let effects = fhsm::transition(&event).map_err(|e| GitvaultError::Usage(e.to_string()))?;
     execute_effects(effects)?;
     crate::output::output_success("Materialized secrets to .env", json);
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 #[cfg(test)]

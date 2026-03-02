@@ -9,7 +9,7 @@ use crate::merge::merge_env_content;
 use crate::{barrier, crypto, env, repo};
 
 /// Check repository safety status
-pub(crate) fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, GitvaultError> {
     // REQ-44: no decryption performed
     let repo_root = crate::repo::find_repo_root()?;
     repo::check_no_tracked_plaintext(&repo_root)?;
@@ -37,11 +37,11 @@ pub(crate) fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<(), Gitvault
         println!("No tracked plaintext detected.");
     }
 
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 /// Harden the repository: update .gitignore, install git hooks
-pub(crate) fn cmd_harden(json: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_harden(json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     crate::materialize::ensure_gitignored(
         &repo_root,
@@ -52,26 +52,26 @@ pub(crate) fn cmd_harden(json: bool) -> Result<(), GitvaultError> {
         "Repository hardened: .gitignore updated, git hooks installed.",
         json,
     );
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 /// Write a timed production allow token (REQ-14)
-pub(crate) fn cmd_allow_prod(ttl: u64, json: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_allow_prod(ttl: u64, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let expiry = barrier::allow_prod(&repo_root, ttl)?;
     crate::output::output_success(
         &format!("Production access allowed for {ttl}s (expires at Unix time {expiry})"),
         json,
     );
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 /// Immediately revoke the production allow token (REQ-14)
-pub(crate) fn cmd_revoke_prod(json: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_revoke_prod(json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     barrier::revoke_prod(&repo_root)?;
     crate::output::output_success("Production allow token revoked.", json);
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 /// Run as git merge driver for .env files (REQ-34, REQ-48)
@@ -117,7 +117,7 @@ pub(crate) fn cmd_check(
     env_override: Option<String>,
     identity_path: Option<String>,
     json: bool,
-) -> Result<(), GitvaultError> {
+) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
 
@@ -160,7 +160,7 @@ pub(crate) fn cmd_check(
         println!("   Recipients  : {}", recipients.len());
         println!("   Secrets     : {secrets_count} encrypted file(s)");
     }
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 #[cfg(test)]

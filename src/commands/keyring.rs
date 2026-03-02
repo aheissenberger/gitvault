@@ -1,12 +1,13 @@
 //! `gitvault keyring` command implementation.
 
 use crate::cli::KeyringAction;
+use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::load_identity;
 use crate::{crypto, keyring_store};
 
 /// Manage identity key in OS keyring (REQ-39)
-pub(crate) fn cmd_keyring(action: KeyringAction, json: bool) -> Result<(), GitvaultError> {
+pub(crate) fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     cmd_keyring_with_ops(
         action,
         json,
@@ -22,7 +23,7 @@ pub(crate) fn cmd_keyring_with_ops<SetFn, GetFn, DeleteFn>(
     keyring_set_fn: SetFn,
     keyring_get_fn: GetFn,
     keyring_delete_fn: DeleteFn,
-) -> Result<(), GitvaultError>
+) -> Result<CommandOutcome, GitvaultError>
 where
     SetFn: Fn(&str) -> Result<(), GitvaultError>,
     GetFn: Fn() -> Result<String, GitvaultError>,
@@ -49,7 +50,7 @@ where
             crate::output::output_success("Identity removed from OS keyring.", json);
         }
     }
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 #[cfg(test)]
@@ -306,7 +307,7 @@ mod tests {
         );
 
         match set_result {
-            Ok(()) => {
+            Ok(_) => {
                 let get_result = cmd_keyring(KeyringAction::Get, false);
                 assert!(
                     get_result.is_ok(),

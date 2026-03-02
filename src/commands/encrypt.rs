@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::{load_identity, resolve_recipient_keys};
 use crate::{crypto, env, repo, structured};
@@ -13,7 +14,7 @@ pub(crate) fn cmd_encrypt(
     fields: Option<String>,
     value_only: bool,
     json: bool,
-) -> Result<(), GitvaultError> {
+) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let input_path = PathBuf::from(&file);
 
@@ -40,7 +41,7 @@ pub(crate) fn cmd_encrypt(
             ),
             json,
         );
-        return Ok(());
+        return Ok(CommandOutcome::Success);
     }
 
     // REQ-6: .env value-only mode
@@ -72,7 +73,7 @@ pub(crate) fn cmd_encrypt(
             &format!("Encrypted .env values in {}", input_path.display()),
             json,
         );
-        return Ok(());
+        return Ok(CommandOutcome::Success);
     }
 
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
@@ -108,7 +109,7 @@ pub(crate) fn cmd_encrypt(
         .map_err(|e| GitvaultError::Io(e.error))?;
 
     crate::output::output_success(&format!("Encrypted to {}", out_path.display()), json);
-    Ok(())
+    Ok(CommandOutcome::Success)
 }
 
 #[cfg(test)]
