@@ -158,7 +158,11 @@ fn find_repo_root_from(start: &Path) -> Result<PathBuf, GitvaultError> {
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
-            None => return Ok(start.to_path_buf()),
+            None => {
+                return Err(GitvaultError::Usage(
+                    "not inside a git repository (no .git directory found)".to_string(),
+                ))
+            }
         }
     }
 }
@@ -2180,9 +2184,14 @@ mod tests {
     #[test]
     fn find_repo_root_from_returns_start_when_no_git() {
         let tmp = TempDir::new().unwrap();
-        // No .git dir — should return start path
-        let found = find_repo_root_from(tmp.path()).unwrap();
-        assert_eq!(found, tmp.path());
+        // No .git dir — should now return an error
+        let result = find_repo_root_from(tmp.path());
+        assert!(result.is_err(), "expected error when no .git directory found");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not inside a git repository"),
+            "unexpected error message: {err_msg}"
+        );
     }
 
     // ─── FakeEffectRunner + execute_effects_with tests ───────────────────────
