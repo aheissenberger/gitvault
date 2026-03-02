@@ -1,7 +1,7 @@
 # Architecture Hotspots
 
 Curated from the 2026-03-01 multi-agent review so future agents can jump directly to high-value areas.
-Last updated: 2026-03-02 (fourth refactor pass — pedantic clippy applied).
+Last updated: 2026-03-02 (fifth refactor pass — nursery clippy applied).
 
 ## Resolved Issues (no longer actionable)
 
@@ -26,6 +26,8 @@ All previously-open issues have been resolved in this session:
   `.github/workflows/build.yml`, satisfying AC5 (spec-15) and AC4 (spec-11).
 - Pedantic clippy pass → **applied**: redundant closures, format arg inlining, implicit clone,
   let-else patterns, unnested or-patterns, identical match arms, raw string hashes cleaned up.
+- Nursery clippy pass → **applied**: `or_fun_call` (11 sites — `unwrap_or(f())` → `unwrap_or_else(|| f())`),
+  `redundant_clone`, `option_if_let_else`, `redundant_closure_for_method_calls`.
 
 ## Remaining Low Priority Items
 
@@ -43,6 +45,9 @@ These items are known but reviewed and deemed low-value relative to refactor ris
 - 17 `#[must_use]` candidates (13 functions + 4 methods) — API annotation work; deferred.
 - 5 `needless_pass_by_value` — all public API `String` params; changing to `&str` would be
   API-breaking and require updating all callers in `dispatch.rs`.
+- 3 `map_or` suggestions in test code — current `match` is clearer; skipped.
+- 2 `unnecessary_wraps` in `keyring.rs` test helpers — functions must match `Result`-returning
+  function pointer signatures; cannot change.
 - 2 remaining `match` → `if let` suggestions — both arms are meaningful (not single-pattern);
   pedantic style preference only.
 
