@@ -396,6 +396,33 @@ fn cmd_decrypt(
     Ok(())
 }
 
+fn decrypt_env_secrets(
+    repo_root: &Path,
+    env: &str,
+    identity: &dyn age::Identity,
+) -> Result<Vec<(String, String)>, GitvaultError> {
+    let mut secrets: Vec<(String, String)> = Vec::new();
+    let encrypted_files = repo::list_encrypted_files_for_env(repo_root, env)?;
+
+    for path in encrypted_files {
+        let ciphertext = std::fs::read(&path)?;
+        match crypto::decrypt(identity, &ciphertext) {
+            Ok(plaintext) => {
+                let text = String::from_utf8_lossy(&plaintext);
+                secrets.extend(parse_env_pairs(&text)?);
+            }
+            Err(e) => {
+                return Err(GitvaultError::Decryption(format!(
+                    "Failed to decrypt {}: {e}",
+                    path.display()
+                )));
+            }
+        }
+    }
+
+    Ok(secrets)
+}
+
 /// Materialize secrets to root .env
 fn cmd_materialize(
     env_override: Option<String>,
@@ -412,26 +439,7 @@ fn cmd_materialize(
 
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
-
-    let mut secrets: Vec<(String, String)> = Vec::new();
-
-    let encrypted_files = repo::list_encrypted_files_for_env(&repo_root, &env)?;
-    for path in encrypted_files {
-        let ciphertext = std::fs::read(&path)?;
-        match crypto::decrypt(&identity, &ciphertext) {
-            Ok(plaintext) => {
-                let text = String::from_utf8_lossy(&plaintext);
-                secrets.extend(parse_env_pairs(&text)?);
-            }
-            // REQ-40: fail closed on any decryption error
-            Err(e) => {
-                return Err(GitvaultError::Decryption(format!(
-                    "Failed to decrypt {}: {e}",
-                    path.display()
-                )));
-            }
-        }
-    }
+    let secrets = decrypt_env_secrets(&repo_root, &env, &identity)?;
 
     materialize::materialize_env_file(&repo_root, &secrets)?;
 
@@ -516,26 +524,7 @@ fn cmd_run(
     // Load identity and decrypt secrets
     let identity_str = load_identity(identity_path)?;
     let identity = crypto::parse_identity(&identity_str)?;
-
-    let mut secrets: Vec<(String, String)> = Vec::new();
-
-    let encrypted_files = repo::list_encrypted_files_for_env(&repo_root, &env)?;
-    for path in encrypted_files {
-        let ciphertext = std::fs::read(&path)?;
-        match crypto::decrypt(&identity, &ciphertext) {
-            Ok(plaintext) => {
-                let text = String::from_utf8_lossy(&plaintext);
-                secrets.extend(parse_env_pairs(&text)?);
-            }
-            // REQ-40: fail closed on any decryption error
-            Err(e) => {
-                return Err(GitvaultError::Decryption(format!(
-                    "Failed to decrypt {}: {e}",
-                    path.display()
-                )));
-            }
-        }
-    }
+    let secrets = decrypt_env_secrets(&repo_root, &env, &identity)?;
 
     // REQ-24: parse --pass
     let pass_vars = pass_raw
