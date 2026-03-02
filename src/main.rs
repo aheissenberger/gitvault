@@ -1,5 +1,6 @@
 mod aws_config;
 mod barrier;
+mod fhsm;
 mod cli;
 mod crypto;
 mod env;
