@@ -255,6 +255,8 @@ jobs:
 
           tap_push_allowed="$(gh api "/repos/${tap_repo}" --jq '.permissions.push' || true)"
           [[ "${tap_push_allowed}" == "true" ]] || { echo "HOMEBREW_TAP_TOKEN cannot push to ${tap_repo}" >&2; exit 1; }
+          tap_default_branch="$(gh api "/repos/${tap_repo}" --jq '.default_branch')"
+          [[ -n "${tap_default_branch}" ]] || { echo "Unable to resolve default branch for ${tap_repo}" >&2; exit 1; }
 
           formula_path="${INPUT_FORMULA_PATH:-${DEFAULT_FORMULA_PATH:-Formula/gitvault.rb}}"
           release_tag="${GITHUB_REF_NAME}"
@@ -262,6 +264,7 @@ jobs:
           release_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}"
 
           echo "tap_repo=${tap_repo}" >> "$GITHUB_OUTPUT"
+          echo "tap_default_branch=${tap_default_branch}" >> "$GITHUB_OUTPUT"
           echo "formula_path=${formula_path}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -290,6 +293,7 @@ jobs:
         with:
           repository: ${{ steps.meta.outputs.tap_repo }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ref: ${{ steps.meta.outputs.tap_default_branch }}
           path: tap
 
       - name: Create or update formula
@@ -315,9 +319,10 @@ jobs:
 
           {
             printf 'class %s < Formula\n' "$class_name"
-            printf '  desc "gitvault CLI"\n'
+            printf '  desc "A secure, distributed vault for managing secrets and sensitive data with Git"\n'
             printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
             printf '  version "%s"\n' "$VERSION"
+            printf '  depends_on :macos\n'
             printf '\n'
             printf '  on_macos do\n'
             printf '    on_arm do\n'
@@ -345,16 +350,23 @@ jobs:
             printf 'end\n'
           } > "$file"
 
-      - name: Create pull request in tap repo
-        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: tap
-          commit-message: "chore: update formula for ${{ steps.meta.outputs.version }}"
-          branch: "ci/update-gitvault-${{ steps.meta.outputs.version }}"
-          title: "chore: update gitvault to ${{ steps.meta.outputs.version }}"
-          body: |
-            Automated formula update from ${{ github.repository }} release.
-            - Version: ${{ steps.meta.outputs.version }}
-            - macOS arm64 SHA256: ${{ steps.sums.outputs.sha_aarch64 }}
-            - macOS x86_64 SHA256: ${{ steps.sums.outputs.sha_x86_64 }}
+      - name: Commit and push formula update
+        env:
+          TAP_DEFAULT_BRANCH: ${{ steps.meta.outputs.tap_default_branch }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          FORMULA_PATH: ${{ steps.meta.outputs.formula_path }}
+        run: |
+          set -euo pipefail
+          cd tap
+
+          if git diff --quiet -- "${FORMULA_PATH}"; then
+            echo "No formula changes detected; skipping push."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${FORMULA_PATH}"
+          git commit -m "chore: update formula for ${VERSION}"
+          git push origin "HEAD:${TAP_DEFAULT_BRANCH}"
