@@ -4,8 +4,6 @@
 //! run, decrypt, and materialize command flows. No I/O is performed here; callers
 //! are responsible for executing the returned [`Effect`] list.
 
-// Public API items are intentionally unused until the wire-effects phase.
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
@@ -24,6 +22,7 @@ pub enum FhsmError {
 // ─── Orthogonal region enums ──────────────────────────────────────────────────
 
 /// Whether interactive prompts are permitted.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PromptMode {
     /// Interactive prompts are allowed.
@@ -33,6 +32,7 @@ pub enum PromptMode {
 }
 
 /// Desired output format.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OutputMode {
     /// Human-readable text output.
@@ -55,6 +55,7 @@ pub enum IdentitySource {
 }
 
 /// Where a secret value comes from within the repository.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretSource {
     /// An encrypted `.env`-style file for the named environment.

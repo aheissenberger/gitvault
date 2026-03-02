@@ -1,3 +1,4 @@
+#[cfg(feature = "ssm")]
 mod aws_config;
 mod barrier;
 mod cli;

@@ -24,6 +24,9 @@ dotenvy = "0.15"
 regex = "1"
 base64 = "0.22"
 
+[features]
+ssm = []
+
 [dev-dependencies]
 tempfile = "3"
 

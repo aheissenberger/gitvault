@@ -4,52 +4,25 @@
 const SERVICE: &str = "gitvault";
 const USERNAME: &str = "age-identity";
 
-#[cfg(target_os = "macos")]
-mod platform {
-    pub(super) fn set_password(service: &str, username: &str, key: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.set_password(key).map_err(|e| e.to_string())
-    }
-
-    pub(super) fn get_password(service: &str, username: &str) -> Result<String, String> {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.get_password().map_err(|e| e.to_string())
-    }
-
-    pub(super) fn delete_credential(service: &str, username: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.delete_credential().map_err(|e| e.to_string())
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod platform {
-    pub(super) fn set_password(service: &str, username: &str, key: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.set_password(key).map_err(|e| e.to_string())
-    }
-
-    pub(super) fn get_password(service: &str, username: &str) -> Result<String, String> {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.get_password().map_err(|e| e.to_string())
-    }
-
-    pub(super) fn delete_credential(service: &str, username: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
-        entry.delete_credential().map_err(|e| e.to_string())
-    }
-}
-
 pub fn keyring_set(key: &str) -> Result<(), String> {
-    keyring_set_with(key, platform::set_password)
+    keyring_set_with(key, |service, username, key| {
+        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
+        entry.set_password(key).map_err(|e| e.to_string())
+    })
 }
 
 pub fn keyring_get() -> Result<String, String> {
-    keyring_get_with(platform::get_password)
+    keyring_get_with(|service, username| {
+        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
+        entry.get_password().map_err(|e| e.to_string())
+    })
 }
 
 pub fn keyring_delete() -> Result<(), String> {
-    keyring_delete_with(platform::delete_credential)
+    keyring_delete_with(|service, username| {
+        let entry = keyring::Entry::new(service, username).map_err(|e| e.to_string())?;
+        entry.delete_credential().map_err(|e| e.to_string())
+    })
 }
 
 fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), String>

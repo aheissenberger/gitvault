@@ -66,6 +66,12 @@ pub fn parse_pass_vars(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn test_run_exit_code_zero() {
@@ -116,6 +122,7 @@ mod tests {
 
     #[test]
     fn test_clear_env_removes_parent_vars() {
+        let _guard = env_lock().lock().unwrap();
         // Set a var in the current process, verify child does NOT see it with --clear-env
         unsafe {
             std::env::set_var("GITVAULT_SHOULD_NOT_PASS", "nope");
@@ -141,6 +148,7 @@ mod tests {
 
     #[test]
     fn test_pass_vars_forwarded_with_clear_env() {
+        let _guard = env_lock().lock().unwrap();
         unsafe {
             std::env::set_var("GITVAULT_PASS_ME", "hello");
         }
@@ -165,6 +173,7 @@ mod tests {
 
     #[test]
     fn test_secrets_override_inherited_vars() {
+        let _guard = env_lock().lock().unwrap();
         unsafe {
             std::env::set_var("GITVAULT_OVERRIDE_TEST", "original");
         }

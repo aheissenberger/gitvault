@@ -36,10 +36,17 @@ pub fn resolve_env(worktree_root: &Path) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn test_default_env_is_dev() {
+        let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         unsafe {
             std::env::remove_var("SECRETS_ENV");
@@ -50,6 +57,7 @@ mod tests {
 
     #[test]
     fn test_env_file_takes_priority_over_default() {
+        let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         unsafe {
             std::env::remove_var("SECRETS_ENV");
@@ -64,6 +72,7 @@ mod tests {
 
     #[test]
     fn test_secrets_env_var_overrides_file() {
+        let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
 
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
@@ -82,6 +91,7 @@ mod tests {
 
     #[test]
     fn test_worktree_independence() {
+        let _guard = env_lock().lock().unwrap();
         let dir1 = TempDir::new().unwrap();
         let dir2 = TempDir::new().unwrap();
         unsafe {
@@ -100,6 +110,7 @@ mod tests {
 
     #[test]
     fn test_whitespace_env_var_falls_back_to_file() {
+        let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
         fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
@@ -117,6 +128,7 @@ mod tests {
 
     #[test]
     fn test_whitespace_env_file_falls_back_to_dev() {
+        let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         unsafe {
             std::env::remove_var("SECRETS_ENV");
