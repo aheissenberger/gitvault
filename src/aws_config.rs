@@ -8,6 +8,7 @@ pub struct AwsConfig {
 }
 
 impl AwsConfig {
+    /// Construct an [`AwsConfig`] from CLI-supplied flags.
     pub fn from_cli(profile: Option<String>, role_arn: Option<String>) -> Self {
         Self { profile, role_arn }
     }

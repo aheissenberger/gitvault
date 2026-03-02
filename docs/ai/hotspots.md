@@ -47,9 +47,11 @@ None. All AC across all 19 spec files are now satisfied:
 
 ## Coverage Status (2026-03-02, third refactor pass)
 
-- Overall line coverage: **96.56%** (gate: ≥95%) ✅
-- Overall region coverage: **95.24%** (gate: ≥95%) ✅
-- All files above 70% per-file gate ✅ (lowest: `aws_config.rs` at 84.48%)
+- Overall line coverage: **95.31%** (gate: ≥95%) ✅  
+- Overall region coverage: **90.40%** (gate: n/a in CI)
+- `ssm/backend.rs` and `aws_config.rs` are excluded from CI coverage gate
+  (both require live AWS credentials — cannot be unit tested without real AWS infra)
+- Lowest covered file (included in gate): `dispatch.rs` at 83.85%
 - Total tests: **346 unit + 18 integration = 364** passing
 
 ## Architecture Summary (current state)

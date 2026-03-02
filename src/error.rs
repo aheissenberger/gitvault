@@ -43,6 +43,10 @@ pub enum GitvaultError {
 }
 
 impl GitvaultError {
+    /// Map the error variant to a POSIX exit code for the CLI process.
+    ///
+    /// Callers use this to propagate structured exit codes to the shell so
+    /// scripts can distinguish encryption failures from permission errors, etc.
     pub fn exit_code(&self) -> i32 {
         match self {
             GitvaultError::Io(_) => EXIT_ERROR,
