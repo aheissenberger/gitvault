@@ -73,9 +73,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p cache-status
-          cat > cache-status/verify-${{ runner.os }}.tsv <<'EOF'
-verify	${{ runner.os }}	-	${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-1.93.1
-EOF
+          printf 'verify\t%s\t-\t%s\trust-%s-1.93.1\n' \
+            "${{ runner.os }}" \
+            "${{ steps.cache_verify.outputs.cache-hit || 'n/a' }}" \
+            "${{ runner.os }}" \
+            > cache-status/verify-${{ runner.os }}.tsv
 
       - name: Upload cache status (verify)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -177,9 +179,12 @@ EOF
         run: |
           set -euo pipefail
           mkdir -p cache-status
-          cat > cache-status/build-${{ matrix.target }}-${{ runner.os }}.tsv <<'EOF'
-build	${{ runner.os }}	${{ matrix.target }}	${{ steps.cache_build.outputs.cache-hit || 'n/a' }}	rust-${{ runner.os }}-1.93.1
-EOF
+          printf 'build\t%s\t%s\t%s\trust-%s-1.93.1\n' \
+            "${{ runner.os }}" \
+            "${{ matrix.target }}" \
+            "${{ steps.cache_build.outputs.cache-hit || 'n/a' }}" \
+            "${{ runner.os }}" \
+            > cache-status/build-${{ matrix.target }}-${{ runner.os }}.tsv
 
       - name: Upload cache status (build)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
