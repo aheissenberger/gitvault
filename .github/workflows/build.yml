@@ -8,6 +8,12 @@ on:
         required: false
         default: false
         type: boolean
+      tap_repo:
+        description: "owner/repo of Homebrew tap (optional override)"
+        required: false
+      tap_formula_path:
+        description: "Formula path in tap repo (optional override)"
+        required: false
   push:
     tags:
       - 'v*'
@@ -128,3 +134,133 @@ jobs:
             artifacts/**/gitvault-windows-x86_64.exe
             artifacts/**/gitvault-macos-aarch64
             artifacts/**/gitvault-macos-x86_64
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Resolve metadata
+        id: meta
+        env:
+          INPUT_TAP_REPO: ${{ github.event.inputs.tap_repo }}
+          INPUT_FORMULA_PATH: ${{ github.event.inputs.tap_formula_path }}
+          DEFAULT_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          DEFAULT_FORMULA_PATH: ${{ vars.HOMEBREW_TAP_FORMULA_PATH }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GH_TOKEN:-}" ]] || { echo "Missing HOMEBREW_TAP_TOKEN" >&2; exit 1; }
+
+          tap_repo="${INPUT_TAP_REPO:-${DEFAULT_TAP_REPO:-}}"
+          [[ -n "${tap_repo}" ]] || { echo "Missing tap repo (set workflow input tap_repo or repo variable HOMEBREW_TAP_REPO)" >&2; exit 1; }
+
+          tap_push_allowed="$(gh api "/repos/${tap_repo}" --jq '.permissions.push' || true)"
+          [[ "${tap_push_allowed}" == "true" ]] || { echo "HOMEBREW_TAP_TOKEN cannot push to ${tap_repo}" >&2; exit 1; }
+
+          formula_path="${INPUT_FORMULA_PATH:-${DEFAULT_FORMULA_PATH:-Formula/gitvault.rb}}"
+          release_tag="${GITHUB_REF_NAME}"
+          version="${release_tag#v}"
+          release_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}"
+
+          echo "tap_repo=${tap_repo}" >> "$GITHUB_OUTPUT"
+          echo "formula_path=${formula_path}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "url_aarch64=${release_base}/gitvault-macos-aarch64" >> "$GITHUB_OUTPUT"
+          echo "url_x86_64=${release_base}/gitvault-macos-x86_64" >> "$GITHUB_OUTPUT"
+
+      - name: Compute asset checksums
+        id: sums
+        env:
+          URL_AARCH64: ${{ steps.meta.outputs.url_aarch64 }}
+          URL_X86_64: ${{ steps.meta.outputs.url_x86_64 }}
+        run: |
+          set -euo pipefail
+          curl -fsSL "$URL_AARCH64" -o macos-aarch64.bin
+          curl -fsSL "$URL_X86_64" -o macos-x86_64.bin
+
+          sha_aarch64="$(sha256sum macos-aarch64.bin | awk '{print $1}')"
+          sha_x86_64="$(sha256sum macos-x86_64.bin | awk '{print $1}')"
+
+          echo "sha_aarch64=${sha_aarch64}" >> "$GITHUB_OUTPUT"
+          echo "sha_x86_64=${sha_x86_64}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.meta.outputs.tap_repo }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Create or update formula
+        env:
+          FORMULA_PATH: ${{ steps.meta.outputs.formula_path }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          URL_AARCH64: ${{ steps.meta.outputs.url_aarch64 }}
+          URL_X86_64: ${{ steps.meta.outputs.url_x86_64 }}
+          SHA_AARCH64: ${{ steps.sums.outputs.sha_aarch64 }}
+          SHA_X86_64: ${{ steps.sums.outputs.sha_x86_64 }}
+        run: |
+          set -euo pipefail
+          file="tap/${FORMULA_PATH}"
+          mkdir -p "$(dirname "$file")"
+          if [[ -f "$file" ]]; then
+            echo "Updating existing formula: ${FORMULA_PATH}"
+          else
+            echo "Creating new formula: ${FORMULA_PATH}"
+          fi
+
+          formula_basename="$(basename "${FORMULA_PATH}" .rb)"
+          class_name="$(echo "${formula_basename}" | sed 's/[-_]/ /g' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}}1' | tr -d ' ')"
+
+          {
+            printf 'class %s < Formula\n' "$class_name"
+            printf '  desc "gitvault CLI"\n'
+            printf '  homepage "https://github.com/%s"\n' "$GITHUB_REPOSITORY"
+            printf '  version "%s"\n' "$VERSION"
+            printf '\n'
+            printf '  on_macos do\n'
+            printf '    on_arm do\n'
+            printf '      url "%s"\n' "$URL_AARCH64"
+            printf '      sha256 "%s"\n' "$SHA_AARCH64"
+            printf '    end\n'
+            printf '\n'
+            printf '    on_intel do\n'
+            printf '      url "%s"\n' "$URL_X86_64"
+            printf '      sha256 "%s"\n' "$SHA_X86_64"
+            printf '    end\n'
+            printf '  end\n'
+            printf '\n'
+            printf '  def install\n'
+            printf '    if Hardware::CPU.arm?\n'
+            printf '      bin.install "gitvault-macos-aarch64" => "gitvault"\n'
+            printf '    else\n'
+            printf '      bin.install "gitvault-macos-x86_64" => "gitvault"\n'
+            printf '    end\n'
+            printf '  end\n'
+            printf '\n'
+            printf '  test do\n'
+            printf '    system "#{bin}/gitvault", "--help"\n'
+            printf '  end\n'
+            printf 'end\n'
+          } > "$file"
+
+      - name: Create pull request in tap repo
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+          commit-message: "chore: update formula for ${{ steps.meta.outputs.version }}"
+          branch: "ci/update-gitvault-${{ steps.meta.outputs.version }}"
+          title: "chore: update gitvault to ${{ steps.meta.outputs.version }}"
+          body: |
+            Automated formula update from ${{ github.repository }} release.
+            - Version: ${{ steps.meta.outputs.version }}
+            - macOS arm64 SHA256: ${{ steps.sums.outputs.sha_aarch64 }}
+            - macOS x86_64 SHA256: ${{ steps.sums.outputs.sha_x86_64 }}
