@@ -10,6 +10,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod crypto;
+pub mod defaults;
 pub mod dispatch;
 pub mod env;
 pub mod error;

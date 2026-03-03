@@ -1,10 +1,11 @@
+use crate::defaults;
 use crate::error::GitvaultError;
 use regex::Regex;
 use std::path::Path;
 use std::sync::OnceLock;
 
-/// File storing persistent recipient public keys (REQ-36)
-pub const RECIPIENTS_FILE: &str = ".secrets/recipients";
+/// File storing persistent recipient public keys (REQ-36); re-exported from [`defaults`].
+pub use defaults::RECIPIENTS_FILE;
 
 /// Read persistent recipients from .secrets/recipients (one pubkey per line).
 ///

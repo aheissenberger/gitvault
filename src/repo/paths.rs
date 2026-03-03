@@ -1,3 +1,4 @@
+use crate::defaults;
 use crate::error::GitvaultError;
 use crate::{crypto, merge};
 use std::fs;
@@ -20,11 +21,11 @@ impl GitRunner for SystemGitRunner {
     }
 }
 
-/// Directory for encrypted artifacts (REQ-7)
-pub const SECRETS_DIR: &str = "secrets";
+/// Directory for encrypted artifacts (REQ-7); re-exported from [`defaults`].
+pub use defaults::SECRETS_DIR;
 
-/// Base directory for plaintext outputs (REQ-8)
-pub const PLAIN_BASE_DIR: &str = ".secrets/plain";
+/// Base directory for plaintext outputs (REQ-8); re-exported from [`defaults`].
+pub use defaults::PLAIN_BASE_DIR;
 
 /// Guard against path traversal: ensure `target` is under `base`.
 ///

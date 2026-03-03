@@ -3,11 +3,12 @@ use std::io::Write;
 use std::path::Path;
 use tempfile::NamedTempFile;
 
+use crate::defaults;
 use crate::error::GitvaultError;
 use crate::permissions;
 
 /// Entries that must be in .gitignore for safety
-pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[".env", ".secrets/plain/"];
+pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[defaults::MATERIALIZE_OUTPUT, ".secrets/plain/"];
 
 /// Materialize decrypted secrets to the root-level `.env` file.
 ///
@@ -26,9 +27,12 @@ pub fn materialize_env_file(
     secrets: &[(String, String)],
 ) -> Result<(), GitvaultError> {
     // REQ-20: ensure .env is in .gitignore before writing
-    ensure_gitignored(repo_root, &[".env", ".secrets/plain/"])?;
+    ensure_gitignored(
+        repo_root,
+        &[defaults::MATERIALIZE_OUTPUT, ".secrets/plain/"],
+    )?;
 
-    let env_path = repo_root.join(".env");
+    let env_path = repo_root.join(defaults::MATERIALIZE_OUTPUT);
 
     // REQ-19: sort keys deterministically
     let mut sorted: Vec<&(String, String)> = secrets.iter().collect();

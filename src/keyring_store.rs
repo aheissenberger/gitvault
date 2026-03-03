@@ -6,11 +6,9 @@
 //! - Linux: kernel keyutils (linux-native feature)
 //! - Windows: Credential Manager (windows-native feature)
 
+use crate::defaults;
 use crate::error::GitvaultError;
 use zeroize::Zeroizing;
-
-const SERVICE: &str = "gitvault";
-const USERNAME: &str = "age-identity";
 
 /// Store the age identity key in the OS keyring (REQ-39).
 ///
@@ -72,7 +70,7 @@ pub fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultErr
 where
     F: FnOnce(&str, &str, &str) -> Result<(), GitvaultError>,
 {
-    set_password(SERVICE, USERNAME, key)
+    set_password(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT, key)
 }
 
 /// Injectable variant of [`keyring_get`] — calls `get_password(service, username)`.
@@ -84,7 +82,7 @@ pub fn keyring_get_with<F>(get_password: F) -> Result<Zeroizing<String>, Gitvaul
 where
     F: FnOnce(&str, &str) -> Result<Zeroizing<String>, GitvaultError>,
 {
-    get_password(SERVICE, USERNAME)
+    get_password(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT)
 }
 
 /// Injectable variant of [`keyring_delete`] — calls `delete_credential(service, username)`.
@@ -96,7 +94,7 @@ pub fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<(), GitvaultError>,
 {
-    delete_credential(SERVICE, USERNAME)
+    delete_credential(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT)
 }
 
 #[cfg(test)]
@@ -159,7 +157,11 @@ mod tests {
         .unwrap();
         assert_eq!(
             captured,
-            Some((SERVICE.to_string(), USERNAME.to_string(), "k".to_string()))
+            Some((
+                defaults::KEYRING_SERVICE.to_string(),
+                defaults::KEYRING_ACCOUNT.to_string(),
+                "k".to_string()
+            ))
         );
     }
 
@@ -172,7 +174,13 @@ mod tests {
         })
         .unwrap();
         assert_eq!(*value, "secret");
-        assert_eq!(captured, Some((SERVICE.to_string(), USERNAME.to_string())));
+        assert_eq!(
+            captured,
+            Some((
+                defaults::KEYRING_SERVICE.to_string(),
+                defaults::KEYRING_ACCOUNT.to_string()
+            ))
+        );
     }
 
     #[test]
@@ -183,7 +191,13 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(captured, Some((SERVICE.to_string(), USERNAME.to_string())));
+        assert_eq!(
+            captured,
+            Some((
+                defaults::KEYRING_SERVICE.to_string(),
+                defaults::KEYRING_ACCOUNT.to_string()
+            ))
+        );
     }
 
     #[test]

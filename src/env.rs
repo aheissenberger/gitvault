@@ -1,3 +1,4 @@
+use crate::defaults;
 use crate::error::GitvaultError;
 use regex::Regex;
 use std::fs;
@@ -8,8 +9,8 @@ use std::sync::OnceLock;
 ///
 /// Priority (REQ-11):
 /// 1. `GITVAULT_ENV` environment variable
-/// 2. `.secrets/env` file in the worktree root
-/// 3. Default: "dev"
+/// 2. [`defaults::ENV_FILE`] (`.secrets/env`) file in the worktree root
+/// 3. Default: [`defaults::DEFAULT_ENV`] (`"dev"`)
 ///
 /// Each worktree resolves independently (REQ-12) because resolution
 /// is relative to the passed `worktree_root` path.
@@ -24,7 +25,7 @@ pub fn resolve_env(worktree_root: &Path) -> String {
     }
 
     // Priority 2: .secrets/env file
-    let env_file = worktree_root.join(".secrets").join("env");
+    let env_file = worktree_root.join(defaults::ENV_FILE);
     if let Ok(content) = fs::read_to_string(&env_file) {
         let env = content.trim().to_string();
         if !env.is_empty() {
@@ -33,7 +34,7 @@ pub fn resolve_env(worktree_root: &Path) -> String {
     }
 
     // Priority 3: default
-    "dev".to_string()
+    defaults::DEFAULT_ENV.to_string()
 }
 
 /// Validate that an environment name is safe to use as a path component.

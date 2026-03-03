@@ -8,14 +8,13 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::defaults;
 use crate::error::GitvaultError;
 use crate::permissions;
 
-/// Default token TTL in seconds (1 hour).
-pub const DEFAULT_TOKEN_TTL_SECS: u64 = 3600;
-
-/// Path of the allow token relative to repo root.
-const TOKEN_PATH: &str = ".secrets/.prod-token";
+/// Default token TTL in seconds (1 hour); re-exported from [`defaults`] for
+/// call-sites that import directly from this module.
+pub use defaults::DEFAULT_BARRIER_TTL_SECS as DEFAULT_TOKEN_TTL_SECS;
 
 /// Check the production barrier for the given environment.
 ///
@@ -56,7 +55,7 @@ fn check_prod_barrier_with_confirm<F>(
 where
     F: FnOnce() -> Result<bool, GitvaultError>,
 {
-    if env != "prod" {
+    if env != defaults::DEFAULT_PROD_ENV {
         return Ok(());
     }
 
@@ -124,7 +123,7 @@ pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError>
         .checked_add(ttl_secs)
         .ok_or_else(|| GitvaultError::Other("timestamp overflow".to_string()))?;
 
-    let token_path = repo_root.join(TOKEN_PATH);
+    let token_path = repo_root.join(defaults::BARRIER_TOKEN_FILE);
     if let Some(parent) = token_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -152,7 +151,7 @@ fn enforce_restricted_token_permissions(path: &Path) -> Result<(), GitvaultError
 ///
 /// Returns [`GitvaultError::Io`] if the token file exists but cannot be removed.
 pub fn revoke_prod(repo_root: &Path) -> Result<(), GitvaultError> {
-    let token_path = repo_root.join(TOKEN_PATH);
+    let token_path = repo_root.join(defaults::BARRIER_TOKEN_FILE);
     match fs::remove_file(&token_path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -163,7 +162,7 @@ pub fn revoke_prod(repo_root: &Path) -> Result<(), GitvaultError> {
 
 /// Returns true if a valid (unexpired) allow token exists. REQ-14.
 fn has_valid_token(repo_root: &Path) -> bool {
-    let token_path = repo_root.join(TOKEN_PATH);
+    let token_path = repo_root.join(defaults::BARRIER_TOKEN_FILE);
     let Ok(content) = fs::read_to_string(&token_path) else {
         return false;
     };
@@ -254,7 +253,7 @@ mod tests {
     #[test]
     fn token_path_constant_is_under_secrets_dir() {
         // The token path itself: just verify the constant is sane
-        assert!(TOKEN_PATH.starts_with(".secrets/"));
+        assert!(defaults::BARRIER_TOKEN_FILE.starts_with(".secrets/"));
     }
 
     #[test]
