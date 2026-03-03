@@ -3,7 +3,7 @@
 A Git-native secrets manager for multi-developer and multi-agent workflows. Secrets are encrypted
 with [age](https://age-encryption.org) and stored in your repository — never plaintext.
 
-## Features (100% of spec — all REQ-1..58 implemented)
+## Features (implementation highlights)
 
 - **age encryption** — standard file format, native Rust, no external binaries required (REQ-1, 2)
 - **Multi-recipient** — encrypt once for every team member; any recipient can decrypt (REQ-3)
@@ -22,6 +22,7 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   each worktree is independent (REQ-11, 12)
 - **Production barrier** — timed allow-token required to materialize or run against `prod`;
   interactive confirmation fallback (REQ-13–15)
+- **Production token revoke** — `revoke-prod` removes the allow-token immediately (REQ-14)
 - **Root `.env` materialization** — atomic write, restricted permissions (`0600` on POSIX,
   restricted ACL on Windows), deterministic sorted output, auto-added to `.gitignore`
   (REQ-16–20)
@@ -34,6 +35,8 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   `rotate` re-encrypts all secrets for the current recipient set (REQ-36, 37, 38)
 - **OS keyring** — `keyring set/get/delete`; `GITVAULT_KEYRING=1` loads identity from system
   keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager) (REQ-39)
+- **Identity bootstrap** — `identity create` generates local identities (classic/hybrid profile)
+  and can store to keyring or export to file (REQ-61, REQ-62)
 - **Security hardening** — fail-closed on decrypt error, `--reveal` required to print secrets,
   path-traversal guard, atomic writes everywhere, `status` never decrypts (REQ-40–44)
 - **JSON output & non-interactive mode** — all commands accept `--json` and `--no-prompt`;
@@ -155,210 +158,61 @@ gitvault --json status   # machine-readable
 ```
 gitvault [OPTIONS] <COMMAND>
 
-Options:
-  --json           Output as JSON (all commands)
-  --no-prompt      Non-interactive / CI mode (all commands; auto-set when CI=true)
-  --aws-profile    AWS profile for SSM backend (or AWS_PROFILE env var)
-  --aws-role-arn   AWS role ARN to assume for SSM backend (or AWS_ROLE_ARN env var)
+Core options (available on all commands):
+  --json
+  --no-prompt
+  --identity-selector <IDENTITY_SELECTOR>
+  --aws-profile <AWS_PROFILE>
+  --aws-role-arn <AWS_ROLE_ARN>
 
 Commands:
-  encrypt       Encrypt a file → secrets/<env>/<name>.age (or preserve repo-relative path with --keep-path)
-  decrypt       Decrypt a .age file (or field-level); bare --output restores repo-relative path from secrets/<env>/...
-  materialize   Decrypt all secrets/*.age → root .env
-  status        Check repo safety (exit 3 if plaintext is tracked)
-  harden        Update .gitignore and install git hooks
-  run           Run a command with secrets injected into its environment
-  allow-prod    Write a timed production allow-token
-  recipient     Manage persistent recipients (add / remove / list)
+  encrypt       Encrypt a secret file
+  decrypt       Decrypt a .age encrypted file
+  materialize   Materialize secrets to root .env
+  status        Check repository safety status
+  harden        Harden repository (update .gitignore, install hooks)
+  run           Run a command with secrets injected as environment variables
+  allow-prod    Write a timed production allow token
+  revoke-prod   Revoke the production allow token immediately
+  merge-driver  Run as git merge driver for .env files
+  recipient     Manage persistent recipients
   rotate        Re-encrypt all secrets with the current recipients list
-  keyring       Store/retrieve identity key in the OS keyring
-  merge-driver  Git merge driver for key-level .env merges
-  check         Preflight validation without side effects
+  keyring       Manage identity key in OS keyring
+  identity      Manage local identity keys (`identity create`)
+  check         Run preflight validation without side effects
   help          Print help
 ```
 
-### `encrypt`
+> This section is synchronized with live CLI help output (`gitvault --help`, `gitvault <command> --help`).
+> If built with `--features ssm`, an additional `ssm` command group is available.
 
-```
-gitvault encrypt <FILE> [--recipient <PUBKEY>...] [--keep-path] [--fields <FIELDS>] [--value-only]
-```
+### Operator quick map
 
-**Whole-file mode** (default): reads `<FILE>`, encrypts it for all recipients, writes
-`secrets/<active-env>/<FILE>.age` where active env resolves via `SECRETS_ENV` → `.secrets/env`
-→ `dev`. If no `--recipient` is provided the local identity's public key is used.
+| Task | Command |
+|------|---------|
+| Encrypt whole file | `gitvault encrypt <file> -r <age_pubkey>` |
+| Encrypt selected fields (JSON/YAML/TOML) | `gitvault encrypt <file> --fields a.b,c` |
+| Encrypt `.env` per value | `gitvault encrypt .env --value-only` |
+| Decrypt to file | `gitvault decrypt <file.age> -i <identity>` |
+| Decrypt and print to stdout | `gitvault decrypt <file.age> --reveal` |
+| Materialize root `.env` | `gitvault materialize -i <identity>` |
+| Run command with injected secrets | `gitvault run -- <cmd> [args...]` |
+| Strict safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |
+| Validate setup without changes | `gitvault check [--env <env>]` |
+| Enable prod operation window | `gitvault allow-prod [--ttl 3600]` |
+| Revoke prod operation window | `gitvault revoke-prod` |
+| Manage recipients | `gitvault recipient add|remove|list ...` |
+| Re-encrypt after recipient changes | `gitvault rotate -i <identity>` |
+| Store/use OS keyring identity | `gitvault keyring set|get|delete` + `GITVAULT_KEYRING=1 ...` |
+| Create new identity | `gitvault identity create [--profile classic|hybrid]` |
 
-**Keep-path mode** (`--keep-path`): preserves `<FILE>` path relative to repo root under
-`secrets/<active-env>/...`. Example: `app/config/service.env` →
-`secrets/dev/app/config/service.env.age`.
+### High-signal command details
 
-**Field-level mode** (`--fields KEY1,KEY2`): for `.json`, `.yaml`/`.yml`, and `.toml` files, only
-the specified fields are encrypted in-place using age ASCII armor. Unchanged fields keep their
-existing ciphertext unchanged (REQ-5: deterministic, git-diff-friendly).
-
-**Value-only mode** (`--value-only`): for `.env` files, encrypts each `KEY=VALUE` value
-individually instead of the whole file.
-
-### `decrypt`
-
-```
-gitvault decrypt <FILE> [--identity <KEY_FILE>] [--output [PATH]] [--fields <FIELDS>]
-```
-
-Decrypts `<FILE>`. Without `--fields`, strips the `.age` extension and writes plaintext.
-With `--fields`, decrypts only the specified inline fields (JSON/YAML/TOML).
-Identity is read from `--identity` or `GITVAULT_IDENTITY` env var.
-
-- `--output <PATH>` writes to explicit path.
-- Bare `--output` (without value) restores repo-relative path from `secrets/<env>/...`.
-- Without `--output`, default behavior stays unchanged (writes next to encrypted input with `.age` stripped).
-
-### `materialize`
-
-```
-gitvault materialize [--env <ENV>] [--identity <KEY_FILE>] [--prod]
-```
-
-Decrypts env-specific `secrets/<env>/*.age` files (or legacy `secrets/*.age` fallback), parses
-`KEY=VALUE` pairs, and writes a deterministic root `.env` (sorted keys, canonical quoting,
-restricted permissions, atomic rename). Use `--prod` to activate the production barrier check
-(REQ-13).
-
-### `status`
-
-```
-gitvault status [--fail-if-dirty]
-```
-
-Reports the resolved environment and checks for tracked plaintext (exit `3` if found).
-`--fail-if-dirty` also exits `6` if `secrets/` has uncommitted changes (REQ-32).
-
-### `harden`
-
-```
-gitvault harden
-```
-
-Ensures `.env` and `.secrets/plain/` are in `.gitignore` and installs idempotent pre-commit /
-pre-push hooks. `pre-push` runs `gitvault status --no-prompt --fail-if-dirty` to block drift.
-Also ensures `.gitattributes` contains `*.env merge=gitvault-env` and sets local git config
-`merge.gitvault-env.driver="gitvault merge-driver %O %A %B"`.
-If `core.hooksPath` is configured, hooks are installed in that active hooks directory.
-
-### Hook Manager Integration
-
-By default, `gitvault harden` installs built-in git hooks — no configuration needed.
-To delegate to an external hook manager, create `.gitvault/config.toml`:
-
-```toml
-[hooks]
-adapter = "husky"   # or "pre-commit" or "lefthook"
-```
-
-When configured, gitvault resolves a `gitvault-<adapter>` binary on `PATH` and invokes it with `harden`:
-
-- **CI / `--no-prompt` mode** — missing adapter binary → deterministic failure with install instructions (exit `2`).
-- **Interactive mode** — missing adapter binary → warning, fallback to built-in hooks.
-
-### `run`
-
-```
-gitvault run [--env <ENV>] [--identity <KEY_FILE>] [--prod] [--clear-env] [--pass <VARS>] -- <CMD> [ARGS...]
-```
-
-Decrypts secrets and injects them into `<CMD>`'s environment without writing `.env` (REQ-21).
-Child exit code is propagated directly (REQ-23).
-
-| Flag | Effect |
-|------|--------|
-| `--clear-env` | Start the child with an empty environment (REQ-24) |
-| `--pass VARS` | Comma-separated vars to pass through when `--clear-env` is set (REQ-24) |
-| `--prod` | Require production barrier (REQ-25) |
-
-### `allow-prod`
-
-```
-gitvault allow-prod [--ttl <SECONDS>]
-```
-
-Writes a timed allow-token to `.secrets/.prod-token` (default TTL: 3600 s). While valid, `--prod`
-commands skip the interactive confirmation prompt (REQ-14).
-
-### `recipient`
-
-```
-gitvault recipient <add <PUBKEY> | remove <PUBKEY> | list>
-```
-
-Manages the persistent recipients file at `.secrets/recipients`. When `encrypt` or `rotate` is run
-without `--recipient`, this file is used automatically.
-
-```bash
-gitvault recipient add age1abc...    # register a team member
-gitvault recipient remove age1xyz... # revoke access (then rotate)
-gitvault recipient list              # show current recipients
-```
-
-### `rotate`
-
-```
-gitvault rotate [--identity <KEY_FILE>]
-```
-
-Re-encrypts every `secrets/**/*.age` file with the current `.secrets/recipients` list (REQ-38).
-Run after adding or removing a recipient to enforce the new access set.
-
-### `keyring`
-
-```
-gitvault keyring <set [--identity <KEY_FILE>] | get | delete>
-```
-
-Stores or retrieves the age identity key in the OS keyring (macOS Keychain, Linux Secret Service,
-Windows Credential Manager). Set `GITVAULT_KEYRING=1` to load the identity from the keyring
-automatically instead of using `GITVAULT_IDENTITY` or `--identity` (REQ-39).
-
-```bash
-gitvault keyring set --identity ~/.age/identity.key  # store once
-GITVAULT_KEYRING=1 gitvault materialize              # use keyring identity
-gitvault keyring delete                              # remove
-```
-
-### `merge-driver`
-
-```
-gitvault merge-driver <BASE> <OURS> <THEIRS>
-```
-
-Runs as a Git merge driver performing key-level three-way merge of `.env` files (REQ-34).
-Exit `0` on clean merge; exit `1` with conflict markers on same-key conflict.
-
-Register once per repository:
-
-```bash
-gitvault harden
-
-# Manual equivalent:
-git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"
-echo '*.env merge=gitvault-env' >> .gitattributes
-```
-
-### `check`
-
-```
-gitvault check [--env <ENV>] [--identity <KEY_FILE>]
-```
-
-Preflight validation without any side effects (REQ-50). Checks:
-1. No tracked plaintext in the repository
-2. Identity is loadable and parseable
-3. All keys in `.secrets/recipients` are valid age public keys
-4. Reports secret file count and resolved environment
-
-```bash
-gitvault check                        # human-readable
-gitvault --json check                 # machine-readable (includes format_version)
-CI=true gitvault check --no-prompt   # CI usage (auto-set by CI=true)
-```
+- `encrypt`: supports `--keep-path`, `--fields`, and `--value-only`.
+- `decrypt`: supports optional `--output [path]`, `--fields`, `--value-only`, and `--reveal`.
+- `run`: supports `--clear-env` plus `--pass <VARS>` for controlled pass-through.
+- `harden`: installs/updates hooks; with adapter config it delegates to external hook manager.
+- `merge-driver`: repository registration shortcut is `gitvault harden`.
 
 ---
 
