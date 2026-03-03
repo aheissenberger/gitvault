@@ -189,6 +189,7 @@ fn load_ssh_agent_identity(selector: Option<&str>) -> Result<Zeroizing<String>, 
 /// Probe each source in the identity chain and return an [`IdentitySourceState`] for each.
 ///
 /// Used by `cmd_check` to report per-source resolution status without loading the key.
+#[must_use]
 pub fn probe_identity_sources(
     path: Option<&str>,
     selector: Option<&str>,
@@ -712,7 +713,7 @@ mod tests {
     fn test_ssh_agent_error_display_ambiguous() {
         let err = SshAgentError::Ambiguous(3);
         let msg = format!("{err}");
-        assert!(msg.contains("3"));
+        assert!(msg.contains('3'));
         assert!(msg.contains("ambiguous"));
     }
 
@@ -722,7 +723,7 @@ mod tests {
     fn test_list_ssh_agent_keys_no_agent_returns_ok_or_not_available() {
         // Without an SSH agent connected, ssh-add returns empty stdout → Ok([])
         // or errors with NotAvailable.  Both are valid outcomes.
-        let result = with_env_var("SSH_AUTH_SOCK", None, || list_ssh_agent_keys());
+        let result = with_env_var("SSH_AUTH_SOCK", None, list_ssh_agent_keys);
         match result {
             Ok(keys) => {
                 // ssh-add ran but found no identities (expected when no agent)
@@ -739,15 +740,14 @@ mod tests {
 
     #[test]
     fn test_probe_identity_sources_with_explicit_valid_path() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (tmp_file, _) = setup_identity_file();
         let states = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("SSH_AUTH_SOCK", None, || {
                 with_env_var("GITVAULT_SSH_AGENT", None, || {
-                    probe_identity_sources(
-                        Some(tmp_file.path().to_str().unwrap()),
-                        None,
-                    )
+                    probe_identity_sources(Some(tmp_file.path().to_str().unwrap()), None)
                 })
             })
         });
@@ -755,18 +755,22 @@ mod tests {
         // Source 1: --identity with a valid file → Resolved
         assert!(
             matches!(&states[0], IdentitySourceState::Resolved { source } if source == "--identity"),
-            "source 1 should be Resolved for --identity, got: {:?}", states[0]
+            "source 1 should be Resolved for --identity, got: {:?}",
+            states[0]
         );
         // Source 3: ssh-agent disabled (no SSH env vars) → SourceNotAvailable
         assert!(
             matches!(&states[2], IdentitySourceState::SourceNotAvailable { source, .. } if source == "ssh-agent"),
-            "source 3 should be ssh-agent SourceNotAvailable, got: {:?}", states[2]
+            "source 3 should be ssh-agent SourceNotAvailable, got: {:?}",
+            states[2]
         );
     }
 
     #[test]
     fn test_probe_identity_sources_with_invalid_path() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let states = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("SSH_AUTH_SOCK", None, || {
                 with_env_var("GITVAULT_SSH_AGENT", None, || {
@@ -778,13 +782,16 @@ mod tests {
         // Source 1: --identity with nonexistent file → SourceNotAvailable
         assert!(
             matches!(&states[0], IdentitySourceState::SourceNotAvailable { source, .. } if source == "--identity"),
-            "source 1 should be SourceNotAvailable for bad --identity path, got: {:?}", states[0]
+            "source 1 should be SourceNotAvailable for bad --identity path, got: {:?}",
+            states[0]
         );
     }
 
     #[test]
     fn test_probe_identity_sources_with_gitvault_identity_env_var() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (tmp_file, _) = setup_identity_file();
         let states = with_env_var(
             "GITVAULT_IDENTITY",
@@ -802,13 +809,16 @@ mod tests {
         // Source 1: GITVAULT_IDENTITY set to valid path → Resolved
         assert!(
             matches!(&states[0], IdentitySourceState::Resolved { source } if source == "GITVAULT_IDENTITY"),
-            "source 1 should be Resolved for GITVAULT_IDENTITY, got: {:?}", states[0]
+            "source 1 should be Resolved for GITVAULT_IDENTITY, got: {:?}",
+            states[0]
         );
     }
 
     #[test]
     fn test_probe_identity_sources_no_identity_no_ssh() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let states = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("SSH_AUTH_SOCK", None, || {
                 with_env_var("GITVAULT_SSH_AGENT", None, || {
@@ -820,12 +830,14 @@ mod tests {
         // Source 1: no explicit source → SourceNotAvailable
         assert!(
             matches!(&states[0], IdentitySourceState::SourceNotAvailable { source, reason } if source == "--identity/GITVAULT_IDENTITY" && reason.contains("not provided")),
-            "source 1 should be SourceNotAvailable with 'not provided', got: {:?}", states[0]
+            "source 1 should be SourceNotAvailable with 'not provided', got: {:?}",
+            states[0]
         );
         // Source 3: no SSH → SourceNotAvailable with SSH_AUTH_SOCK reason
         assert!(
             matches!(&states[2], IdentitySourceState::SourceNotAvailable { source, .. } if source == "ssh-agent"),
-            "source 3 should be ssh-agent SourceNotAvailable, got: {:?}", states[2]
+            "source 3 should be ssh-agent SourceNotAvailable, got: {:?}",
+            states[2]
         );
     }
 
@@ -834,7 +846,9 @@ mod tests {
         // With GITVAULT_SSH_AGENT=1 but no real agent, list_ssh_agent_keys returns
         // Ok([]) (ssh-add exits with empty stdout), so the probe reports
         // SourceNotAvailable for ssh-agent.
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let states = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("SSH_AUTH_SOCK", None, || {
                 with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
@@ -847,7 +861,7 @@ mod tests {
         let ssh_state = &states[2];
         assert!(
             matches!(ssh_state, IdentitySourceState::SourceNotAvailable { source, .. } if source == "ssh-agent"),
-            "source 3 should be ssh-agent SourceNotAvailable, got: {:?}", ssh_state
+            "source 3 should be ssh-agent SourceNotAvailable, got: {ssh_state:?}"
         );
     }
 
@@ -857,7 +871,9 @@ mod tests {
     fn test_load_identity_with_ssh_agent_enabled_no_real_agent_fails_closed() {
         // When GITVAULT_SSH_AGENT=1 but no agent is available, the chain should
         // fall through to fail-closed with a Usage error.
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let err = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("SSH_AUTH_SOCK", None, || {
                 with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
@@ -911,7 +927,9 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_from_recipients_file() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::TempDir::new().expect("temp dir");
 
         // Write a valid recipients file
@@ -933,7 +951,9 @@ mod tests {
 
     #[test]
     fn test_resolve_recipient_keys_fallback_to_identity() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::TempDir::new().expect("temp dir");
         let (identity_file, identity) = setup_identity_file();
         let pubkey = identity.to_public().to_string();
@@ -956,7 +976,9 @@ mod tests {
 
     #[test]
     fn test_load_identity_from_source_unresolved_falls_back_to_chain() {
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (tmp_file, _) = setup_identity_file();
         let source = fhsm::IdentitySource::Unresolved;
         // Provide GITVAULT_IDENTITY so the full chain can resolve
@@ -969,7 +991,10 @@ mod tests {
                 })
             },
         );
-        assert!(result.is_ok(), "Unresolved should fall back to chain: {result:?}");
+        assert!(
+            result.is_ok(),
+            "Unresolved should fall back to chain: {result:?}"
+        );
     }
 
     #[test]
@@ -988,14 +1013,16 @@ mod tests {
     fn test_load_identity_source_openssh_key_file_returns_raw_content() {
         // A file beginning with the OpenSSH private key header should be returned
         // as-is without extracting an AGE-SECRET-KEY line (covers line 347).
-        let mut f = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
-        let content =
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nfakebase64==\n-----END OPENSSH PRIVATE KEY-----\n";
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        let content = "-----BEGIN OPENSSH PRIVATE KEY-----\nfakebase64==\n-----END OPENSSH PRIVATE KEY-----\n";
         f.write_all(content.as_bytes()).unwrap();
         f.flush().unwrap();
         let result = load_identity_source(f.path().to_str().unwrap(), "test-source");
-        assert!(result.is_ok(), "OpenSSH key file should succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "OpenSSH key file should succeed: {result:?}"
+        );
         assert_eq!(result.unwrap().as_str(), content);
     }
 
@@ -1005,7 +1032,9 @@ mod tests {
     fn test_probe_identity_sources_gitvault_identity_invalid_path_is_not_available() {
         // When GITVAULT_IDENTITY is set to a non-existent path, source 1 should be
         // SourceNotAvailable with source == "GITVAULT_IDENTITY" (covers lines 214-217).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let states = with_env_var(
             "GITVAULT_IDENTITY",
             Some("/nonexistent/path/to/identity_key_xyz"),
@@ -1038,7 +1067,7 @@ mod tests {
     // ─── SSH agent mock infrastructure ───────────────────────────────────────
 
     /// Create a temp directory containing fake `ssh-add` and `ssh-keygen` binaries.
-    /// Returns the TempDir (caller must keep it alive).
+    /// Returns the `TempDir` (caller must keep it alive).
     #[cfg(unix)]
     fn setup_fake_ssh_binaries(ssh_add_output: &str, ssh_keygen_output: &str) -> tempfile::TempDir {
         use std::os::unix::fs::PermissionsExt;
@@ -1047,7 +1076,7 @@ mod tests {
         let ssh_add_path = bin_dir.path().join("ssh-add");
         std::fs::write(
             &ssh_add_path,
-            format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", ssh_add_output),
+            format!("#!/bin/sh\nprintf '%s\\n' '{ssh_add_output}'\n"),
         )
         .unwrap();
         std::fs::set_permissions(&ssh_add_path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1055,11 +1084,10 @@ mod tests {
         let ssh_keygen_path = bin_dir.path().join("ssh-keygen");
         std::fs::write(
             &ssh_keygen_path,
-            format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", ssh_keygen_output),
+            format!("#!/bin/sh\nprintf '%s\\n' '{ssh_keygen_output}'\n"),
         )
         .unwrap();
-        std::fs::set_permissions(&ssh_keygen_path, std::fs::Permissions::from_mode(0o755))
-            .unwrap();
+        std::fs::set_permissions(&ssh_keygen_path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         bin_dir
     }
@@ -1071,14 +1099,16 @@ mod tests {
     fn test_list_ssh_agent_keys_with_mock_returns_ed25519_key() {
         // Uses a fake ssh-add binary to test the ED25519 key parsing loop
         // in list_ssh_agent_keys (covers lines 75-100).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let bin_dir =
             setup_fake_ssh_binaries("256 SHA256:testfingerprint id_ed25519 (ED25519)", "");
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
 
-        let result = with_env_var("PATH", Some(&new_path), || list_ssh_agent_keys());
+        let result = with_env_var("PATH", Some(&new_path), list_ssh_agent_keys);
 
         let keys = result.expect("should succeed with mock ssh-add");
         assert_eq!(keys.len(), 1, "should have exactly 1 ED25519 key");
@@ -1094,13 +1124,15 @@ mod tests {
     #[test]
     fn test_list_ssh_agent_keys_with_mock_filters_non_ed25519() {
         // When ssh-add output contains a non-ED25519 key, it should be filtered out.
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let bin_dir = setup_fake_ssh_binaries("256 SHA256:rsafp rsa_key (RSA)", "");
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
 
-        let result = with_env_var("PATH", Some(&new_path), || list_ssh_agent_keys());
+        let result = with_env_var("PATH", Some(&new_path), list_ssh_agent_keys);
         let keys = result.expect("should succeed with mock ssh-add");
         assert_eq!(keys.len(), 0, "RSA key should be filtered out");
     }
@@ -1112,7 +1144,9 @@ mod tests {
     fn test_find_ssh_key_file_with_mock_keygen_finds_matching_file() {
         // Tests find_ssh_key_file with fake HOME and fake ssh-keygen that returns
         // a matching fingerprint (covers lines 107-128).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let home_dir = tempfile::TempDir::new().unwrap();
         let ssh_dir = home_dir.path().join(".ssh");
@@ -1128,10 +1162,7 @@ mod tests {
         .unwrap();
 
         // Fake ssh-keygen returns the matching fingerprint
-        let bin_dir = setup_fake_ssh_binaries(
-            "",
-            "256 SHA256:fp12345 test@host (ED25519)",
-        );
+        let bin_dir = setup_fake_ssh_binaries("", "256 SHA256:fp12345 test@host (ED25519)");
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
@@ -1141,13 +1172,9 @@ mod tests {
             comment: "identity".to_string(),
         };
 
-        let result = with_env_var(
-            "HOME",
-            Some(home_dir.path().to_str().unwrap()),
-            || {
-                with_env_var("PATH", Some(&new_path), || find_ssh_key_file(&key))
-            },
-        );
+        let result = with_env_var("HOME", Some(home_dir.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || find_ssh_key_file(&key))
+        });
 
         assert!(
             result.is_some(),
@@ -1162,7 +1189,9 @@ mod tests {
     #[test]
     fn test_load_ssh_agent_identity_one_key_returns_file_content() {
         // Tests the full path: list → find file → read content (covers lines 152-183).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let home_dir = tempfile::TempDir::new().unwrap();
         let ssh_dir = home_dir.path().join(".ssh");
@@ -1175,22 +1204,16 @@ mod tests {
 
         let fingerprint = "SHA256:fp_for_load_test";
         let bin_dir = setup_fake_ssh_binaries(
-            &format!("256 {} identity (ED25519)", fingerprint),
-            &format!("256 {} test@host (ED25519)", fingerprint),
+            &format!("256 {fingerprint} identity (ED25519)"),
+            &format!("256 {fingerprint} test@host (ED25519)"),
         );
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
 
-        let result = with_env_var(
-            "HOME",
-            Some(home_dir.path().to_str().unwrap()),
-            || {
-                with_env_var("PATH", Some(&new_path), || {
-                    load_ssh_agent_identity(None)
-                })
-            },
-        );
+        let result = with_env_var("HOME", Some(home_dir.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || load_ssh_agent_identity(None))
+        });
 
         let content = result.expect("load_ssh_agent_identity should succeed");
         assert!(
@@ -1207,7 +1230,9 @@ mod tests {
         // When ssh-add returns empty output, list_ssh_agent_keys returns Ok([]).
         // load_ssh_agent_identity should then return Err(NotAvailable).
         // Covers lines 154-157 (keys.is_empty() true branch).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Fake ssh-add returns empty output → Ok([]) from list_ssh_agent_keys
         let bin_dir = setup_fake_ssh_binaries("", "");
@@ -1215,9 +1240,7 @@ mod tests {
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
 
-        let result = with_env_var("PATH", Some(&new_path), || {
-            load_ssh_agent_identity(None)
-        });
+        let result = with_env_var("PATH", Some(&new_path), || load_ssh_agent_identity(None));
 
         assert!(
             matches!(result, Err(SshAgentError::NotAvailable(_))),
@@ -1232,13 +1255,12 @@ mod tests {
     fn test_load_ssh_agent_identity_selector_no_match_returns_not_available() {
         // When a selector matches no keys, Err(NotAvailable) is returned.
         // Covers lines 161-168 (selector filtering + 0 match arm).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let fingerprint = "SHA256:fp_selector_test";
-        let bin_dir = setup_fake_ssh_binaries(
-            &format!("256 {} mykey (ED25519)", fingerprint),
-            "",
-        );
+        let bin_dir = setup_fake_ssh_binaries(&format!("256 {fingerprint} mykey (ED25519)"), "");
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
@@ -1263,7 +1285,9 @@ mod tests {
         // should return a Usage error mentioning ambiguity.
         // Covers lines 430-434 (SshAgentError::Ambiguous arm) and line 185 in
         // load_ssh_agent_identity (count => Ambiguous(count)).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Fake ssh-add returns 2 ED25519 keys → list_ssh_agent_keys returns Ok([k1, k2])
         // → load_ssh_agent_identity sees keys.len() = 2 → Err(Ambiguous(2))
@@ -1294,7 +1318,7 @@ mod tests {
         );
         let msg = err.to_string();
         assert!(
-            msg.contains("2"),
+            msg.contains('2'),
             "error message should mention count 2: {msg}"
         );
     }
@@ -1307,13 +1331,13 @@ mod tests {
         // When SSH agent has exactly one ED25519 key, probe should report
         // IdentitySourceState::Resolved for the ssh-agent source.
         // Covers lines 241, 255-276 (Ok path → key count = 1 → Resolved).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let fingerprint = "SHA256:fp_probe_test";
-        let bin_dir = setup_fake_ssh_binaries(
-            &format!("256 {} probe_key (ED25519)", fingerprint),
-            "",
-        );
+        let bin_dir =
+            setup_fake_ssh_binaries(&format!("256 {fingerprint} probe_key (ED25519)"), "");
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
@@ -1345,7 +1369,9 @@ mod tests {
     fn test_probe_identity_sources_ssh_two_keys_ambiguous() {
         // When SSH agent has 2 keys and no selector, probe should report Ambiguous.
         // Covers lines 273-276 (count => Ambiguous in probe).
-        let _lock = global_test_lock().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let bin_dir = setup_fake_ssh_binaries(
             "256 SHA256:fp_a key_a (ED25519)\n256 SHA256:fp_b key_b (ED25519)",

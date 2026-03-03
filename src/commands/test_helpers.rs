@@ -25,6 +25,7 @@ impl CwdGuard {
     /// # Panics
     ///
     /// Panics if the current directory cannot be read or if switching to `path` fails.
+    #[must_use]
     pub fn enter(path: &Path) -> Self {
         let previous = std::env::current_dir().expect("current dir should be readable");
         std::env::set_current_dir(path).expect("should switch cwd");
@@ -53,6 +54,7 @@ pub fn init_git_repo(path: &Path) {
 /// # Panics
 ///
 /// Panics if a temporary file cannot be created or the identity cannot be written to it.
+#[must_use]
 pub fn setup_identity_file() -> (NamedTempFile, x25519::Identity) {
     let identity = x25519::Identity::generate();
     let identity_file = NamedTempFile::new().expect("temp file should be created");

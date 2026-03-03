@@ -312,10 +312,10 @@ mod tests {
         let result = cmd_identity(
             crate::cli::IdentityAction::Create {
                 profile: IdentityProfile::Classic,
-                out: Some(path.clone()),
+                out: Some(path),
             },
-            true,  // json
-            true,  // no_prompt
+            true, // json
+            true, // no_prompt
         );
         // The dispatch should reach cmd_identity_create.
         assert!(
@@ -330,7 +330,7 @@ mod tests {
         let (_tmp, path) = make_out_file();
         let result = cmd_identity_create(
             IdentityProfile::Classic,
-            Some(path.clone()),
+            Some(path),
             true,  // json: exercises the serde_json path
             false, // no_prompt: exercises the eprintln warning if keyring fails
         );
@@ -348,8 +348,8 @@ mod tests {
 
         let result = cmd_identity_create(
             IdentityProfile::Hybrid,
-            None,   // no --out: keyring is the only storage
-            false,  // json=false: exercises the plain-text output path
+            None,  // no --out: keyring is the only storage
+            false, // json=false: exercises the plain-text output path
             true,
         );
         // With the mock keyring always succeeding, this should return Ok.
@@ -359,7 +359,11 @@ mod tests {
                 // If the mock still fails for some reason, accept Keyring/Usage errors
                 // without panicking — we just want to exercise the code path.
                 assert!(
-                    matches!(e, crate::error::GitvaultError::Usage(_) | crate::error::GitvaultError::Keyring(_)),
+                    matches!(
+                        e,
+                        crate::error::GitvaultError::Usage(_)
+                            | crate::error::GitvaultError::Keyring(_)
+                    ),
                     "unexpected error: {e:?}"
                 );
             }

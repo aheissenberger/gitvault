@@ -787,27 +787,21 @@ mod tests {
         let bin_dir = TempDir::new().unwrap();
         let mut lines = String::new();
         for i in 0..key_count {
-            lines.push_str(&format!(
-                "256 SHA256:fakeprint{i} test_key_{i} (ED25519)\n",
-            ));
+            use std::fmt::Write as _;
+            writeln!(lines, "256 SHA256:fakeprint{i} test_key_{i} (ED25519)").unwrap();
         }
         let ssh_add_path = bin_dir.path().join("ssh-add");
-        std::fs::write(
-            &ssh_add_path,
-            format!("#!/bin/sh\nprintf '%s' '{}'\n", lines),
-        )
-        .unwrap();
+        std::fs::write(&ssh_add_path, format!("#!/bin/sh\nprintf '%s' '{lines}'\n")).unwrap();
         std::fs::set_permissions(&ssh_add_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         // Also provide a stub ssh-keygen so PATH resolution doesn't fail
         let ssh_keygen_path = bin_dir.path().join("ssh-keygen");
         std::fs::write(&ssh_keygen_path, "#!/bin/sh\necho ''\n").unwrap();
-        std::fs::set_permissions(&ssh_keygen_path, std::fs::Permissions::from_mode(0o755))
-            .unwrap();
+        std::fs::set_permissions(&ssh_keygen_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         bin_dir
     }
 
-    /// When SSH agent has 2 ED25519 keys, probe_identity_sources returns Ambiguous.
-    /// cmd_check should report it in plain-text output (covers lines 283-285 in Ambiguous arm).
+    /// When SSH agent has 2 ED25519 keys, `probe_identity_sources` returns Ambiguous.
+    /// `cmd_check` should report it in plain-text output (covers lines 283-285 in Ambiguous arm).
     #[cfg(unix)]
     #[test]
     fn test_cmd_check_reports_ambiguous_ssh_source() {

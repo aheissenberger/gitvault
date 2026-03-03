@@ -42,6 +42,7 @@ pub enum AnyIdentity {
 
 impl AnyIdentity {
     /// Return a reference to the underlying [`age::Identity`] implementation.
+    #[must_use]
     pub fn as_identity(&self) -> &dyn age::Identity {
         match self {
             Self::X25519(id) => id,
@@ -439,8 +440,7 @@ mod tests {
             .expect("valid AGE-SECRET-KEY should parse");
         // The underlying identity should decrypt correctly.
         let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
-        let ciphertext = encrypt(vec![recipient], b"test")
-            .expect("encrypt should succeed");
+        let ciphertext = encrypt(vec![recipient], b"test").expect("encrypt should succeed");
         let decrypted = decrypt(any_identity.as_identity(), &ciphertext)
             .expect("decrypt with parsed identity should succeed");
         assert_eq!(decrypted, b"test");

@@ -327,10 +327,7 @@ mod tests {
             result.contains("new body"),
             "replaced block should contain new body"
         );
-        assert!(
-            !result.contains("old body"),
-            "old body should be replaced"
-        );
+        assert!(!result.contains("old body"), "old body should be replaced");
         assert!(
             result.contains("extra trailing line"),
             "trailing content after block should be preserved"

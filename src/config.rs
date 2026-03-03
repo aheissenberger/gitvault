@@ -138,9 +138,7 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
 
 /// Inner implementation for [`load_global_config`] that accepts an optional
 /// home-directory override (used by tests to avoid touching `HOME`).
-fn load_global_config_impl(
-    home_override: Option<&Path>,
-) -> Result<GitvaultConfig, GitvaultError> {
+fn load_global_config_impl(home_override: Option<&Path>) -> Result<GitvaultConfig, GitvaultError> {
     let home_path = match home_override {
         Some(p) => p.to_path_buf(),
         None => match std::env::var("HOME") {
@@ -271,8 +269,8 @@ pub fn effective_config(repo_root: &Path) -> Result<GitvaultConfig, GitvaultErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::commands::test_helpers::global_test_lock;
+    use tempfile::TempDir;
 
     fn make_config_file(dir: &TempDir, content: &str) {
         let gitvault_dir = dir.path().join(".gitvault");
@@ -397,8 +395,8 @@ mod tests {
     fn test_global_config_valid() {
         let home = TempDir::new().unwrap();
         make_global_config_file(&home, "[hooks]\nadapter = \"lefthook\"\n");
-        let config = load_global_config_impl(Some(home.path()))
-            .expect("valid global config should parse");
+        let config =
+            load_global_config_impl(Some(home.path())).expect("valid global config should parse");
         assert_eq!(config.hooks.adapter, Some(HookAdapter::Lefthook));
     }
 
@@ -515,7 +513,7 @@ mod tests {
         assert!(config.hooks.adapter.is_none());
     }
 
-    /// Covers line 148: HOME is empty → load_global_config_impl returns default without reading.
+    /// Covers line 148: HOME is empty → `load_global_config_impl` returns default without reading.
     #[test]
     fn test_load_global_config_empty_home_returns_default() {
         let _lock = global_test_lock().lock().unwrap();
@@ -536,7 +534,11 @@ mod tests {
     fn test_load_global_config_io_error_returns_usage_error() {
         let home = TempDir::new().unwrap();
         // Create a *directory* at the config.toml path → read_to_string fails with EISDIR.
-        let config_toml_path = home.path().join(".config").join("gitvault").join("config.toml");
+        let config_toml_path = home
+            .path()
+            .join(".config")
+            .join("gitvault")
+            .join("config.toml");
         std::fs::create_dir_all(&config_toml_path).unwrap();
         let err = load_global_config_impl(Some(home.path()))
             .expect_err("reading a dir as config should fail");

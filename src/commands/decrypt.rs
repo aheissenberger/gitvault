@@ -526,7 +526,7 @@ mod tests {
         assert!(restored.contains("KEY=VALUE"));
     }
 
-    /// Covers lines 170-174: strip_prefix error when encrypted file is outside the repo.
+    /// Covers lines 170-174: `strip_prefix` error when encrypted file is outside the repo.
     #[test]
     fn test_resolve_output_path_sentinel_outside_repo_errors() {
         let _lock = global_test_lock().lock().unwrap();
@@ -601,7 +601,7 @@ mod tests {
         );
     }
 
-    /// Covers line 84: `create_dir_all(parent)` when value_only output path parent doesn't exist.
+    /// Covers line 84: `create_dir_all(parent)` when `value_only` output path parent doesn't exist.
     #[test]
     fn test_cmd_decrypt_value_only_output_creates_missing_parent_dir() {
         let _lock = global_test_lock().lock().unwrap();

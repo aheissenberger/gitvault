@@ -50,7 +50,9 @@ fn compute_output_path(
             .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
             .to_string_lossy();
         let out_name = format!("{filename}.age");
-        Ok(repo::get_env_encrypted_path(repo_root, active_env, &out_name))
+        Ok(repo::get_env_encrypted_path(
+            repo_root, active_env, &out_name,
+        ))
     }
 }
 

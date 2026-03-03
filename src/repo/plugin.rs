@@ -112,8 +112,8 @@ pub fn invoke_adapter_harden(adapter_path: &Path, repo_root: &Path) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::HookAdapter;
     use crate::commands::test_helpers::global_test_lock;
+    use crate::config::HookAdapter;
     use std::str::FromStr;
 
     #[test]
@@ -171,7 +171,10 @@ mod tests {
             return; // Skip on platforms without /usr/bin/true
         }
         let result = invoke_adapter_harden(true_path, std::path::Path::new("/tmp"));
-        assert!(result.is_ok(), "invoke_adapter_harden with /usr/bin/true should succeed");
+        assert!(
+            result.is_ok(),
+            "invoke_adapter_harden with /usr/bin/true should succeed"
+        );
     }
 
     #[test]
@@ -221,12 +224,16 @@ mod tests {
             tmp.path().display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        unsafe { std::env::set_var("PATH", &new_path); }
+        unsafe {
+            std::env::set_var("PATH", &new_path);
+        }
 
         let adapter = HookAdapter::from_str("husky").unwrap();
         let result = find_adapter_binary(&adapter);
 
-        unsafe { std::env::set_var("PATH", original_path); }
+        unsafe {
+            std::env::set_var("PATH", original_path);
+        }
 
         assert!(
             matches!(result, AdapterLookup::Found(_)),
