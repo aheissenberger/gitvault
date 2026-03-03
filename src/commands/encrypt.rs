@@ -24,12 +24,22 @@ fn compute_output_path(
             std::env::current_dir()?.join(input_path)
         };
 
-        let rel_input = resolved_input.strip_prefix(repo_root).map_err(|_| {
-            GitvaultError::Usage(format!(
-                "--keep-path requires input under repository root: {}",
-                input_path.display()
-            ))
-        })?;
+        let canonical_repo_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
+        let canonical_input = resolved_input
+            .canonicalize()
+            .unwrap_or_else(|_| resolved_input.clone());
+
+        let rel_input = canonical_input
+            .strip_prefix(&canonical_repo_root)
+            .or_else(|_| resolved_input.strip_prefix(repo_root))
+            .map_err(|_| {
+                GitvaultError::Usage(format!(
+                    "--keep-path requires input under repository root: {}",
+                    input_path.display()
+                ))
+            })?;
 
         let rel_name = rel_input
             .file_name()
