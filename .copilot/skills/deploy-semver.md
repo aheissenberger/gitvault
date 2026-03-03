@@ -45,15 +45,15 @@ Example structure:
 After the bump type is known:
 
 1. Read current version from `Cargo.toml` (`[package].version`).
-2. Compute next version:
-   - `major`: `X+1.0.0`
-   - `minor`: `X.Y+1.0`
-   - `patch`: `X.Y.Z+1`
-3. Update `Cargo.toml` version.
-4. Run verification:
+2. Run verification:
    - `cargo verify`
    - Verify required coverage by running the CLI:
      - `cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs|ssm/backend\.rs" --fail-under-lines 95 > /dev/null 2>&1`
+3. Compute next version:
+   - `major`: `X+1.0.0`
+   - `minor`: `X.Y+1.0`
+   - `patch`: `X.Y.Z+1`
+4. Update `Cargo.toml` version.
 5. Commit with message:
    - `chore(release): v<new-version>`
 6. Create annotated tag:
