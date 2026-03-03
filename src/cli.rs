@@ -177,6 +177,12 @@ pub enum Commands {
         action: IdentityAction,
     },
 
+    /// AI tooling helpers (skill and context print)
+    Ai {
+        #[command(subcommand)]
+        action: AiAction,
+    },
+
     /// AWS SSM Parameter Store backend
     #[cfg(feature = "ssm")]
     Ssm {
@@ -281,6 +287,28 @@ mod tests {
             _ => panic!("expected encrypt command"),
         }
     }
+}
+
+/// AI subcommand: choose between skill and context printing.
+#[derive(Subcommand)]
+pub enum AiAction {
+    /// Print canonical gitvault skill content for Copilot usage
+    Skill {
+        #[command(subcommand)]
+        action: AiPrintAction,
+    },
+    /// Print concise project AI context for agent onboarding
+    Context {
+        #[command(subcommand)]
+        action: AiPrintAction,
+    },
+}
+
+/// AI print sub-subcommand.
+#[derive(Subcommand, Clone)]
+pub enum AiPrintAction {
+    /// Print the content
+    Print,
 }
 
 #[cfg(feature = "ssm")]

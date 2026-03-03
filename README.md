@@ -178,6 +178,7 @@ Commands:
   keyring       Manage identity key in OS keyring
   identity      Manage local identity keys (`identity create`)
   check         Run preflight validation without side effects
+  ai            AI tooling helpers (skill and context print)
   help          Print help
 ```
 
@@ -203,6 +204,8 @@ Commands:
 | Re-encrypt after recipient changes | `gitvault rotate -i <identity>` |
 | Store/use OS keyring identity | `gitvault keyring set|get|delete` + `GITVAULT_KEYRING=1 ...` |
 | Create new identity | `gitvault identity create [--profile classic|hybrid]` |
+| Print embedded skill reference      | `gitvault ai skill print` |
+| Print embedded agent context        | `gitvault ai context print` |
 
 ### High-signal command details
 
@@ -211,6 +214,7 @@ Commands:
 - `run`: supports `--clear-env` plus `--pass <VARS>` for controlled pass-through.
 - `harden`: installs/updates hooks; with adapter config it delegates to external hook manager.
 - `merge-driver`: repository registration shortcut is `gitvault harden`.
+- `ai`: `skill print` and `context print` emit content embedded at compile time; use `--json` for MCP-style envelope output.
 
 ---
 

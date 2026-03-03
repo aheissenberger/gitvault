@@ -3,6 +3,7 @@
 //! Each sub-module owns one logical command group and its unit tests.
 
 pub mod admin;
+pub mod ai;
 pub mod decrypt;
 pub mod effects;
 pub mod encrypt;
