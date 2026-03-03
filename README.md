@@ -202,7 +202,7 @@ Commands:
 | Run command with injected secrets | `gitvault run -- <cmd> [args...]` |
 | Strict safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |
 | Validate setup without changes | `gitvault check [--env <env>]` |
-| Enable prod operation window | `gitvault allow-prod [--ttl 3600]` |
+| Enable prod operation window | `gitvault allow-prod [--ttl <secs>]` |
 | Revoke prod operation window | `gitvault revoke-prod` |
 | Manage recipients | `gitvault recipient add|remove|list ...` |
 | Re-encrypt after recipient changes | `gitvault rotate -i <identity>` |
@@ -320,6 +320,85 @@ gitvault supports two optional TOML configuration file layers. Both files are op
 
 ---
 
+### `[env]` section
+
+Controls environment resolution (which environment name is active).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `default` | string | `dev` | Environment name used when neither `GITVAULT_ENV` nor the `.secrets/env` file is set. |
+| `prod_name` | string | `prod` | The environment name that triggers the production barrier check. Change this if your production environment is named differently (e.g. `production`). |
+| `env_file` | string | `.secrets/env` | Repository-relative path of the file that stores the active environment name. |
+
+**Example:**
+
+```toml
+# .gitvault/config.toml
+[env]
+default = "staging"         # treat staging as the default environment
+prod_name = "production"    # barrier triggers on "production" instead of "prod"
+```
+
+---
+
+### `[barrier]` section
+
+Controls the production allow-token behaviour.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ttl_secs` | integer | `3600` | Lifetime in seconds for a production allow-token written by `gitvault allow-prod`. The `--ttl` flag overrides this per invocation. |
+
+**Example:**
+
+```toml
+# .gitvault/config.toml
+[barrier]
+ttl_secs = 1800   # 30-minute production windows instead of 60
+```
+
+---
+
+### `[paths]` section
+
+Controls repository-relative file locations.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `recipients_file` | string | `.secrets/recipients` | Repository-relative path of the persistent recipients list read and written by `recipient add/remove/list` and `rotate`. |
+| `materialize_output` | string | `.env` | Repository-relative path written by `gitvault materialize`. Change to `.env.local` or any other filename your toolchain expects. |
+
+**Example:**
+
+```toml
+# .gitvault/config.toml
+[paths]
+materialize_output = ".env.local"
+recipients_file = ".gitvault/recipients"
+```
+
+---
+
+### `[keyring]` section
+
+Controls which OS keyring slot gitvault uses to store and retrieve the age identity.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `service` | string | `gitvault` | OS keyring service name used to namespace gitvault credentials. |
+| `account` | string | `age-identity` | OS keyring account / username under which the age identity key is stored. |
+
+**Example:**
+
+```toml
+# ~/.config/gitvault/config.toml
+[keyring]
+service = "my-company-gitvault"   # avoid collisions if running multiple gitvault instances
+account = "default-identity"
+```
+
+---
+
 ### `[hooks]` section
 
 Controls how `gitvault harden` installs Git hooks into the repository.
@@ -352,7 +431,7 @@ adapter = "husky"   # delegate hook installation to gitvault-husky
 adapter = "lefthook"   # personal default; overridden by any project config
 ```
 
-> **Validation:** unknown keys inside `[hooks]` produce a `Usage` error (exit `2`) with an actionable message. Unknown top-level sections are silently ignored for forward compatibility.
+> **Validation:** unknown keys inside any known section produce a `Usage` error (exit `2`) with an actionable message. Unknown top-level sections are silently ignored for forward compatibility.
 
 ---
 
