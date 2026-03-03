@@ -31,8 +31,7 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   `.env` merges
 - **Recipient management** — persistent `.secrets/recipients` file; `recipient add/remove/list`;
   `rotate` re-encrypts all secrets for the current recipient set
-- **OS keyring** — `keyring set/get/delete`; `GITVAULT_KEYRING=1` loads identity from system
-  keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager)
+- **OS keyring** — `keyring set/get/delete`; the OS keyring is always tried automatically as an identity source (macOS Keychain, Linux Secret Service, Windows Credential Manager)
 - **Identity bootstrap** — `identity create` generates local identities (classic/hybrid profile)
   and can store to keyring or export to file
 - **Security hardening** — fail-closed on decrypt error, `--reveal` required to print secrets,
@@ -206,7 +205,7 @@ Commands:
 | Revoke prod operation window | `gitvault revoke-prod` |
 | Manage recipients | `gitvault recipient add|remove|list ...` |
 | Re-encrypt after recipient changes | `gitvault rotate -i <identity>` |
-| Store/use OS keyring identity | `gitvault keyring set|get|delete` + `GITVAULT_KEYRING=1 ...` |
+| Store/use OS keyring identity | `gitvault keyring set|get|delete` |
 | Create new identity | `gitvault identity create [--profile classic|hybrid]` |
 | Print embedded skill reference      | `gitvault ai skill print` |
 | Print embedded agent context        | `gitvault ai context print` |
@@ -245,7 +244,6 @@ environment variable. Precedence (highest → lowest): CLI flag → `GITVAULT_*`
 | Identity key path/string | — | — | `GITVAULT_IDENTITY` |
 | SSH-agent key selector | — | — | `GITVAULT_IDENTITY_SELECTOR` |
 | SSH-agent enabled | off | — | `GITVAULT_SSH_AGENT=1` |
-| OS keyring as identity | off | — | `GITVAULT_KEYRING=1` |
 | Non-interactive mode | off | — | `CI=1` |
 | AWS profile (SSM) | — | — | `AWS_PROFILE` |
 | AWS role ARN (SSM) | — | — | `AWS_ROLE_ARN` |
@@ -297,7 +295,8 @@ Priority order for loading the age identity:
 |----------|--------|
 | 1 | `--identity <file>` flag |
 | 2 | `GITVAULT_IDENTITY` environment variable (key file path or raw `AGE-SECRET-KEY-` string) |
-| 3 | OS keyring when `GITVAULT_KEYRING=1` |
+| 3 | OS keyring (always tried automatically) |
+| 4 | SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set |
 
 ---
 

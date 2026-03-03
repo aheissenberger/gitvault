@@ -27,7 +27,6 @@ exit codes make it CI/CD safe.
 |----------|---------|-----------------|-------------|
 | `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.secrets/env` file |
 | `GITVAULT_IDENTITY` | — | — | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string |
-| `GITVAULT_KEYRING` | off | — | Set `1` to load identity from OS keyring |
 | `GITVAULT_IDENTITY_SELECTOR` | — | — | Key disambiguation hint for keyring / SSH agent |
 | `GITVAULT_SSH_AGENT` | off | — | Set `1` to enable SSH-agent as an identity source |
 | `CI` | off | — | Set `true` to auto-enable `--no-prompt` |
@@ -38,7 +37,8 @@ exit codes make it CI/CD safe.
 
 1. `-i / --identity <file>` flag (per-command)
 2. `GITVAULT_IDENTITY` environment variable
-3. OS keyring when `GITVAULT_KEYRING=1`
+3. OS keyring (always tried automatically)
+4. SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set
 
 ---
 

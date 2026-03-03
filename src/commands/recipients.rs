@@ -181,9 +181,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let result = with_env_var("GITVAULT_IDENTITY", None, || {
-            with_env_var("GITVAULT_KEYRING", None, || {
-                resolve_recipient_keys(dir.path(), vec![])
-            })
+            resolve_recipient_keys(dir.path(), vec![])
         });
 
         let err = result.expect_err("expected usage error for missing identity");

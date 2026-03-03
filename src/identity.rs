@@ -630,7 +630,7 @@ mod tests {
             std::env::remove_var("GITVAULT_SSH_AGENT");
         }
 
-        // Under the new chain, keyring is always tried (GITVAULT_KEYRING=1 no longer needed).
+        // The keyring is always tried automatically; no env var is needed.
         let value = load_identity_with(
             None,
             || Ok(Zeroizing::new("AGE-SECRET-KEY-TEST".to_string())),

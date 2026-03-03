@@ -57,7 +57,6 @@ gitvault <command> --help
 |----------|---------|-----------------|-------------|
 | `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.secrets/env` |
 | `GITVAULT_IDENTITY` | — | — | Path to identity file or raw `AGE-SECRET-KEY-...` |
-| `GITVAULT_KEYRING` | off | — | Set `1` to load identity from OS keyring |
 | `GITVAULT_IDENTITY_SELECTOR` | — | — | Key disambiguation hint for keyring / SSH agent |
 | `GITVAULT_SSH_AGENT` | off | — | Set `1` to enable SSH-agent as identity source |
 | `CI` | off | — | Set `true` to auto-enable `--no-prompt` |
@@ -67,7 +66,8 @@ gitvault <command> --help
 ### Identity (highest → lowest)
 1. `-i / --identity <file>` on command
 2. `GITVAULT_IDENTITY`
-3. OS keyring when `GITVAULT_KEYRING=1`
+3. OS keyring (always tried automatically)
+4. SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set
 
 ### Environment (highest → lowest)
 1. `GITVAULT_ENV`

@@ -27,7 +27,9 @@ pub enum IdentitySource {
     FilePath(String),
     /// A raw key value supplied via an environment variable.
     EnvVar(String),
-    /// Read from the OS keyring (`GITVAULT_KEYRING=1`).
+    /// Read from the OS keyring. The keyring is always tried automatically by
+    /// the executor (no env var required); this variant is retained for explicit
+    /// injection in tests and future callers.
     Keyring,
     /// A raw inline key value (e.g. supplied directly as a string).
     Inline(String),
@@ -149,16 +151,14 @@ pub enum Effect {
 /// Priority order:
 /// 1. Explicit `path` argument.
 /// 2. `gitvault_identity_env` – value of `GITVAULT_IDENTITY` (caller supplies).
-/// 3. `gitvault_keyring_env` – value of `GITVAULT_KEYRING` (caller supplies "1" to enable).
 ///
 /// Returns [`IdentitySource::FilePath`] for explicit paths, [`IdentitySource::EnvVar`]
-/// for values found in `GITVAULT_IDENTITY`, and [`IdentitySource::Keyring`] when
-/// `GITVAULT_KEYRING=1`.
+/// for values found in `GITVAULT_IDENTITY`, and [`IdentitySource::Unresolved`] otherwise
+/// (the executor will then try the OS keyring and SSH-agent automatically).
 #[must_use]
 pub fn resolve_identity_source(
     path: Option<&str>,
     gitvault_identity_env: Option<&str>,
-    gitvault_keyring_env: Option<&str>,
 ) -> IdentitySource {
     if let Some(p) = path {
         return IdentitySource::FilePath(p.to_owned());
@@ -166,11 +166,8 @@ pub fn resolve_identity_source(
     if let Some(val) = gitvault_identity_env {
         return IdentitySource::EnvVar(val.to_owned());
     }
-    if gitvault_keyring_env == Some("1") {
-        return IdentitySource::Keyring;
-    }
-    // No source configured at the FHSM level — executor must resolve
-    // using the full priority chain (GITVAULT_IDENTITY env var, keyring, etc.)
+    // No explicit source — executor resolves via the full priority chain
+    // (keyring always tried automatically, no env var needed).
     IdentitySource::Unresolved
 }
 
@@ -233,8 +230,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
             let resolved_env = env.as_deref().unwrap_or("dev").to_owned();
             let source = resolve_identity_source(
                 identity.as_deref(),
-                None, // real env vars resolved by the executor
-                None,
+                None, // real GITVAULT_IDENTITY resolved by the executor
             );
             let pass_vars = parse_pass_vars(pass_raw.as_deref());
 
@@ -261,7 +257,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
             no_prompt,
         } => {
             let resolved_env = env.as_deref().unwrap_or("dev").to_owned();
-            let source = resolve_identity_source(identity.as_deref(), None, None);
+            let source = resolve_identity_source(identity.as_deref(), None);
 
             Ok(vec![
                 Effect::CheckProdBarrier {
@@ -283,7 +279,7 @@ pub fn transition(event: &Event) -> Result<Vec<Effect>, FhsmError> {
             no_prompt: _, // decrypt is always non-interactive; no_prompt is not applicable
             output,
         } => {
-            let source = resolve_identity_source(identity.as_deref(), None, None);
+            let source = resolve_identity_source(identity.as_deref(), None);
 
             Ok(vec![
                 Effect::ResolveIdentity { source },
@@ -426,19 +422,20 @@ mod tests {
 
     #[test]
     fn resolve_identity_source_explicit_path_returns_file_path() {
-        let source = resolve_identity_source(Some("/keys/id.age"), None, None);
+        let source = resolve_identity_source(Some("/keys/id.age"), None);
         assert_eq!(source, IdentitySource::FilePath("/keys/id.age".to_string()));
     }
 
     #[test]
-    fn resolve_identity_source_no_path_keyring_true_returns_keyring() {
-        let source = resolve_identity_source(None, None, Some("1"));
-        assert_eq!(source, IdentitySource::Keyring);
+    fn resolve_identity_source_no_explicit_source_returns_unresolved() {
+        // Keyring is now always tried by the executor — no env var needed.
+        let source = resolve_identity_source(None, None);
+        assert_eq!(source, IdentitySource::Unresolved);
     }
 
     #[test]
     fn resolve_identity_source_env_var_returns_env_var() {
-        let source = resolve_identity_source(None, Some("AGE-SECRET-KEY-abc123"), None);
+        let source = resolve_identity_source(None, Some("AGE-SECRET-KEY-abc123"));
         assert_eq!(
             source,
             IdentitySource::EnvVar("AGE-SECRET-KEY-abc123".to_string())
@@ -447,18 +444,8 @@ mod tests {
 
     #[test]
     fn resolve_identity_source_path_takes_priority_over_env_var() {
-        let source =
-            resolve_identity_source(Some("/p/id.age"), Some("AGE-SECRET-KEY-abc"), Some("1"));
+        let source = resolve_identity_source(Some("/p/id.age"), Some("AGE-SECRET-KEY-abc"));
         assert_eq!(source, IdentitySource::FilePath("/p/id.age".to_string()));
-    }
-
-    #[test]
-    fn resolve_identity_source_env_var_takes_priority_over_keyring() {
-        let source = resolve_identity_source(None, Some("AGE-SECRET-KEY-abc"), Some("1"));
-        assert_eq!(
-            source,
-            IdentitySource::EnvVar("AGE-SECRET-KEY-abc".to_string())
-        );
     }
 
     // ── parse_pass_vars (via transition) ────────────────────────────────────
@@ -541,7 +528,7 @@ mod tests {
 
     #[test]
     fn resolve_identity_source_none_inputs_returns_unresolved() {
-        let source = resolve_identity_source(None, None, None);
+        let source = resolve_identity_source(None, None);
         assert_eq!(source, IdentitySource::Unresolved);
     }
 }
