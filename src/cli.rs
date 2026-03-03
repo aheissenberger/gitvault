@@ -6,6 +6,20 @@ pub const OUTPUT_KEEP_PATH_SENTINEL: &str = "__GITVAULT_KEEP_PATH__";
 #[command(
     name = "gitvault",
     about = "Git-native secrets manager",
+    after_help = "\
+CONFIG FILES (override built-in defaults):
+  .gitvault/config.toml          project-level (committed with the repo)
+  ~/.config/gitvault/config.toml user-global personal defaults
+
+  Sections and keys:
+    [env]     default, prod_name, env_file
+    [barrier] ttl_secs
+    [paths]   recipients_file, materialize_output
+    [keyring] service, account
+    [hooks]   adapter
+
+  CLI flags and environment variables always take precedence over config files.
+  Run `gitvault help` for the full reference or see README.md § Configuration.",
     version,
     long_version = concat!(
         env!("CARGO_PKG_VERSION"),

@@ -232,6 +232,7 @@ Commands:
 | `GITVAULT_IDENTITY` | Path to age identity key file (alternative to `--identity`) |
 | `GITVAULT_IDENTITY_SELECTOR` | SSH-agent key selector for disambiguation (alternative to `--identity-selector`) |
 | `GITVAULT_SSH_AGENT` | Set to `1` to enable SSH-agent as an identity source |
+| `GITVAULT_KEYRING` | Set to `1` to use the OS keyring as the identity source |
 
 ### System
 
