@@ -6,15 +6,34 @@ use age::secrecy::ExposeSecret;
 use age::x25519;
 use std::path::Path;
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use tempfile::NamedTempFile;
 
 use crate::crypto;
 use crate::repo;
 
-pub fn global_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+pub struct GlobalTestMutex {
+    inner: Mutex<()>,
+}
+
+impl GlobalTestMutex {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(()),
+        }
+    }
+
+    pub fn lock(&self) -> std::sync::LockResult<MutexGuard<'_, ()>> {
+        match self.inner.lock() {
+            Ok(guard) => Ok(guard),
+            Err(poison) => Ok(poison.into_inner()),
+        }
+    }
+}
+
+pub fn global_test_lock() -> &'static GlobalTestMutex {
+    static LOCK: OnceLock<GlobalTestMutex> = OnceLock::new();
+    LOCK.get_or_init(GlobalTestMutex::new)
 }
 
 pub struct CwdGuard {
