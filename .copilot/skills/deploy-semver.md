@@ -24,6 +24,8 @@ After the user chooses a bump type:
 3. Update `Cargo.toml` version.
 4. Run verification:
    - `cargo verify`
+   - Verify required coverage by running the CLI:
+     - `cargo run -- coverage-check`
 5. Commit with message:
    - `chore(release): v<new-version>`
 6. Create annotated tag:
