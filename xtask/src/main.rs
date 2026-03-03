@@ -133,10 +133,31 @@ impl Task {
 
 fn run_verify() -> Result<(), String> {
     Task::Fmt.run()?;
-    Task::Clippy.run()?;
+    run(
+        "cargo",
+        &[
+            "clippy",
+            "--locked",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    )?;
     Task::InstructionsLint.run()?;
-    run("cargo", &["test", "--workspace", "--all-features", "--quiet"])?;
-    Task::Build.run()?;
+    run(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--workspace",
+            "--all-features",
+            "--quiet",
+        ],
+    )?;
+    run("cargo", &["build", "--locked", "--workspace", "--release"])?;
     Ok(())
 }
 
