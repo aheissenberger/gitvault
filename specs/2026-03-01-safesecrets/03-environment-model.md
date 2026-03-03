@@ -10,7 +10,7 @@ scope:
   avoid: ["target/**"]
 acceptance:
   - id: "AC1"
-    text: "REQ-11: environment resolution priority is SECRETS_ENV, then .secrets/env, then default dev."
+    text: "REQ-11: environment resolution priority is GITVAULT_ENV, then .secrets/env, then default dev."
   - id: "AC2"
     text: "REQ-12: each worktree resolves environments independently without cross-contamination."
 verification:

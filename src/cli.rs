@@ -88,7 +88,7 @@ pub enum Commands {
     },
     /// Materialize secrets to root .env
     Materialize {
-        /// Environment to use (overrides `SECRETS_ENV` and .secrets/env)
+        /// Environment to use (overrides `GITVAULT_ENV` and .secrets/env)
         #[arg(short, long)]
         env: Option<String>,
         /// Identity key file path

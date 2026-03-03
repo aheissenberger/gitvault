@@ -101,7 +101,7 @@ Develop a Rust-based, cross-platform CLI tool that:
 
 Priority:
 
-1. `SECRETS_ENV`
+1. `GITVAULT_ENV`
 2. `.secrets/env` (gitignored)
 3. Default: `dev`
 

@@ -27,7 +27,7 @@ exit codes make it CI/CD safe.
 |----------|-------------|
 | `GITVAULT_IDENTITY` | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string |
 | `GITVAULT_KEYRING` | Set `1` to load identity from OS keyring (macOS Keychain / Linux Secret Service / Windows Credential Manager) |
-| `SECRETS_ENV` | Active environment name; overrides `.secrets/env` file |
+| `GITVAULT_ENV` | Active environment name; overrides `.secrets/env` file |
 | `CI` | Set `true` to auto-enable `--no-prompt` |
 | `GITVAULT_IDENTITY_SELECTOR` | Key disambiguation hint passed to keyring / SSH agent |
 
@@ -43,7 +43,7 @@ exit codes make it CI/CD safe.
 
 ## Environment resolution order (highest → lowest priority)
 
-1. `SECRETS_ENV` environment variable
+1. `GITVAULT_ENV` environment variable
 2. `.secrets/env` file in the worktree root
 3. `dev` (built-in default)
 
@@ -131,7 +131,7 @@ Decrypt all secrets for the active environment and write a root `.env` (atomic, 
 
 | Option | Description |
 |--------|-------------|
-| `-e, --env <ENV>` | Environment to use (overrides `SECRETS_ENV` and `.secrets/env`) |
+| `-e, --env <ENV>` | Environment to use (overrides `GITVAULT_ENV` and `.secrets/env`) |
 | `-i, --identity <FILE>` | Identity key file path |
 | `--prod` | Require production barrier (mandatory when env=prod) |
 

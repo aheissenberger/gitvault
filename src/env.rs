@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 /// Resolve the active environment for a given worktree root.
 ///
 /// Priority (REQ-11):
-/// 1. `SECRETS_ENV` environment variable
+/// 1. `GITVAULT_ENV` environment variable
 /// 2. `.secrets/env` file in the worktree root
 /// 3. Default: "dev"
 ///
@@ -15,8 +15,8 @@ use std::sync::OnceLock;
 /// is relative to the passed `worktree_root` path.
 #[must_use]
 pub fn resolve_env(worktree_root: &Path) -> String {
-    // Priority 1: SECRETS_ENV env var
-    if let Ok(env) = std::env::var("SECRETS_ENV") {
+    // Priority 1: GITVAULT_ENV env var
+    if let Ok(env) = std::env::var("GITVAULT_ENV") {
         let env = env.trim().to_string();
         if !env.is_empty() {
             return env;
@@ -79,7 +79,7 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         unsafe {
-            std::env::remove_var("SECRETS_ENV");
+            std::env::remove_var("GITVAULT_ENV");
         }
         let env = resolve_env(dir.path());
         assert_eq!(env, "dev");
@@ -90,7 +90,7 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         unsafe {
-            std::env::remove_var("SECRETS_ENV");
+            std::env::remove_var("GITVAULT_ENV");
         }
 
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
@@ -109,11 +109,11 @@ mod tests {
         fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
 
         unsafe {
-            std::env::set_var("SECRETS_ENV", "prod");
+            std::env::set_var("GITVAULT_ENV", "prod");
         }
         let env = resolve_env(dir.path());
         unsafe {
-            std::env::remove_var("SECRETS_ENV");
+            std::env::remove_var("GITVAULT_ENV");
         }
 
         assert_eq!(env, "prod");
@@ -125,7 +125,7 @@ mod tests {
         let dir1 = TempDir::new().unwrap();
         let dir2 = TempDir::new().unwrap();
         unsafe {
-            std::env::remove_var("SECRETS_ENV");
+            std::env::remove_var("GITVAULT_ENV");
         }
 
         fs::create_dir_all(dir1.path().join(".secrets")).unwrap();
@@ -146,11 +146,11 @@ mod tests {
         fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
 
         unsafe {
-            std::env::set_var("SECRETS_ENV", "   ");
+            std::env::set_var("GITVAULT_ENV", "   ");
         }
         let env = resolve_env(dir.path());
         unsafe {
-            std::env::remove_var("SECRETS_ENV");
+            std::env::remove_var("GITVAULT_ENV");
         }
 
         assert_eq!(env, "staging");
@@ -161,7 +161,7 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         unsafe {
-            std::env::remove_var("SECRETS_ENV");
+            std::env::remove_var("GITVAULT_ENV");
         }
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
         fs::write(dir.path().join(".secrets").join("env"), "  \n").unwrap();

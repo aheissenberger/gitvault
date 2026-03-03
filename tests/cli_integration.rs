@@ -812,7 +812,7 @@ fn encrypt_decrypt_and_materialize_roundtrip() {
     let encrypt = bin()
         .args(["encrypt", "app.env", "--recipient", &pubkey])
         .env("GITVAULT_IDENTITY", &identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
@@ -845,7 +845,7 @@ fn encrypt_decrypt_and_materialize_roundtrip() {
     let materialize = bin()
         .arg("materialize")
         .env("GITVAULT_IDENTITY", &identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("materialize should run");
@@ -873,7 +873,7 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
             "--keep-path",
         ])
         .env("GITVAULT_IDENTITY", &identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
@@ -953,7 +953,7 @@ fn run_command_propagates_exit_code() {
     let encrypt = bin()
         .args(["encrypt", "run.env", "--recipient", &pubkey])
         .env("GITVAULT_IDENTITY", &identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
@@ -1315,7 +1315,7 @@ fn removed_recipient_cannot_decrypt_after_rotate() {
     let enc = bin()
         .args(["encrypt", "app.env", "--recipient", &old_pubkey])
         .env("GITVAULT_IDENTITY", &old_identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
@@ -1442,7 +1442,7 @@ fn encrypt_decrypt_dotenv_whole_file() {
     let enc = bin()
         .args(["encrypt", ".env", "--recipient", &pubkey])
         .env("GITVAULT_IDENTITY", &identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");
@@ -1513,7 +1513,7 @@ fn decrypt_reveal_prints_plaintext() {
     let enc = bin()
         .args(["encrypt", "secrets.env", "--recipient", &pubkey])
         .env("GITVAULT_IDENTITY", &identity_path)
-        .env("SECRETS_ENV", "dev")
+        .env("GITVAULT_ENV", "dev")
         .current_dir(repo.path())
         .output()
         .expect("encrypt should run");

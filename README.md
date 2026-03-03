@@ -17,7 +17,7 @@ with [age](https://age-encryption.org) and stored in your repository — never p
   fallback), plaintext outputs under `.secrets/plain/<env>/`; one `.age` file per secret
 - **Plaintext leak detection** — refuses to operate if `.env` or plaintext secrets are tracked by
   Git
-- **Environment model** — resolves active environment from `SECRETS_ENV` → `.secrets/env` → `dev`;
+- **Environment model** — resolves active environment from `GITVAULT_ENV` → `.secrets/env` → `dev`;
   each worktree is independent
 - **Production barrier** — timed allow-token required to materialize or run against `prod`;
   interactive confirmation fallback
@@ -100,9 +100,9 @@ All assets are published with `SHA256SUMS` plus Sigstore cosign `.sig` / `.pem` 
 ### 1 — Generate an age identity (one-time per developer)
 
 ```bash
-# Using age-keygen (install via https://age-encryption.org):
-age-keygen -o ~/.age/identity.key
-# Public key is printed — share it with team members for multi-recipient encryption.
+# Using the builtin identity command:
+gitvault identity create
+# Your identity is saved and public key is printed — share it with team members for multi-recipient encryption.
 
 # Or use the dev sandbox (no setup needed):
 cargo xtask dev-shell
@@ -224,7 +224,7 @@ Priority order:
 
 | Priority | Source |
 |----------|--------|
-| 1 | `SECRETS_ENV` environment variable |
+| 1 | `GITVAULT_ENV` environment variable |
 | 2 | `.secrets/env` file in the worktree root |
 | 3 | `dev` (default) |
 

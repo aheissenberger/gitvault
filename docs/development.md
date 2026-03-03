@@ -146,7 +146,7 @@ execute_effects_with(effects, &repo_root, &fake).unwrap();
 | `src/run.rs` | Child process execution with secret injection |
 | `src/materialize.rs` | Root `.env` materialization |
 | `src/keyring_store.rs` | OS keyring integration |
-| `src/env.rs` | Environment resolution (`SECRETS_ENV` → `.secrets/env` → `dev`) |
+| `src/env.rs` | Environment resolution (`GITVAULT_ENV` → `.secrets/env` → `dev`) |
 | `src/permissions.rs` | POSIX/Windows file permission helpers |
 | `src/aws_config.rs` | AWS profile/role-ARN config for future SSM backend |
 | `src/cli.rs` | clap CLI struct definitions |
@@ -161,7 +161,7 @@ git worktree add ../gitvault-agent-a -b agent-a
 git worktree add ../gitvault-agent-b -b agent-b
 ```
 
-Each worktree resolves its own environment via `.secrets/env` or `SECRETS_ENV`, enabling parallel
+Each worktree resolves its own environment via `.secrets/env` or `GITVAULT_ENV`, enabling parallel
 multi-agent development without environment cross-contamination.
 
 ## Local development environment
