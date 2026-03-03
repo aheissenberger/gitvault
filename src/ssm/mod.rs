@@ -24,11 +24,13 @@ pub use refs::{refs_file_path, ssm_path};
 mod tests {
     use super::backend::MockSsmBackend;
     use super::commands::{
-        cmd_ssm_diff_with, cmd_ssm_pull_with, cmd_ssm_push_with, cmd_ssm_set_with,
+        cmd_ssm_diff, cmd_ssm_diff_with, cmd_ssm_pull, cmd_ssm_pull_with, cmd_ssm_push,
+        cmd_ssm_push_with, cmd_ssm_set, cmd_ssm_set_with,
     };
     use super::refs::{
         get_app_name, load_refs, refs_file_path, save_refs, ssm_path, validate_app_name,
     };
+    use crate::aws_config::AwsConfig;
     use crate::error::GitvaultError;
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -448,5 +450,119 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("put failed"));
+    }
+
+    // ── Public command wrappers — error-path coverage ─────────────────────────
+    //
+    // These tests exercise the public `cmd_ssm_*` functions (which build a
+    // `RealSsmBackend` internally) via paths that fail *before* any AWS API
+    // call is made, so no live credentials are required.
+
+    /// Helper: create a subdirectory whose name contains characters that are
+    /// invalid for an SSM app name (`@`), so that `get_app_name` returns an
+    /// error without making any AWS calls.
+    fn make_invalid_app_dir(parent: &TempDir) -> std::path::PathBuf {
+        let bad = parent.path().join("app@invalid");
+        std::fs::create_dir(&bad).expect("create dir");
+        bad
+    }
+
+    // ── cmd_ssm_pull (public) ─────────────────────────────────────────────────
+
+    /// `cmd_ssm_pull` propagates a `get_app_name` failure that occurs when the
+    /// repository directory name contains characters invalid for SSM paths.
+    /// No AWS call is made; the error is returned before `build_client`.
+    #[tokio::test]
+    async fn test_cmd_ssm_pull_invalid_app_name_errors() {
+        let parent = TempDir::new().unwrap();
+        let bad_dir = make_invalid_app_dir(&parent);
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_pull(&bad_dir, "dev", &aws, false).await;
+        assert!(result.is_err(), "should fail for invalid app name");
+    }
+
+    /// Same as above but with `json = true` to exercise that branch of the
+    /// public wrapper.
+    #[tokio::test]
+    async fn test_cmd_ssm_pull_json_invalid_app_name_errors() {
+        let parent = TempDir::new().unwrap();
+        let bad_dir = make_invalid_app_dir(&parent);
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_pull(&bad_dir, "dev", &aws, true).await;
+        assert!(result.is_err(), "should fail for invalid app name (json)");
+    }
+
+    // ── cmd_ssm_diff (public) ─────────────────────────────────────────────────
+
+    /// `cmd_ssm_diff` propagates a `get_app_name` failure before touching AWS.
+    #[tokio::test]
+    async fn test_cmd_ssm_diff_invalid_app_name_errors() {
+        let parent = TempDir::new().unwrap();
+        let bad_dir = make_invalid_app_dir(&parent);
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_diff(&bad_dir, "dev", &aws, false, false).await;
+        assert!(result.is_err(), "should fail for invalid app name");
+    }
+
+    /// `cmd_ssm_diff` with `reveal = true` still fails at `get_app_name`.
+    #[tokio::test]
+    async fn test_cmd_ssm_diff_reveal_invalid_app_name_errors() {
+        let parent = TempDir::new().unwrap();
+        let bad_dir = make_invalid_app_dir(&parent);
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_diff(&bad_dir, "dev", &aws, true, false).await;
+        assert!(result.is_err(), "reveal diff should fail for invalid app name");
+    }
+
+    // ── cmd_ssm_set (public) ──────────────────────────────────────────────────
+
+    /// `cmd_ssm_set` rejects production writes when `--prod` is absent.
+    /// This exercises the public wrapper body up to and including the
+    /// `check_prod_barrier` call — no AWS call is needed.
+    #[tokio::test]
+    async fn test_cmd_ssm_set_prod_barrier_rejects_without_flag() {
+        let dir = TempDir::new().unwrap();
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_set(dir.path(), "prod", "KEY", "val", &aws, false, false).await;
+        assert!(
+            matches!(result, Err(GitvaultError::BarrierNotSatisfied(_))),
+            "expected BarrierNotSatisfied, got: {result:?}"
+        );
+    }
+
+    /// `cmd_ssm_set` propagates `get_app_name` failure (dev env, barrier
+    /// passes immediately, then `get_app_name` fails).
+    #[tokio::test]
+    async fn test_cmd_ssm_set_dev_invalid_app_name_errors() {
+        let parent = TempDir::new().unwrap();
+        let bad_dir = make_invalid_app_dir(&parent);
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_set(&bad_dir, "dev", "KEY", "val", &aws, false, false).await;
+        assert!(result.is_err(), "should fail for invalid app name");
+    }
+
+    // ── cmd_ssm_push (public) ─────────────────────────────────────────────────
+
+    /// `cmd_ssm_push` rejects production writes when `--prod` is absent.
+    #[tokio::test]
+    async fn test_cmd_ssm_push_prod_barrier_rejects_without_flag() {
+        let dir = TempDir::new().unwrap();
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_push(dir.path(), "prod", &aws, false, false).await;
+        assert!(
+            matches!(result, Err(GitvaultError::BarrierNotSatisfied(_))),
+            "expected BarrierNotSatisfied, got: {result:?}"
+        );
+    }
+
+    /// `cmd_ssm_push` propagates `get_app_name` failure (dev env, barrier
+    /// passes, then `get_app_name` fails before any AWS call).
+    #[tokio::test]
+    async fn test_cmd_ssm_push_dev_invalid_app_name_errors() {
+        let parent = TempDir::new().unwrap();
+        let bad_dir = make_invalid_app_dir(&parent);
+        let aws = AwsConfig::from_cli(None, None);
+        let result = cmd_ssm_push(&bad_dir, "dev", &aws, false, false).await;
+        assert!(result.is_err(), "should fail for invalid app name");
     }
 }
