@@ -222,6 +222,26 @@ Commands:
 
 ---
 
+## Environment variables
+
+### `GITVAULT_*`
+
+| Variable | Purpose |
+|----------|---------|
+| `GITVAULT_ENV` | Active environment name; overrides `.secrets/env` file and the `dev` default |
+| `GITVAULT_IDENTITY` | Path to age identity key file (alternative to `--identity`) |
+| `GITVAULT_IDENTITY_SELECTOR` | SSH-agent key selector for disambiguation (alternative to `--identity-selector`) |
+| `GITVAULT_SSH_AGENT` | Set to `1` to enable SSH-agent as an identity source |
+
+### System
+
+| Variable | Purpose |
+|----------|---------|
+| `CI` | Set to `1`, `true`, or `yes` to enable non-interactive mode automatically |
+| `SSH_AUTH_SOCK` | Standard SSH socket; presence enables SSH-agent as an identity source |
+| `AWS_PROFILE` | AWS profile for the SSM backend (alternative to `--aws-profile`) |
+| `AWS_ROLE_ARN` | AWS role ARN to assume for the SSM backend (alternative to `--aws-role-arn`) |
+
 ## Environment resolution
 
 Priority order:
@@ -232,7 +252,7 @@ Priority order:
 | 2 | `.secrets/env` file in the worktree root |
 | 3 | `dev` (default) |
 
-Each Git worktree resolves its environment independently.
+Each Git worktree resolves its environment independently. The active environment can also be overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `check`).
 
 ---
 
