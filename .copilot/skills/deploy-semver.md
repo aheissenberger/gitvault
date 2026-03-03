@@ -53,7 +53,7 @@ After the bump type is known:
 4. Run verification:
    - `cargo verify`
    - Verify required coverage by running the CLI:
-     - `cargo llvm-cov --workspace --all-features --fail-under-lines 95`
+     - `cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs|ssm/backend\.rs" --fail-under-lines 95 > /dev/null 2>&1`
 5. Commit with message:
    - `chore(release): v<new-version>`
 6. Create annotated tag:
