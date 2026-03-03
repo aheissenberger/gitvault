@@ -69,34 +69,21 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
 
     #[cfg(windows)]
     fn starts_with_base(target: &Path, base: &Path) -> bool {
-        use std::path::Component;
-
-        fn component_eq(a: Component<'_>, b: Component<'_>) -> bool {
-            match (a, b) {
-                (Component::Prefix(pa), Component::Prefix(pb)) => pa
-                    .as_os_str()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&pb.as_os_str().to_string_lossy()),
-                (Component::RootDir, Component::RootDir)
-                | (Component::CurDir, Component::CurDir)
-                | (Component::ParentDir, Component::ParentDir) => true,
-                (Component::Normal(na), Component::Normal(nb)) => na
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&nb.to_string_lossy()),
-                _ => false,
+        fn normalize_for_compare(path: &Path) -> String {
+            let mut normalized = path.to_string_lossy().replace('/', "\\");
+            while normalized.ends_with('\\') && normalized.len() > 3 {
+                normalized.pop();
             }
+            normalized.to_ascii_lowercase()
         }
 
-        let mut target_components = target.components();
-        for base_component in base.components() {
-            let Some(target_component) = target_components.next() else {
-                return false;
-            };
-            if !component_eq(target_component, base_component) {
-                return false;
-            }
+        let normalized_target = normalize_for_compare(target);
+        let normalized_base = normalize_for_compare(base);
+        if normalized_target == normalized_base {
+            return true;
         }
-        true
+        let base_with_sep = format!("{normalized_base}\\");
+        normalized_target.starts_with(&base_with_sep)
     }
 
     #[cfg(not(windows))]
