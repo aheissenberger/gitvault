@@ -23,13 +23,14 @@ exit codes make it CI/CD safe.
 
 ## Environment variables
 
-| Variable | Description |
-|----------|-------------|
-| `GITVAULT_IDENTITY` | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string |
-| `GITVAULT_KEYRING` | Set `1` to load identity from OS keyring (macOS Keychain / Linux Secret Service / Windows Credential Manager) |
-| `GITVAULT_ENV` | Active environment name; overrides `.secrets/env` file |
-| `CI` | Set `true` to auto-enable `--no-prompt` |
-| `GITVAULT_IDENTITY_SELECTOR` | Key disambiguation hint passed to keyring / SSH agent |
+| Variable | Default | Config file key | Description |
+|----------|---------|-----------------|-------------|
+| `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.secrets/env` file |
+| `GITVAULT_IDENTITY` | — | — | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string |
+| `GITVAULT_KEYRING` | off | — | Set `1` to load identity from OS keyring |
+| `GITVAULT_IDENTITY_SELECTOR` | — | — | Key disambiguation hint for keyring / SSH agent |
+| `GITVAULT_SSH_AGENT` | off | — | Set `1` to enable SSH-agent as an identity source |
+| `CI` | off | — | Set `true` to auto-enable `--no-prompt` |
 
 ---
 
@@ -44,10 +45,36 @@ exit codes make it CI/CD safe.
 ## Environment resolution order (highest → lowest priority)
 
 1. `GITVAULT_ENV` environment variable
-2. `.secrets/env` file in the worktree root
-3. `dev` (built-in default)
+2. `.secrets/env` file in the worktree root (path overridable via `[env] env_file` config)
+3. `[env] default` in config file
+4. `dev` (built-in default)
 
 Each Git worktree resolves independently.
+
+---
+
+## Configuration files
+
+Two optional TOML layers override built-in defaults. Missing files are silently ignored.
+
+| File | Scope |
+|------|-------|
+| `.gitvault/config.toml` | Repository-level (commit with project) |
+| `~/.config/gitvault/config.toml` | User-global personal defaults |
+
+**Defaults & overrides quick reference:**
+
+| Setting | Default | Config key | `GITVAULT_*` env var |
+|---------|---------|------------|----------------------|
+| Active environment | `dev` | `[env] default` | `GITVAULT_ENV` |
+| Production env name | `prod` | `[env] prod_name` | — |
+| Env name file | `.secrets/env` | `[env] env_file` | — |
+| Prod token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
+| Recipients file | `.secrets/recipients` | `[paths] recipients_file` | — |
+| Materialize output | `.env` | `[paths] materialize_output` | — |
+| Keyring service | `gitvault` | `[keyring] service` | — |
+| Keyring account | `age-identity` | `[keyring] account` | — |
+| Hook adapter | *(none)* | `[hooks] adapter` | — |
 
 ---
 
@@ -129,7 +156,7 @@ gitvault decrypt config.json.age --fields db.password       # field-level
 
 ### `gitvault materialize [OPTIONS]`
 
-Decrypt all secrets for the active environment and write a root `.env` (atomic, `0600`/restricted ACL).
+Decrypt all secrets for the active environment and write a root `.env` (atomic, `0600`/restricted ACL). Output path configurable via `[paths] materialize_output`.
 
 | Option | Description |
 |--------|-------------|
@@ -206,7 +233,7 @@ Write a timed production allow-token to `.secrets/.prod-token`.
 
 | Option | Description |
 |--------|-------------|
-| `--ttl <SECONDS>` | Token lifetime (default: `3600`) |
+| `--ttl <SECONDS>` | Token lifetime; default from `[barrier] ttl_secs` config, then `3600` |
 
 ---
 
