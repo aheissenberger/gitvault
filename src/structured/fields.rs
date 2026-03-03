@@ -304,9 +304,9 @@ mod tests {
 
         let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
         write!(tmp, r#"{{"password":"hunter2","user":"alice"}}"#).unwrap();
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
-        encrypt_fields(&path, &["password"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["password"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&after_enc).unwrap();
@@ -318,7 +318,7 @@ mod tests {
             "other fields unchanged"
         );
 
-        decrypt_fields(&path, &["password"], &identity).unwrap();
+        decrypt_fields(path.as_ref(), &["password"], &identity).unwrap();
 
         let after_dec = std::fs::read_to_string(&path).unwrap();
         let v2: serde_json::Value = serde_json::from_str(&after_dec).unwrap();
@@ -333,12 +333,12 @@ mod tests {
 
         let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
         write!(tmp, r#"{{"secret":"mysecret","other":"value"}}"#).unwrap();
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
-        encrypt_fields(&path, &["secret"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["secret"], &identity, &keys).unwrap();
         let first_enc = std::fs::read_to_string(&path).unwrap();
 
-        encrypt_fields(&path, &["secret"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["secret"], &identity, &keys).unwrap();
         let second_enc = std::fs::read_to_string(&path).unwrap();
 
         assert_eq!(
@@ -355,9 +355,9 @@ mod tests {
 
         let mut tmp = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(tmp, "database_password: secret123\nhost: localhost\n").unwrap();
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
-        encrypt_fields(&path, &["database_password"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["database_password"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: serde_yml::Value = serde_yml::from_str(&after_enc).unwrap();
@@ -368,7 +368,7 @@ mod tests {
         );
         assert_eq!(v["host"].as_str().unwrap(), "localhost");
 
-        decrypt_fields(&path, &["database_password"], &identity).unwrap();
+        decrypt_fields(path.as_ref(), &["database_password"], &identity).unwrap();
 
         let after_dec = std::fs::read_to_string(&path).unwrap();
         let v2: serde_yml::Value = serde_yml::from_str(&after_dec).unwrap();
@@ -383,9 +383,9 @@ mod tests {
 
         let mut tmp = NamedTempFile::with_suffix(".toml").unwrap();
         write!(tmp, "api_key = \"top-secret\"\nname = \"app\"\n").unwrap();
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
-        encrypt_fields(&path, &["api_key"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["api_key"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: toml::Value = after_enc.parse().unwrap();
@@ -396,7 +396,7 @@ mod tests {
         );
         assert_eq!(v["name"].as_str().unwrap(), "app");
 
-        decrypt_fields(&path, &["api_key"], &identity).unwrap();
+        decrypt_fields(path.as_ref(), &["api_key"], &identity).unwrap();
 
         let after_dec = std::fs::read_to_string(&path).unwrap();
         let v2: toml::Value = after_dec.parse().unwrap();
@@ -411,10 +411,10 @@ mod tests {
 
         let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
         write!(tmp, r#"{{"a":"alpha","b":"beta"}}"#).unwrap();
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
         // Encrypt both fields
-        encrypt_fields(&path, &["a", "b"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["a", "b"], &identity, &keys).unwrap();
         let both_enc = std::fs::read_to_string(&path).unwrap();
         let v1: serde_json::Value = serde_json::from_str(&both_enc).unwrap();
         let a_enc1 = v1["a"].as_str().unwrap().to_string();
@@ -435,7 +435,7 @@ mod tests {
         .unwrap();
         drop(f);
 
-        encrypt_fields(&path, &["a", "b"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["a", "b"], &identity, &keys).unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
         let v2: serde_json::Value = serde_json::from_str(&after).unwrap();
         let a_enc2 = v2["a"].as_str().unwrap();
@@ -625,14 +625,14 @@ mod tests {
 
         let mut tmp = NamedTempFile::with_suffix(".yml").unwrap();
         write!(tmp, "token: secret_token\nenv: prod\n").unwrap();
-        let path = tmp.path().to_path_buf();
+        let path = tmp.into_temp_path();
 
-        encrypt_fields(&path, &["token"], &identity, &keys).unwrap();
+        encrypt_fields(path.as_ref(), &["token"], &identity, &keys).unwrap();
         let v: serde_yml::Value =
             serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(is_age_armor(v["token"].as_str().unwrap()));
 
-        decrypt_fields(&path, &["token"], &identity).unwrap();
+        decrypt_fields(path.as_ref(), &["token"], &identity).unwrap();
         let v2: serde_yml::Value =
             serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v2["token"].as_str().unwrap(), "secret_token");

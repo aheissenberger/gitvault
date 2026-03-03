@@ -49,21 +49,46 @@ pub fn find_adapter_binary(adapter: &HookAdapter) -> AdapterLookup {
 /// crate.
 fn which_binary(name: &str) -> Result<PathBuf, ()> {
     let path_var = std::env::var_os("PATH").ok_or(())?;
+
+    #[cfg(windows)]
+    let candidates: Vec<String> = {
+        let path = std::path::Path::new(name);
+        if path.extension().is_some() {
+            vec![name.to_string()]
+        } else {
+            let pathext =
+                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+            let mut out = vec![name.to_string()];
+            out.extend(
+                pathext
+                    .split(';')
+                    .filter(|ext| !ext.is_empty())
+                    .map(|ext| format!("{name}{ext}")),
+            );
+            out
+        }
+    };
+
+    #[cfg(not(windows))]
+    let candidates: Vec<String> = vec![name.to_string()];
+
     for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            // Check execute permission on Unix.
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let meta = std::fs::metadata(&candidate).map_err(|_| ())?;
-                if meta.permissions().mode() & 0o111 != 0 {
+        for binary_name in &candidates {
+            let candidate = dir.join(binary_name);
+            if candidate.is_file() {
+                // Check execute permission on Unix.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let meta = std::fs::metadata(&candidate).map_err(|_| ())?;
+                    if meta.permissions().mode() & 0o111 != 0 {
+                        return Ok(candidate);
+                    }
+                }
+                #[cfg(not(unix))]
+                {
                     return Ok(candidate);
                 }
-            }
-            #[cfg(not(unix))]
-            {
-                return Ok(candidate);
             }
         }
     }
@@ -138,11 +163,14 @@ mod tests {
 
     #[test]
     fn test_adapter_lookup_found_for_real_binary() {
-        // `echo` is always present on Unix systems.  We can't use HookAdapter
-        // directly because its binary names are `gitvault-*`, so we test the
-        // underlying `which_binary` helper instead.
-        let result = which_binary("echo");
-        assert!(result.is_ok(), "echo should be found on PATH");
+        #[cfg(windows)]
+        let probe = "cmd";
+        #[cfg(not(windows))]
+        let probe = "echo";
+
+        // We test the underlying `which_binary` helper with a known shell binary.
+        let result = which_binary(probe);
+        assert!(result.is_ok(), "{probe} should be found on PATH");
         let path = result.unwrap();
         assert!(path.is_absolute());
     }
@@ -210,7 +238,14 @@ mod tests {
         // Create a temp directory with a fake gitvault-husky script, then prepend
         // that directory to PATH so find_adapter_binary returns Found.
         let tmp = tempfile::TempDir::new().expect("temp dir");
-        let binary_path = tmp.path().join("gitvault-husky");
+        #[cfg(windows)]
+        let bin_name = "gitvault-husky.cmd";
+        #[cfg(not(windows))]
+        let bin_name = "gitvault-husky";
+        let binary_path = tmp.path().join(bin_name);
+        #[cfg(windows)]
+        std::fs::write(&binary_path, "@echo off\r\nexit /b 0\r\n").expect("write script");
+        #[cfg(not(windows))]
         std::fs::write(&binary_path, "#!/bin/sh\nexit 0\n").expect("write script");
         #[cfg(unix)]
         {
@@ -221,11 +256,10 @@ mod tests {
         }
 
         let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let new_path = format!(
-            "{}:{}",
-            tmp.path().display(),
-            std::env::var("PATH").unwrap_or_default()
-        );
+        let mut entries = Vec::new();
+        entries.push(tmp.path().to_path_buf());
+        entries.extend(std::env::split_paths(&original_path));
+        let new_path = std::env::join_paths(entries).expect("join PATH entries should succeed");
         unsafe {
             std::env::set_var("PATH", &new_path);
         }

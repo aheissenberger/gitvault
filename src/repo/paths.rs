@@ -47,25 +47,40 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
         out
     }
 
-    let canonical_base = base.canonicalize().unwrap_or_else(|_| normalize(base));
-    let canonical_target = match target.canonicalize() {
-        Ok(p) => p,
-        Err(_) => {
-            // For not-yet-existing files, canonicalize the parent then re-attach filename
-            if let Some(parent) = target.parent() {
-                let canon_parent = parent.canonicalize().unwrap_or_else(|_| normalize(parent));
-                let fname = target.file_name().ok_or_else(|| {
-                    GitvaultError::Usage(format!(
-                        "path has no file name component: {}",
-                        target.display()
-                    ))
-                })?;
-                canon_parent.join(fname)
-            } else {
-                normalize(target)
-            }
+    fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf, GitvaultError> {
+        if let Ok(canonical) = path.canonicalize() {
+            return Ok(canonical);
         }
-    };
+
+        let mut existing = path;
+        let mut tail = Vec::new();
+        while !existing.exists() {
+            let name = existing.file_name().ok_or_else(|| {
+                GitvaultError::Usage(format!(
+                    "path has no file name component: {}",
+                    path.display()
+                ))
+            })?;
+            tail.push(name.to_os_string());
+            existing = existing.parent().ok_or_else(|| {
+                GitvaultError::Usage(format!(
+                    "path has no file name component: {}",
+                    path.display()
+                ))
+            })?;
+        }
+
+        let mut canonical = existing
+            .canonicalize()
+            .unwrap_or_else(|_| normalize(existing));
+        for part in tail.iter().rev() {
+            canonical.push(part);
+        }
+        Ok(canonical)
+    }
+
+    let canonical_base = canonicalize_with_missing_tail(base)?;
+    let canonical_target = canonicalize_with_missing_tail(target)?;
 
     #[cfg(windows)]
     fn starts_with_base(target: &Path, base: &Path) -> bool {
@@ -343,6 +358,18 @@ mod tests {
         x25519::Identity::generate()
     }
 
+    fn assert_paths_equivalent(left: &Path, right: &Path) {
+        fn normalize(path: &Path) -> String {
+            path.canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        }
+
+        assert_eq!(normalize(left), normalize(right));
+    }
+
     #[test]
     fn test_get_encrypted_path() {
         let root = Path::new("/repo");
@@ -588,7 +615,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         init_git_repo(tmp.path());
         let found = find_repo_root_from(tmp.path()).unwrap();
-        assert_eq!(found, tmp.path());
+        assert_paths_equivalent(&found, tmp.path());
     }
 
     #[test]
@@ -598,7 +625,7 @@ mod tests {
         let sub = tmp.path().join("a/b/c");
         std::fs::create_dir_all(&sub).unwrap();
         let found = find_repo_root_from(&sub).unwrap();
-        assert_eq!(found, tmp.path());
+        assert_paths_equivalent(&found, tmp.path());
     }
 
     #[test]
@@ -624,7 +651,7 @@ mod tests {
 
         let found = find_repo_root_from_with_runner(tmp.path(), &FailingGitRunner).unwrap();
 
-        assert_eq!(found, tmp.path());
+        assert_paths_equivalent(&found, tmp.path());
     }
 
     #[test]
@@ -636,6 +663,6 @@ mod tests {
 
         let found = find_repo_root_from_with_runner(&sub, &FailingGitRunner).unwrap();
 
-        assert_eq!(found, tmp.path());
+        assert_paths_equivalent(&found, tmp.path());
     }
 }
