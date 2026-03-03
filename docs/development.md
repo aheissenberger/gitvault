@@ -8,6 +8,7 @@ This document covers local development workflows for gitvault contributors.
 - [Verification commands](#verification-commands)
 - [All xtask commands](#all-xtask-commands)
 - [Architecture: FHSM and testability](#architecture-fhsm-and-testability)
+- [Centralized defaults and configuration](#centralized-defaults-and-configuration)
 - [Multi-worktree workflow](#multi-worktree-workflow)
 - [Local development environment](#local-development-environment)
 
@@ -146,11 +147,48 @@ execute_effects_with(effects, &repo_root, &fake).unwrap();
 | `src/run.rs` | Child process execution with secret injection |
 | `src/materialize.rs` | Root `.env` materialization |
 | `src/keyring_store.rs` | OS keyring integration |
-| `src/env.rs` | Environment resolution (`GITVAULT_ENV` → `.secrets/env` → `dev`) |
+| `src/defaults.rs` | Centralized built-in default constants — all hardcoded fallback values live here; new configurable defaults should be added here first |
 | `src/permissions.rs` | POSIX/Windows file permission helpers |
 | `src/aws_config.rs` | AWS profile/role-ARN config for future SSM backend |
 | `src/cli.rs` | clap CLI struct definitions |
 | `src/error.rs` | `GitvaultError` enum and exit codes |
+
+## Centralized defaults and configuration
+
+All hardcoded fallback values are collected in **`src/defaults.rs`**. This single file is the
+canonical source of truth for every built-in default — no literals should be scattered across
+implementation files.
+
+### Adding a new configurable default
+
+1. **Define the constant** in `src/defaults.rs` with a `///` doc-comment explaining its role.
+2. **Replace the call-site literal** with `crate::defaults::THE_CONST`.
+3. **Add a config key** in the appropriate section struct in `src/config.rs` (e.g. `[env]`,
+   `[barrier]`, `[paths]`, `[keyring]`):
+   - Add an `Option<T>` field to the raw TOML struct and the resolved struct.
+   - Add a resolver method that calls `.unwrap_or(defaults::THE_CONST)`.
+   - Wire the merge in `effective_config_impl` using `.or()` (repo wins, global fills in).
+4. **Thread the resolved value** from `effective_config(repo_root)?` down to the function that
+   needs it.
+5. **Document the key** in `README.md` and in the relevant spec file under `specs/`.
+
+### Currently configured defaults
+
+| Constant | Value | Config key |
+|----------|-------|-----------|
+| `defaults::DEFAULT_ENV` | `dev` | `[env] default` |
+| `defaults::DEFAULT_PROD_ENV` | `prod` | `[env] prod_name` |
+| `defaults::ENV_FILE` | `.secrets/env` | `[env] env_file` |
+| `defaults::DEFAULT_BARRIER_TTL_SECS` | `3600` | `[barrier] ttl_secs` |
+| `defaults::RECIPIENTS_FILE` | `.secrets/recipients` | `[paths] recipients_file` |
+| `defaults::MATERIALIZE_OUTPUT` | `.env` | `[paths] materialize_output` |
+| `defaults::KEYRING_SERVICE` | `gitvault` | `[keyring] service` |
+| `defaults::KEYRING_ACCOUNT` | `age-identity` | `[keyring] account` |
+| `defaults::BARRIER_TOKEN_FILE` | `.secrets/.prod-token` | *(not yet configurable)* |
+| `defaults::SECRETS_DIR` | `secrets` | *(not yet configurable)* |
+| `defaults::PLAIN_BASE_DIR` | `.secrets/plain` | *(not yet configurable)* |
+
+---
 
 ## Multi-worktree workflow
 
