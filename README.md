@@ -5,54 +5,52 @@ with [age](https://age-encryption.org) and stored in your repository — never p
 
 ## Features (implementation highlights)
 
-- **age encryption** — standard file format, native Rust, no external binaries required (REQ-1, 2)
-- **Multi-recipient** — encrypt once for every team member; any recipient can decrypt (REQ-3)
+- **age encryption** — standard file format, native Rust, no external binaries required
+- **Multi-recipient** — encrypt once for every team member; any recipient can decrypt
 - **Field-level encryption** — encrypt individual fields in JSON, YAML, and TOML files; values
-  stored as age ASCII armor inline in the document (REQ-4)
+  stored as age ASCII armor inline in the document
 - **Deterministic re-encryption** — unchanged field values retain existing ciphertext so git diffs
-  stay minimal (REQ-5, 35)
+  stay minimal
 - **Whole-file / value-only modes** — `.env` files default to whole-file encryption; opt in to
-  per-value encryption with `--value-only` (REQ-6)
+  per-value encryption with `--value-only`
 - **Repository layout** — encrypted artifacts under `secrets/<env>/` (with legacy `secrets/*.age`
-  fallback), plaintext outputs under `.secrets/plain/<env>/`; one `.age` file per secret (REQ-7,
-  8, 11, 12, 33)
+  fallback), plaintext outputs under `.secrets/plain/<env>/`; one `.age` file per secret
 - **Plaintext leak detection** — refuses to operate if `.env` or plaintext secrets are tracked by
-  Git (REQ-10)
+  Git
 - **Environment model** — resolves active environment from `SECRETS_ENV` → `.secrets/env` → `dev`;
-  each worktree is independent (REQ-11, 12)
+  each worktree is independent
 - **Production barrier** — timed allow-token required to materialize or run against `prod`;
-  interactive confirmation fallback (REQ-13–15)
-- **Production token revoke** — `revoke-prod` removes the allow-token immediately (REQ-14)
+  interactive confirmation fallback
+- **Production token revoke** — `revoke-prod` removes the allow-token immediately
 - **Root `.env` materialization** — atomic write, restricted permissions (`0600` on POSIX,
   restricted ACL on Windows), deterministic sorted output, auto-added to `.gitignore`
-  (REQ-16–20)
 - **Fileless run mode** — injects secrets directly into child process environment without writing
-  `.env`; supports `--clear-env` and `--pass` (REQ-21–25)
+  `.env`; supports `--clear-env` and `--pass`
 - **Git hooks + merge driver** — `harden` installs pre-commit / pre-push hooks (`pre-push`
   enforces drift checks with `--fail-if-dirty`); optional `gitvault merge-driver` for key-level
-  `.env` merges (REQ-31, 32, 34)
+  `.env` merges
 - **Recipient management** — persistent `.secrets/recipients` file; `recipient add/remove/list`;
-  `rotate` re-encrypts all secrets for the current recipient set (REQ-36, 37, 38)
+  `rotate` re-encrypts all secrets for the current recipient set
 - **OS keyring** — `keyring set/get/delete`; `GITVAULT_KEYRING=1` loads identity from system
-  keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager) (REQ-39)
+  keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager)
 - **Identity bootstrap** — `identity create` generates local identities (classic/hybrid profile)
-  and can store to keyring or export to file (REQ-61, REQ-62)
+  and can store to keyring or export to file
 - **Security hardening** — fail-closed on decrypt error, `--reveal` required to print secrets,
-  path-traversal guard, atomic writes everywhere, `status` never decrypts (REQ-40–44)
+  path-traversal guard, atomic writes everywhere, `status` never decrypts
 - **JSON output & non-interactive mode** — all commands accept `--json` and `--no-prompt`;
-  `CI=true` auto-enables non-interactive mode (REQ-45–48)
+  `CI=true` auto-enables non-interactive mode
 - **Preflight check** — `gitvault check` validates identity, recipients, and secrets dir without
-  side effects (REQ-50)
+  side effects
 - **Streaming crypto** — encryption and decryption are streaming-capable; no full-file buffering
-  for large files (REQ-51, 52)
+  for large files
 - **AWS SSM backend** — `gitvault ssm pull/push/diff/set` sync secrets with AWS SSM Parameter Store;
-  enable with `--features ssm`; uses `--aws-profile` / `--aws-role-arn` (REQ-26–30, 49)
-- **Signed releases** — CI produces cosign-signed binaries for Linux, macOS, and Windows (REQ-54)
-- **Format versioning** — format version visible in `gitvault --version` output (REQ-55)
+  enable with `--features ssm`; uses `--aws-profile` / `--aws-role-arn`
+- **Signed releases** — CI produces cosign-signed binaries for Linux, macOS, and Windows
+- **Format versioning** — format version visible in `gitvault --version` output
 - **Build metadata in version output** — `gitvault --version --long` includes git SHA and commit date
 - **Tag/version release gate** — `cargo xtask release-check` enforces `Cargo.toml` version ↔ git tag parity (`vX.Y.Z`), clean tree, and annotated tags
-- **Stable exit codes** — documented, machine-readable (REQ-47)
-- **Spec gate** — `cargo xtask spec-verify` enforces frontmatter on every requirement spec (REQ-56)
+- **Stable exit codes** — documented, machine-readable
+- **Spec gate** — `cargo xtask spec-verify` enforces frontmatter on every requirement spec
 
 ---
 
@@ -130,7 +128,7 @@ gitvault encrypt app.env \
 gitvault encrypt config.json --fields db.password,api_key \
   --recipient age1abc...
 # Only the db.password and api_key values are replaced with age armor inline.
-# Repeat runs leave unchanged fields identical in git diff (REQ-5).
+# Repeat runs leave unchanged fields identical in git diff.
 ```
 
 ### 4 — Materialize secrets to `.env`
@@ -218,7 +216,7 @@ Commands:
 
 ## Environment resolution
 
-Priority order (REQ-11):
+Priority order:
 
 | Priority | Source |
 |----------|--------|
@@ -226,11 +224,11 @@ Priority order (REQ-11):
 | 2 | `.secrets/env` file in the worktree root |
 | 3 | `dev` (default) |
 
-Each Git worktree resolves its environment independently (REQ-12).
+Each Git worktree resolves its environment independently.
 
 ---
 
-## Exit codes (REQ-47)
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -239,8 +237,8 @@ Each Git worktree resolves its environment independently (REQ-12).
 | `2` | Usage / argument error |
 | `3` | Plaintext secret detected in tracked files |
 | `4` | Decryption error (wrong key, corrupt file) |
-| `5` | Production barrier not satisfied (REQ-13) |
-| `6` | Secrets drift detected (uncommitted changes in encrypted files; REQ-47) |
+| `5` | Production barrier not satisfied |
+| `6` | Secrets drift detected (uncommitted changes in encrypted files) |
 
 ---
 

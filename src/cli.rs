@@ -18,23 +18,23 @@ pub const OUTPUT_KEEP_PATH_SENTINEL: &str = "__GITVAULT_KEEP_PATH__";
     )
 )]
 pub struct Cli {
-    /// Output results as JSON (REQ-45)
+    /// Output results as JSON
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Disable interactive prompts (REQ-46)
+    /// Disable interactive prompts
     #[arg(long, global = true)]
     pub no_prompt: bool,
 
-    /// Explicit identity selector for SSH-agent key disambiguation (REQ-39/46)
+    /// Explicit identity selector for SSH-agent key disambiguation
     #[arg(long, global = true, env = "GITVAULT_IDENTITY_SELECTOR")]
     pub identity_selector: Option<String>,
 
-    /// AWS profile name for SSM backend (REQ-49)
+    /// AWS profile name for SSM backend
     #[arg(long, global = true, env = "AWS_PROFILE")]
     pub aws_profile: Option<String>,
 
-    /// AWS role ARN to assume for SSM backend (REQ-49)
+    /// AWS role ARN to assume for SSM backend
     #[arg(long, global = true, env = "AWS_ROLE_ARN")]
     pub aws_role_arn: Option<String>,
 
@@ -54,10 +54,10 @@ pub enum Commands {
         /// Preserve input path relative to repo root under secrets/<env>/
         #[arg(long)]
         keep_path: bool,
-        /// Fields to encrypt (comma-separated key paths, for JSON/YAML/TOML field-level encryption; REQ-4)
+        /// Fields to encrypt (comma-separated key paths, for JSON/YAML/TOML field-level encryption)
         #[arg(long, value_name = "FIELDS")]
         fields: Option<String>,
-        /// Encrypt .env values individually instead of whole-file (REQ-6)
+        /// Encrypt .env values individually instead of whole-file
         #[arg(long)]
         value_only: bool,
     },
@@ -76,13 +76,13 @@ pub enum Commands {
             default_missing_value = OUTPUT_KEEP_PATH_SENTINEL
         )]
         output: Option<String>,
-        /// Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML; REQ-4)
+        /// Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML)
         #[arg(long, value_name = "FIELDS")]
         fields: Option<String>,
-        /// Print decrypted content to stdout instead of writing to file (REQ-41)
+        /// Print decrypted content to stdout instead of writing to file
         #[arg(long)]
         reveal: bool,
-        /// Decrypt .env values individually (reverse of --value-only encrypt; REQ-6)
+        /// Decrypt .env values individually (reverse of --value-only encrypt)
         #[arg(long)]
         value_only: bool,
     },
@@ -94,19 +94,19 @@ pub enum Commands {
         /// Identity key file path
         #[arg(short, long)]
         identity: Option<String>,
-        /// Require production barrier for prod env (REQ-13)
+        /// Require production barrier for prod env
         #[arg(long)]
         prod: bool,
     },
     /// Check repository safety status
     Status {
-        /// Fail with exit code 6 if secrets/ has uncommitted changes (REQ-32)
+        /// Fail with exit code 6 if secrets/ has uncommitted changes
         #[arg(long)]
         fail_if_dirty: bool,
     },
     /// Harden repository (update .gitignore, install hooks)
     Harden,
-    /// Run a command with secrets injected as environment variables (REQ-21..25)
+    /// Run a command with secrets injected as environment variables
     Run {
         /// Environment to use
         #[arg(short, long)]
@@ -114,26 +114,26 @@ pub enum Commands {
         /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
-        /// Require production barrier (required when env=prod) (REQ-13)
+        /// Require production barrier (required when env=prod)
         #[arg(long)]
         prod: bool,
-        /// Start child with empty environment (REQ-24)
+        /// Start child with empty environment
         #[arg(long)]
         clear_env: bool,
-        /// Comma-separated vars to pass through when --clear-env is set (REQ-24)
+        /// Comma-separated vars to pass through when --clear-env is set
         #[arg(long, value_name = "VARS")]
         pass: Option<String>,
         /// Command and arguments to run
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
-    /// Write a timed production allow token (REQ-14)
+    /// Write a timed production allow token
     AllowProd {
         /// Token lifetime in seconds
         #[arg(long, default_value_t = crate::barrier::DEFAULT_TOKEN_TTL_SECS)]
         ttl: u64,
     },
-    /// Run as git merge driver for .env files (REQ-34)
+    /// Run as git merge driver for .env files
     /// Usage: git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"
     MergeDriver {
         /// Base version (ancestor)
@@ -143,23 +143,23 @@ pub enum Commands {
         /// Theirs version (incoming branch)
         theirs: String,
     },
-    /// Manage persistent recipients (REQ-37)
+    /// Manage persistent recipients
     Recipient {
         #[command(subcommand)]
         action: RecipientAction,
     },
-    /// Re-encrypt all secrets with the current recipients list (REQ-38)
+    /// Re-encrypt all secrets with the current recipients list
     Rotate {
         /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
     },
-    /// Manage identity key in OS keyring (REQ-39)
+    /// Manage identity key in OS keyring
     Keyring {
         #[command(subcommand)]
         action: KeyringAction,
     },
-    /// Run preflight validation without side effects (REQ-50)
+    /// Run preflight validation without side effects
     Check {
         /// Environment to validate
         #[arg(short, long)]
@@ -168,16 +168,16 @@ pub enum Commands {
         #[arg(short, long)]
         identity: Option<String>,
     },
-    /// Revoke the production allow token immediately [REQ-14].
+    /// Revoke the production allow token immediately.
     RevokeProd,
 
-    /// Manage local identity keys (REQ-61..63)
+    /// Manage local identity keys
     Identity {
         #[command(subcommand)]
         action: IdentityAction,
     },
 
-    /// AWS SSM Parameter Store backend (REQ-26 to REQ-30)
+    /// AWS SSM Parameter Store backend
     #[cfg(feature = "ssm")]
     Ssm {
         #[command(subcommand)]
@@ -217,7 +217,7 @@ pub enum KeyringAction {
 
 #[derive(Subcommand)]
 pub enum IdentityAction {
-    /// Create a new identity key (REQ-61, REQ-62)
+    /// Create a new identity key
     Create {
         /// Identity profile: classic (age X25519) or hybrid (age X25519 + future PQ-ready label)
         #[arg(long, value_enum, default_value = "classic")]
@@ -304,7 +304,7 @@ pub enum SsmAction {
         value: String,
         #[arg(short, long)]
         env: Option<String>,
-        /// Require production barrier (required when env=prod) (REQ-13)
+        /// Require production barrier (required when env=prod)
         #[arg(long)]
         prod: bool,
     },
@@ -312,7 +312,7 @@ pub enum SsmAction {
     Push {
         #[arg(short, long)]
         env: Option<String>,
-        /// Require production barrier (required when env=prod) (REQ-13)
+        /// Require production barrier (required when env=prod)
         #[arg(long)]
         prod: bool,
     },
