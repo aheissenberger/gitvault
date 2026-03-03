@@ -304,21 +304,12 @@ Priority order for loading the age identity:
 
 ## Configuration
 
-gitvault supports two optional TOML config file layers.
+gitvault supports two optional TOML configuration file layers. Both files are optional — a missing file (or missing section) silently uses built-in defaults.
 
-**Project config — `.gitvault/config.toml`**
-
-```toml
-[hooks]
-adapter = "husky"   # optional: husky | pre-commit | lefthook
-```
-
-**User-global config — `~/.config/gitvault/config.toml`**
-
-```toml
-[hooks]
-adapter = "husky"   # personal default, overridden by project config
-```
+| File | Scope |
+|------|-------|
+| `.gitvault/config.toml` | Repository-level; committed with the project |
+| `~/.config/gitvault/config.toml` | User-global; personal defaults for all repos |
 
 **Precedence** (highest → lowest):
 
@@ -327,7 +318,41 @@ adapter = "husky"   # personal default, overridden by project config
 3. User-global `~/.config/gitvault/config.toml`
 4. Built-in defaults
 
-> Unknown keys in either file produce a `Usage` error (exit `2`) with an actionable message.
+---
+
+### `[hooks]` section
+
+Controls how `gitvault harden` installs Git hooks into the repository.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `adapter` | string | *(none)* | Hook-manager adapter to delegate to. When set, `gitvault harden` delegates to the adapter's binary instead of writing native Git hooks directly. Accepted values: `husky`, `pre-commit`, `lefthook`. An empty string is treated as unset and the next precedence layer applies. |
+
+**Adapter binaries invoked:**
+
+| Value | Binary on `PATH` |
+|-------|-----------------|
+| `husky` | `gitvault-husky` |
+| `pre-commit` | `gitvault-pre-commit` |
+| `lefthook` | `gitvault-lefthook` |
+
+**Example — project config:**
+
+```toml
+# .gitvault/config.toml
+[hooks]
+adapter = "husky"   # delegate hook installation to gitvault-husky
+```
+
+**Example — user-global config:**
+
+```toml
+# ~/.config/gitvault/config.toml
+[hooks]
+adapter = "lefthook"   # personal default; overridden by any project config
+```
+
+> **Validation:** unknown keys inside `[hooks]` produce a `Usage` error (exit `2`) with an actionable message. Unknown top-level sections are silently ignored for forward compatibility.
 
 ---
 
