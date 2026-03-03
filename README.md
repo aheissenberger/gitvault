@@ -244,6 +244,21 @@ Also ensures `.gitattributes` contains `*.env merge=gitvault-env` and sets local
 `merge.gitvault-env.driver="gitvault merge-driver %O %A %B"`.
 If `core.hooksPath` is configured, hooks are installed in that active hooks directory.
 
+### Hook Manager Integration
+
+By default, `gitvault harden` installs built-in git hooks — no configuration needed.
+To delegate to an external hook manager, create `.gitvault/config.toml`:
+
+```toml
+[hooks]
+adapter = "husky"   # or "pre-commit" or "lefthook"
+```
+
+When configured, gitvault resolves a `gitvault-<adapter>` binary on `PATH` and invokes it with `harden`:
+
+- **CI / `--no-prompt` mode** — missing adapter binary → deterministic failure with install instructions (exit `2`).
+- **Interactive mode** — missing adapter binary → warning, fallback to built-in hooks.
+
 ### `run`
 
 ```
@@ -404,6 +419,35 @@ Priority order for loading the age identity:
 | 1 | `--identity <file>` flag |
 | 2 | `GITVAULT_IDENTITY` environment variable (key file path or raw `AGE-SECRET-KEY-` string) |
 | 3 | OS keyring when `GITVAULT_KEYRING=1` |
+
+---
+
+## Configuration
+
+gitvault supports two optional TOML config file layers.
+
+**Project config — `.gitvault/config.toml`**
+
+```toml
+[hooks]
+adapter = "husky"   # optional: husky | pre-commit | lefthook
+```
+
+**User-global config — `~/.config/gitvault/config.toml`**
+
+```toml
+[hooks]
+adapter = "husky"   # personal default, overridden by project config
+```
+
+**Precedence** (highest → lowest):
+
+1. CLI flags / environment variables
+2. Project `.gitvault/config.toml`
+3. User-global `~/.config/gitvault/config.toml`
+4. Built-in defaults
+
+> Unknown keys in either file produce a `Usage` error (exit `2`) with an actionable message.
 
 ---
 
