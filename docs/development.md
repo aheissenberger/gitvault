@@ -34,6 +34,11 @@ cargo llvm-cov --summary-only                        # show per-file line covera
 cargo llvm-cov --fail-under-lines 95                 # enforce ≥95% line coverage gate
 ```
 
+Release-flow note:
+- Prefer `cargo verify-fmt`, `cargo verify-clippy`, `cargo instructions-lint`, and `cargo llvm-cov` over `cargo verify` for release prep.
+- `cargo llvm-cov` already compiles and runs tests; `cargo verify` would duplicate test/build work.
+- Multi-target release binaries are built in CI, so local pre-tag release builds are optional for speed-focused release workflows.
+
 All source files maintain ≥95% line coverage (LCOV). Current coverage highlights:
 
 | File | Coverage |

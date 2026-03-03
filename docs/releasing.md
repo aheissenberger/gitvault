@@ -30,10 +30,18 @@ Example: `0.1.0` -> `0.1.1`.
 ## 2) Run local verification
 
 ```bash
-cargo verify
+cargo verify-fmt
+cargo verify-clippy
+cargo instructions-lint
+cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs|ssm/backend\.rs" --fail-under-lines 95
 ```
 
-`cargo verify` must pass before tagging.
+All verification commands above must pass before tagging.
+
+Why this is faster:
+- `cargo llvm-cov` already compiles and runs the test suite, so running `cargo verify` would duplicate `test` work.
+- CI `build` jobs produce release binaries for all targets, so local release flow avoids redundant pre-tag release builds.
+- `cargo check -p gitvault --all-features` is sufficient to refresh lockfile metadata for the root crate version bump.
 
 If CLI commands or options have changed since the last release, regenerate the AI help index so documentation agents work from accurate data:
 
@@ -78,7 +86,7 @@ After tag push or manual dispatch, verify this workflow:
 - **Unified release workflow**: [build.yml](../.github/workflows/build.yml)
   - Triggers only on tag pushes matching `v*` and manual dispatch.
   - Runs `cargo fmt`, `clippy`, tests, and tag consistency checks.
-  - Enforces 100% Rust line coverage with `cargo llvm-cov --workspace --all-features --fail-under-lines 100`.
+  - Enforces Rust line coverage with `cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs|ssm/backend\.rs" --fail-under-lines 95`.
   - Builds release binaries for Linux, Windows, and macOS (arm64 + x86_64).
   - Signs each release artifact with Sigstore Cosign (keyless) and verifies signatures in CI.
   - Uploads binaries as workflow artifacts.

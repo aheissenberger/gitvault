@@ -48,7 +48,9 @@ After the bump type is known:
 2. Require a clean tree before verification:
    - `git status --short` must be empty before continuing.
 3. Run verification:
-   - `cargo verify > /dev/null 2>&1`
+   - `cargo verify-fmt > /dev/null 2>&1`
+   - `cargo verify-clippy > /dev/null 2>&1`
+   - `cargo instructions-lint > /dev/null 2>&1`
    - Verify required coverage by running the CLI:
      - `cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs|ssm/backend\.rs" --fail-under-lines 95 > /dev/null 2>&1`
 4. Require a clean tree after verification:
@@ -59,7 +61,7 @@ After the bump type is known:
    - `major`: `X+1.0.0`
 6. Update `Cargo.toml` version.
 7. Sync lockfile package version:
-   - Run `cargo check --workspace --all-features`.
+   - Run `cargo check -p gitvault --all-features`.
    - Require `Cargo.lock` to reflect the same `gitvault` package version as `Cargo.toml`.
    - Check lockfile diff scope with:
      - `git diff -- Cargo.lock`
@@ -70,11 +72,9 @@ After the bump type is known:
    - Commit both `Cargo.toml` and `Cargo.lock` together.
 9. Create annotated tag:
    - `git tag -a v<new-version> -m "v<new-version>"`
-10. Require clean tree before release gate:
-   - `git status --short` must be empty.
-11. Run release gate:
+10. Run release gate:
    - `cargo xtask release-check`
-12. Push commit and tag:
+11. Push commit and tag:
    - `git push origin main`
    - `git push origin v<new-version>`
 
@@ -88,6 +88,7 @@ After the bump type is known:
 - Abort if lockfile updates include unrelated dependency/version changes.
 - Never create lightweight tags.
 - Never skip `cargo xtask release-check`.
+- In release flow, do not run `cargo verify`; it duplicates `test`/`build` work already covered by `cargo llvm-cov` and CI build jobs.
 
 ## Output contract
 
