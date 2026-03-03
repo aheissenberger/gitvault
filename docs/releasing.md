@@ -35,6 +35,13 @@ cargo verify
 
 `cargo verify` must pass before tagging.
 
+If CLI commands or options have changed since the last release, regenerate the AI help index so documentation agents work from accurate data:
+
+```bash
+cargo xtask cli-help
+git add docs/ai/cli-help.json && git commit -m "chore: refresh CLI help index"
+```
+
 ## 3) Create and push annotated tag
 
 ```bash

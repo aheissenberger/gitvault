@@ -13,6 +13,7 @@
 - Update `specs/<id>/04-progress.md` after task completion.
 - Use `cargo xtask`/aliases for spec/worktree actions: `spec-init`, `spec-verify`, `wt-*`.
 - Do not add or use shell wrappers for spec/worktree flows.
+- Run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` before updating README.md.
 
 ## Collaboration
 - Keep commits small and reviewable.

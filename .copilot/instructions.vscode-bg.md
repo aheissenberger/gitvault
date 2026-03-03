@@ -10,6 +10,7 @@ Hard rules:
 - Write/update tests (Rust changes require full test coverage).
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Run `cargo xtask spec-verify` (or `cargo spec-verify`) and fix failures.
+- Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - Use `cargo xtask wt-*` for worktree operations only.
 

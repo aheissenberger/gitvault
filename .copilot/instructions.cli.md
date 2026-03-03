@@ -7,6 +7,7 @@ Rules:
 - Do not implement new requirements without an approved spec entry.
 - After implementing a requirement, update the corresponding requirement spec status to reflect completion.
 - Use `cargo xtask`/aliases for spec and worktree tasks.
+- Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.
 - For Rust changes, ensure full test coverage.
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
