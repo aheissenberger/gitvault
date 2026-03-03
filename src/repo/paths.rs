@@ -66,7 +66,45 @@ pub fn validate_write_path(base: &Path, target: &Path) -> Result<(), GitvaultErr
             }
         }
     };
-    if canonical_target.starts_with(&canonical_base) {
+
+    #[cfg(windows)]
+    fn starts_with_base(target: &Path, base: &Path) -> bool {
+        use std::path::Component;
+
+        fn component_eq(a: Component<'_>, b: Component<'_>) -> bool {
+            match (a, b) {
+                (Component::Prefix(pa), Component::Prefix(pb)) => pa
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&pb.as_os_str().to_string_lossy()),
+                (Component::RootDir, Component::RootDir)
+                | (Component::CurDir, Component::CurDir)
+                | (Component::ParentDir, Component::ParentDir) => true,
+                (Component::Normal(na), Component::Normal(nb)) => na
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&nb.to_string_lossy()),
+                _ => false,
+            }
+        }
+
+        let mut target_components = target.components();
+        for base_component in base.components() {
+            let Some(target_component) = target_components.next() else {
+                return false;
+            };
+            if !component_eq(target_component, base_component) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[cfg(not(windows))]
+    fn starts_with_base(target: &Path, base: &Path) -> bool {
+        target.starts_with(base)
+    }
+
+    if starts_with_base(&canonical_target, &canonical_base) {
         Ok(())
     } else {
         Err(GitvaultError::Usage(format!(
