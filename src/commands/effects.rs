@@ -85,19 +85,35 @@ pub trait EffectRunner {
 pub struct DefaultRunner {
     /// Optional identity selector for SSH-agent key disambiguation (REQ-39/46).
     pub selector: Option<String>,
+    /// Environment name that activates the production barrier (from `[env].prod_name`).
+    pub prod_name: String,
+    /// Output filename for `gitvault materialize` (from `[paths].materialize_output`).
+    pub materialize_output: String,
 }
 
 impl DefaultRunner {
-    /// Create a `DefaultRunner` with no selector.
+    /// Create a `DefaultRunner` with built-in defaults.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            selector: None,
+            prod_name: crate::defaults::DEFAULT_PROD_ENV.to_string(),
+            materialize_output: crate::defaults::MATERIALIZE_OUTPUT.to_string(),
+        }
     }
 
-    /// Create a `DefaultRunner` with an explicit selector.
+    /// Create a `DefaultRunner` with an explicit selector and configured values.
     #[must_use]
-    pub const fn with_selector(selector: Option<String>) -> Self {
-        Self { selector }
+    pub fn with_selector(
+        selector: Option<String>,
+        prod_name: String,
+        materialize_output: String,
+    ) -> Self {
+        Self {
+            selector,
+            prod_name,
+            materialize_output,
+        }
     }
 }
 
@@ -109,7 +125,7 @@ impl EffectRunner for DefaultRunner {
         prod: bool,
         no_prompt: bool,
     ) -> Result<(), GitvaultError> {
-        barrier::check_prod_barrier(repo_root, env, prod, no_prompt)
+        barrier::check_prod_barrier(repo_root, env, prod, no_prompt, &self.prod_name)
     }
 
     fn load_identity_str(
@@ -146,7 +162,7 @@ impl EffectRunner for DefaultRunner {
         repo_root: &Path,
         secrets: &[(String, String)],
     ) -> Result<(), GitvaultError> {
-        materialize::materialize_env_file(repo_root, secrets)
+        materialize::materialize_env_file(repo_root, secrets, &self.materialize_output)
     }
 }
 
@@ -245,10 +261,15 @@ pub fn execute_effects(
     selector: Option<&str>,
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
+    let cfg = crate::config::effective_config(&repo_root)?;
     execute_effects_with(
         effects,
         &repo_root,
-        &DefaultRunner::with_selector(selector.map(str::to_owned)),
+        &DefaultRunner::with_selector(
+            selector.map(str::to_owned),
+            cfg.env.prod_name().to_string(),
+            cfg.paths.materialize_output().to_string(),
+        ),
     )
 }
 

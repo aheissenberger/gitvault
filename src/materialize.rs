@@ -10,29 +10,30 @@ use crate::permissions;
 /// Entries that must be in .gitignore for safety
 pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[defaults::MATERIALIZE_OUTPUT, ".secrets/plain/"];
 
-/// Materialize decrypted secrets to the root-level `.env` file.
+/// Materialize decrypted secrets to an output file (default: `.env`).
 ///
 /// REQ-16: generates root-level .env
 /// REQ-17: atomic write (temp file + rename)
 /// REQ-18: restricted .env permissions (0600 on Unix; restricted ACL via icacls on Windows)
 /// REQ-19: deterministic output (sorted keys, canonical quoting)
-/// REQ-20: ensures .env is in .gitignore first
+/// REQ-20: ensures output file is in .gitignore first
+///
+/// `output_filename` is the repository-relative path to write, e.g. `".env"`.
+/// Use [`defaults::MATERIALIZE_OUTPUT`] or `cfg.paths.materialize_output()` as the value.
 ///
 /// # Errors
 ///
-/// Returns [`GitvaultError::Io`] if writing the `.env` temp file or atomic rename fails,
+/// Returns [`GitvaultError::Io`] if writing the temp file or atomic rename fails,
 /// or if `.gitignore` cannot be read or updated.
 pub fn materialize_env_file(
     repo_root: &Path,
     secrets: &[(String, String)],
+    output_filename: &str,
 ) -> Result<(), GitvaultError> {
-    // REQ-20: ensure .env is in .gitignore before writing
-    ensure_gitignored(
-        repo_root,
-        &[defaults::MATERIALIZE_OUTPUT, ".secrets/plain/"],
-    )?;
+    // REQ-20: ensure output file is in .gitignore before writing
+    ensure_gitignored(repo_root, &[output_filename, ".secrets/plain/"])?;
 
-    let env_path = repo_root.join(defaults::MATERIALIZE_OUTPUT);
+    let env_path = repo_root.join(output_filename);
 
     // REQ-19: sort keys deterministically
     let mut sorted: Vec<&(String, String)> = secrets.iter().collect();
@@ -60,7 +61,7 @@ pub fn materialize_env_file(
 }
 
 fn enforce_restricted_env_permissions(path: &Path) -> Result<(), GitvaultError> {
-    permissions::enforce_owner_rw(path, ".env")
+    permissions::enforce_owner_rw(path, defaults::MATERIALIZE_OUTPUT)
 }
 
 /// Format key=value pairs as canonical .env content.
@@ -203,7 +204,7 @@ mod tests {
             ("DB_URL", "postgres://localhost/db"),
             ("API_KEY", "secret123"),
         ]);
-        materialize_env_file(dir.path(), &secrets).unwrap();
+        materialize_env_file(dir.path(), &secrets, defaults::MATERIALIZE_OUTPUT).unwrap();
 
         assert!(dir.path().join(".env").exists(), ".env should be created");
     }
@@ -214,7 +215,7 @@ mod tests {
         fs::write(dir.path().join(".gitignore"), "").unwrap();
 
         let secrets = make_secrets(&[("ZEBRA", "z"), ("ALPHA", "a"), ("MIDDLE", "m")]);
-        materialize_env_file(dir.path(), &secrets).unwrap();
+        materialize_env_file(dir.path(), &secrets, defaults::MATERIALIZE_OUTPUT).unwrap();
 
         let content = fs::read_to_string(dir.path().join(".env")).unwrap();
         let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
@@ -231,10 +232,10 @@ mod tests {
 
         let secrets = make_secrets(&[("KEY_B", "value_b"), ("KEY_A", "value_a")]);
 
-        materialize_env_file(dir.path(), &secrets).unwrap();
+        materialize_env_file(dir.path(), &secrets, defaults::MATERIALIZE_OUTPUT).unwrap();
         let content1 = fs::read_to_string(dir.path().join(".env")).unwrap();
 
-        materialize_env_file(dir.path(), &secrets).unwrap();
+        materialize_env_file(dir.path(), &secrets, defaults::MATERIALIZE_OUTPUT).unwrap();
         let content2 = fs::read_to_string(dir.path().join(".env")).unwrap();
 
         assert_eq!(
@@ -249,7 +250,7 @@ mod tests {
         fs::write(dir.path().join(".gitignore"), "").unwrap();
 
         let secrets = make_secrets(&[("KEY", "value with \"quotes\" and \\backslash")]);
-        materialize_env_file(dir.path(), &secrets).unwrap();
+        materialize_env_file(dir.path(), &secrets, defaults::MATERIALIZE_OUTPUT).unwrap();
 
         let content = fs::read_to_string(dir.path().join(".env")).unwrap();
         assert!(content.contains("KEY=\"value with \\\"quotes\\\" and \\\\backslash\""));
@@ -262,7 +263,7 @@ mod tests {
         fs::write(dir.path().join(".gitignore"), "").unwrap();
 
         let secrets = make_secrets(&[("SECRET", "value")]);
-        materialize_env_file(dir.path(), &secrets).unwrap();
+        materialize_env_file(dir.path(), &secrets, defaults::MATERIALIZE_OUTPUT).unwrap();
 
         let meta = fs::metadata(dir.path().join(".env")).unwrap();
         let mode = meta.permissions().mode() & 0o777;

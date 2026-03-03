@@ -61,7 +61,10 @@ pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, Git
     // REQ-44: no decryption performed
     let repo_root = crate::repo::find_repo_root()?;
     repo::check_no_tracked_plaintext(&repo_root)?;
-    let env = env::resolve_env(&repo_root);
+    let env = env::resolve_env(
+        &repo_root,
+        &crate::config::effective_config(&repo_root)?.env,
+    );
 
     // REQ-32: drift check
     if fail_if_dirty && repo::has_secrets_drift(&repo_root)? {
@@ -227,7 +230,8 @@ pub fn cmd_check(
     json: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
-    let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
+    let cfg = crate::config::effective_config(&repo_root)?;
+    let env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root, &cfg.env));
 
     // Check 1: no tracked plaintext (REQ-10)
     repo::check_no_tracked_plaintext(&repo_root)?;
@@ -240,7 +244,7 @@ pub fn cmd_check(
     crypto::parse_identity_any(&identity_str)?;
 
     // Check 3: recipients file is readable and all keys are valid
-    let recipients = repo::read_recipients(&repo_root)?;
+    let recipients = repo::read_recipients(&repo_root, cfg.paths.recipients_file())?;
     for key in &recipients {
         crypto::parse_recipient(key).map_err(|e| {
             GitvaultError::Usage(format!(
@@ -485,7 +489,8 @@ mod tests {
 
         // Write a valid recipient so that the for loop on lines 995-1000 executes.
         let pubkey = identity.to_public().to_string();
-        repo::write_recipients(dir.path(), &[pubkey]).expect("write_recipients should succeed");
+        repo::write_recipients(dir.path(), &[pubkey], crate::defaults::RECIPIENTS_FILE)
+            .expect("write_recipients should succeed");
 
         with_identity_env(identity_file.path(), || {
             cmd_check(None, None, None, false).expect("check with valid recipient should succeed");

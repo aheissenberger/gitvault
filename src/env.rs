@@ -1,3 +1,4 @@
+use crate::config::EnvConfig;
 use crate::defaults;
 use crate::error::GitvaultError;
 use regex::Regex;
@@ -9,13 +10,13 @@ use std::sync::OnceLock;
 ///
 /// Priority (REQ-11):
 /// 1. `GITVAULT_ENV` environment variable
-/// 2. [`defaults::ENV_FILE`] (`.secrets/env`) file in the worktree root
-/// 3. Default: [`defaults::DEFAULT_ENV`] (`"dev"`)
+/// 2. `cfg.env_file()` (default: `.secrets/env`) file in the worktree root
+/// 3. Default: `cfg.default_env()` (default: `"dev"`)
 ///
 /// Each worktree resolves independently (REQ-12) because resolution
 /// is relative to the passed `worktree_root` path.
 #[must_use]
-pub fn resolve_env(worktree_root: &Path) -> String {
+pub fn resolve_env(worktree_root: &Path, cfg: &EnvConfig) -> String {
     // Priority 1: GITVAULT_ENV env var
     if let Ok(env) = std::env::var("GITVAULT_ENV") {
         let env = env.trim().to_string();
@@ -24,8 +25,8 @@ pub fn resolve_env(worktree_root: &Path) -> String {
         }
     }
 
-    // Priority 2: .secrets/env file
-    let env_file = worktree_root.join(defaults::ENV_FILE);
+    // Priority 2: env file (path configurable via [env].env_file)
+    let env_file = worktree_root.join(cfg.env_file());
     if let Ok(content) = fs::read_to_string(&env_file) {
         let env = content.trim().to_string();
         if !env.is_empty() {
@@ -33,8 +34,8 @@ pub fn resolve_env(worktree_root: &Path) -> String {
         }
     }
 
-    // Priority 3: default
-    defaults::DEFAULT_ENV.to_string()
+    // Priority 3: configured default (or built-in "dev")
+    cfg.default_env().to_string()
 }
 
 /// Validate that an environment name is safe to use as a path component.
@@ -82,7 +83,7 @@ mod tests {
         unsafe {
             std::env::remove_var("GITVAULT_ENV");
         }
-        let env = resolve_env(dir.path());
+        let env = resolve_env(dir.path(), &Default::default());
         assert_eq!(env, "dev");
     }
 
@@ -97,7 +98,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
         fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
 
-        let env = resolve_env(dir.path());
+        let env = resolve_env(dir.path(), &Default::default());
         assert_eq!(env, "staging");
     }
 
@@ -112,7 +113,7 @@ mod tests {
         unsafe {
             std::env::set_var("GITVAULT_ENV", "prod");
         }
-        let env = resolve_env(dir.path());
+        let env = resolve_env(dir.path(), &Default::default());
         unsafe {
             std::env::remove_var("GITVAULT_ENV");
         }
@@ -135,8 +136,8 @@ mod tests {
         fs::create_dir_all(dir2.path().join(".secrets")).unwrap();
         fs::write(dir2.path().join(".secrets").join("env"), "dev").unwrap();
 
-        assert_eq!(resolve_env(dir1.path()), "staging");
-        assert_eq!(resolve_env(dir2.path()), "dev");
+        assert_eq!(resolve_env(dir1.path(), &Default::default()), "staging");
+        assert_eq!(resolve_env(dir2.path(), &Default::default()), "dev");
     }
 
     #[test]
@@ -149,7 +150,7 @@ mod tests {
         unsafe {
             std::env::set_var("GITVAULT_ENV", "   ");
         }
-        let env = resolve_env(dir.path());
+        let env = resolve_env(dir.path(), &Default::default());
         unsafe {
             std::env::remove_var("GITVAULT_ENV");
         }
@@ -167,7 +168,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".secrets")).unwrap();
         fs::write(dir.path().join(".secrets").join("env"), "  \n").unwrap();
 
-        let env = resolve_env(dir.path());
+        let env = resolve_env(dir.path(), &Default::default());
         assert_eq!(env, "dev");
     }
 

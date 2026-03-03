@@ -7,14 +7,20 @@ use std::sync::OnceLock;
 /// File storing persistent recipient public keys (REQ-36); re-exported from [`defaults`].
 pub use defaults::RECIPIENTS_FILE;
 
-/// Read persistent recipients from .secrets/recipients (one pubkey per line).
+/// Read persistent recipients from the configured recipients file (one pubkey per line).
+///
+/// `recipients_file` is the repository-relative path to the file, e.g. `".secrets/recipients"`.
+/// Use [`defaults::RECIPIENTS_FILE`] or `cfg.paths.recipients_file()` as the value.
 ///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Io`] if the file exists but cannot be read.
 /// Returns [`GitvaultError::Usage`] if any line is not a valid age recipient key.
-pub fn read_recipients(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
-    let path = repo_root.join(RECIPIENTS_FILE);
+pub fn read_recipients(
+    repo_root: &Path,
+    recipients_file: &str,
+) -> Result<Vec<String>, GitvaultError> {
+    let path = repo_root.join(recipients_file);
     if !path.exists() {
         return Ok(vec![]);
     }
@@ -24,7 +30,7 @@ pub fn read_recipients(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
         if let Some(recipient) = parse_recipient_line(line).map_err(|message| {
             GitvaultError::Usage(format!(
                 "Invalid recipient entry in {}:{}: {message}",
-                RECIPIENTS_FILE,
+                recipients_file,
                 line_no + 1
             ))
         })? {
@@ -54,14 +60,21 @@ fn parse_recipient_line(line: &str) -> Result<Option<String>, &'static str> {
     Err("expected age recipient key")
 }
 
-/// Write recipients to .secrets/recipients atomically.
+/// Write recipients to the configured recipients file atomically.
+///
+/// `recipients_file` is the repository-relative path to write, e.g. `".secrets/recipients"`.
+/// Use [`defaults::RECIPIENTS_FILE`] or `cfg.paths.recipients_file()` as the value.
 ///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Io`] if the parent directory cannot be created or
 /// the file cannot be written atomically.
-pub fn write_recipients(repo_root: &Path, recipients: &[String]) -> Result<(), GitvaultError> {
-    let path = repo_root.join(RECIPIENTS_FILE);
+pub fn write_recipients(
+    repo_root: &Path,
+    recipients: &[String],
+    recipients_file: &str,
+) -> Result<(), GitvaultError> {
+    let path = repo_root.join(recipients_file);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -90,8 +103,8 @@ mod tests {
             "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string(),
             "age1z6j0we5lvscfzxqlqtpfwkf6p4amhjw6hv6h0x3n7lkdmkdwkjnq9x5x5v".to_string(),
         ];
-        write_recipients(dir.path(), &keys).unwrap();
-        let read_back = read_recipients(dir.path()).unwrap();
+        write_recipients(dir.path(), &keys, defaults::RECIPIENTS_FILE).unwrap();
+        let read_back = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         assert_eq!(read_back, keys);
     }
 
@@ -101,16 +114,21 @@ mod tests {
         let pubkey = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string();
 
         // Write once
-        write_recipients(dir.path(), std::slice::from_ref(&pubkey)).unwrap();
+        write_recipients(
+            dir.path(),
+            std::slice::from_ref(&pubkey),
+            defaults::RECIPIENTS_FILE,
+        )
+        .unwrap();
 
         // Simulate cmd_recipient Add logic (check contains before adding)
-        let mut recipients = read_recipients(dir.path()).unwrap();
+        let mut recipients = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         if !recipients.contains(&pubkey) {
             recipients.push(pubkey.clone());
-            write_recipients(dir.path(), &recipients).unwrap();
+            write_recipients(dir.path(), &recipients, defaults::RECIPIENTS_FILE).unwrap();
         }
 
-        let read_back = read_recipients(dir.path()).unwrap();
+        let read_back = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         assert_eq!(
             read_back.iter().filter(|r| r.as_str() == pubkey).count(),
             1,
@@ -121,7 +139,7 @@ mod tests {
     #[test]
     fn test_read_recipients_empty_when_no_file() {
         let dir = TempDir::new().unwrap();
-        let recipients = read_recipients(dir.path()).unwrap();
+        let recipients = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         assert!(recipients.is_empty());
     }
 
@@ -136,7 +154,7 @@ mod tests {
         )
         .unwrap();
 
-        let recipients = read_recipients(dir.path()).unwrap();
+        let recipients = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         assert_eq!(
             recipients,
             vec!["age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p".to_string()]
@@ -150,7 +168,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "not-a-recipient\n").unwrap();
 
-        let result = read_recipients(dir.path());
+        let result = read_recipients(dir.path(), defaults::RECIPIENTS_FILE);
         match result {
             Err(GitvaultError::Usage(message)) => {
                 assert!(message.contains("Invalid recipient entry"));
@@ -173,7 +191,7 @@ mod tests {
         )
         .unwrap();
 
-        let recipients = read_recipients(dir.path()).unwrap();
+        let recipients = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         assert_eq!(recipients.len(), 1);
     }
 
@@ -185,16 +203,21 @@ mod tests {
         let key2 = "age1z6j0we5lvscfzxqlqtpfwkf6p4amhjw6hv6h0x3n7lkdmkdwkjnq9x5x5v".to_string();
 
         // Start with only key1.
-        write_recipients(dir.path(), std::slice::from_ref(&key1)).unwrap();
+        write_recipients(
+            dir.path(),
+            std::slice::from_ref(&key1),
+            defaults::RECIPIENTS_FILE,
+        )
+        .unwrap();
 
         // key2 is not present — simulate the "add" branch.
-        let mut recipients = read_recipients(dir.path()).unwrap();
+        let mut recipients = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         if !recipients.contains(&key2) {
             recipients.push(key2.clone());
-            write_recipients(dir.path(), &recipients).unwrap();
+            write_recipients(dir.path(), &recipients, defaults::RECIPIENTS_FILE).unwrap();
         }
 
-        let read_back = read_recipients(dir.path()).unwrap();
+        let read_back = read_recipients(dir.path(), defaults::RECIPIENTS_FILE).unwrap();
         assert!(read_back.contains(&key2), "key2 should have been added");
         assert_eq!(read_back.len(), 2);
     }

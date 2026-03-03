@@ -18,16 +18,19 @@ pub use defaults::DEFAULT_BARRIER_TTL_SECS as DEFAULT_TOKEN_TTL_SECS;
 
 /// Check the production barrier for the given environment.
 ///
-/// REQ-13: if `env` == "prod", requires:
+/// REQ-13: if `env` == `prod_name`, requires:
 ///   - `prod_flag` == true   (explicit --prod opt-in), AND
 ///   - valid unexpired allow token OR interactive confirmation (blocked when `no_prompt`)
 ///
 /// REQ-15: fails closed — returns Err(BarrierNotSatisfied) if any condition is unmet.
 /// Non-prod environments pass immediately.
 ///
+/// `prod_name` is the environment name that triggers the barrier (default: `"prod"`).
+/// Use [`defaults::DEFAULT_PROD_ENV`] or `cfg.env.prod_name()` to supply this value.
+///
 /// # Errors
 ///
-/// Returns [`GitvaultError::BarrierNotSatisfied`] if `env` is `"prod"` and the
+/// Returns [`GitvaultError::BarrierNotSatisfied`] if `env` matches `prod_name` and the
 /// `--prod` flag was not set, no valid token exists, or the user declines the prompt.
 /// Returns [`GitvaultError::Io`] if reading the token file or stdin fails.
 pub fn check_prod_barrier(
@@ -35,12 +38,14 @@ pub fn check_prod_barrier(
     env: &str,
     prod_flag: bool,
     no_prompt: bool,
+    prod_name: &str,
 ) -> Result<(), GitvaultError> {
     check_prod_barrier_with_confirm(
         repo_root,
         env,
         prod_flag,
         no_prompt,
+        prod_name,
         prompt_prod_confirmation,
     )
 }
@@ -50,12 +55,13 @@ fn check_prod_barrier_with_confirm<F>(
     env: &str,
     prod_flag: bool,
     no_prompt: bool,
+    prod_name: &str,
     confirm: F,
 ) -> Result<(), GitvaultError>
 where
     F: FnOnce() -> Result<bool, GitvaultError>,
 {
-    if env != defaults::DEFAULT_PROD_ENV {
+    if env != prod_name {
         return Ok(());
     }
 
@@ -196,21 +202,34 @@ mod tests {
     #[test]
     fn non_prod_env_always_passes() {
         let dir = root();
-        assert!(check_prod_barrier(dir.path(), "dev", false, true).is_ok());
-        assert!(check_prod_barrier(dir.path(), "staging", false, true).is_ok());
+        assert!(
+            check_prod_barrier(dir.path(), "dev", false, true, defaults::DEFAULT_PROD_ENV).is_ok()
+        );
+        assert!(
+            check_prod_barrier(
+                dir.path(),
+                "staging",
+                false,
+                true,
+                defaults::DEFAULT_PROD_ENV
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn prod_without_prod_flag_fails() {
         let dir = root();
-        let err = check_prod_barrier(dir.path(), "prod", false, true).unwrap_err();
+        let err = check_prod_barrier(dir.path(), "prod", false, true, defaults::DEFAULT_PROD_ENV)
+            .unwrap_err();
         assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
     }
 
     #[test]
     fn prod_with_prod_flag_no_token_no_prompt_fails() {
         let dir = root();
-        let err = check_prod_barrier(dir.path(), "prod", true, true).unwrap_err();
+        let err = check_prod_barrier(dir.path(), "prod", true, true, defaults::DEFAULT_PROD_ENV)
+            .unwrap_err();
         assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
     }
 
@@ -218,7 +237,9 @@ mod tests {
     fn prod_with_valid_token_passes() {
         let dir = root();
         allow_prod(dir.path(), 3600).unwrap();
-        assert!(check_prod_barrier(dir.path(), "prod", true, true).is_ok());
+        assert!(
+            check_prod_barrier(dir.path(), "prod", true, true, defaults::DEFAULT_PROD_ENV).is_ok()
+        );
     }
 
     #[test]
@@ -229,7 +250,8 @@ mod tests {
         std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
         std::fs::write(&token_path, "1").unwrap(); // expired in 1970
 
-        let err = check_prod_barrier(dir.path(), "prod", true, true).unwrap_err();
+        let err = check_prod_barrier(dir.path(), "prod", true, true, defaults::DEFAULT_PROD_ENV)
+            .unwrap_err();
         assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
     }
 
@@ -259,23 +281,42 @@ mod tests {
     #[test]
     fn prod_with_interactive_confirm_yes_passes() {
         let dir = root();
-        let result = check_prod_barrier_with_confirm(dir.path(), "prod", true, false, || Ok(true));
+        let result = check_prod_barrier_with_confirm(
+            dir.path(),
+            "prod",
+            true,
+            false,
+            defaults::DEFAULT_PROD_ENV,
+            || Ok(true),
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn prod_with_interactive_confirm_no_fails() {
         let dir = root();
-        let result = check_prod_barrier_with_confirm(dir.path(), "prod", true, false, || Ok(false));
+        let result = check_prod_barrier_with_confirm(
+            dir.path(),
+            "prod",
+            true,
+            false,
+            defaults::DEFAULT_PROD_ENV,
+            || Ok(false),
+        );
         assert!(matches!(result, Err(GitvaultError::BarrierNotSatisfied(_))));
     }
 
     #[test]
     fn prod_confirmation_error_is_propagated() {
         let dir = root();
-        let result = check_prod_barrier_with_confirm(dir.path(), "prod", true, false, || {
-            Err(GitvaultError::Io(std::io::Error::other("read failed")))
-        });
+        let result = check_prod_barrier_with_confirm(
+            dir.path(),
+            "prod",
+            true,
+            false,
+            defaults::DEFAULT_PROD_ENV,
+            || Err(GitvaultError::Io(std::io::Error::other("read failed"))),
+        );
         assert!(matches!(result, Err(GitvaultError::Io(_))));
     }
 
@@ -302,7 +343,8 @@ mod tests {
         unsafe {
             std::env::set_var("GITVAULT_TEST_CONFIRM", "y");
         }
-        let result = check_prod_barrier(dir.path(), "prod", true, false);
+        let result =
+            check_prod_barrier(dir.path(), "prod", true, false, defaults::DEFAULT_PROD_ENV);
         // SAFETY: GITVAULT_TEST_CONFIRM_LOCK is held for the duration of this env var
         // modification, serializing access across all test threads in this process.
         unsafe {
@@ -320,7 +362,8 @@ mod tests {
         unsafe {
             std::env::set_var("GITVAULT_TEST_CONFIRM", "n");
         }
-        let result = check_prod_barrier(dir.path(), "prod", true, false);
+        let result =
+            check_prod_barrier(dir.path(), "prod", true, false, defaults::DEFAULT_PROD_ENV);
         // SAFETY: GITVAULT_TEST_CONFIRM_LOCK is held for the duration of this env var
         // modification, serializing access across all test threads in this process.
         unsafe {

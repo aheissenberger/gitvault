@@ -238,7 +238,10 @@ pub fn probe_identity_sources(
     }
 
     // Source 2: OS keyring
-    match keyring_store::keyring_get() {
+    match keyring_store::keyring_get(
+        crate::defaults::KEYRING_SERVICE,
+        crate::defaults::KEYRING_ACCOUNT,
+    ) {
         Ok(_) => states.push(IdentitySourceState::Resolved {
             source: "keyring".to_string(),
         }),
@@ -379,7 +382,16 @@ pub fn load_identity_source(
 /// Returns [`GitvaultError`] if no identity source is configured or the
 /// identity cannot be loaded from the specified source.
 pub fn load_identity(path: Option<String>) -> Result<Zeroizing<String>, GitvaultError> {
-    load_identity_with(path, keyring_store::keyring_get, None)
+    load_identity_with(
+        path,
+        || {
+            keyring_store::keyring_get(
+                crate::defaults::KEYRING_SERVICE,
+                crate::defaults::KEYRING_ACCOUNT,
+            )
+        },
+        None,
+    )
 }
 
 /// Like [`load_identity`] but with an explicit key selector for SSH-agent disambiguation.
@@ -392,7 +404,16 @@ pub fn load_identity_with_selector(
     path: Option<String>,
     selector: Option<&str>,
 ) -> Result<Zeroizing<String>, GitvaultError> {
-    load_identity_with(path, keyring_store::keyring_get, selector)
+    load_identity_with(
+        path,
+        || {
+            keyring_store::keyring_get(
+                crate::defaults::KEYRING_SERVICE,
+                crate::defaults::KEYRING_ACCOUNT,
+            )
+        },
+        selector,
+    )
 }
 
 /// Dependency-injected variant of [`load_identity`].
@@ -490,7 +511,10 @@ pub fn load_identity_from_source_with_selector(
     match source {
         fhsm::IdentitySource::FilePath(p) => load_identity_source(p, "--identity"),
         fhsm::IdentitySource::EnvVar(v) => load_identity_source(v, "GITVAULT_IDENTITY"),
-        fhsm::IdentitySource::Keyring => keyring_store::keyring_get(),
+        fhsm::IdentitySource::Keyring => keyring_store::keyring_get(
+            crate::defaults::KEYRING_SERVICE,
+            crate::defaults::KEYRING_ACCOUNT,
+        ),
         fhsm::IdentitySource::Inline(s) if !s.is_empty() => Ok(Zeroizing::new(s.clone())),
         // Unresolved: executor must run the full priority chain at runtime
         fhsm::IdentitySource::Inline(_) | fhsm::IdentitySource::Unresolved => {
@@ -517,7 +541,7 @@ pub fn resolve_recipient_keys(
     }
 
     // Try persistent recipients file (REQ-36)
-    let from_file = repo::read_recipients(repo_root)?;
+    let from_file = repo::read_recipients(repo_root, crate::defaults::RECIPIENTS_FILE)?;
     if !from_file.is_empty() {
         return Ok(from_file);
     }

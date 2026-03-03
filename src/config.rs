@@ -77,11 +77,142 @@ pub struct HooksConfig {
     pub adapter: Option<HookAdapter>,
 }
 
+/// Configuration for the `[env]` section.
+///
+/// All fields are `Option` — `None` means "use the built-in default from
+/// [`defaults`]".  Callers resolve with e.g.
+/// `cfg.env.default_env.as_deref().unwrap_or(defaults::DEFAULT_ENV)`.
+#[derive(Debug, Default)]
+pub struct EnvConfig {
+    /// Default environment name when `GITVAULT_ENV` and the env file are both absent.
+    /// `None` → [`defaults::DEFAULT_ENV`] (`"dev"`).
+    pub default_env: Option<String>,
+
+    /// Environment name that triggers the production barrier check.
+    /// `None` → [`defaults::DEFAULT_PROD_ENV`] (`"prod"`).
+    pub prod_name: Option<String>,
+
+    /// Repository-relative path of the file storing the active environment name.
+    /// `None` → [`defaults::ENV_FILE`] (`".secrets/env"`).
+    pub env_file: Option<String>,
+}
+
+impl EnvConfig {
+    /// Resolve the effective default environment name.
+    #[must_use]
+    pub fn default_env(&self) -> &str {
+        self.default_env
+            .as_deref()
+            .unwrap_or(crate::defaults::DEFAULT_ENV)
+    }
+
+    /// Resolve the effective production environment name.
+    #[must_use]
+    pub fn prod_name(&self) -> &str {
+        self.prod_name
+            .as_deref()
+            .unwrap_or(crate::defaults::DEFAULT_PROD_ENV)
+    }
+
+    /// Resolve the effective env-file path (relative to repo root).
+    #[must_use]
+    pub fn env_file(&self) -> &str {
+        self.env_file
+            .as_deref()
+            .unwrap_or(crate::defaults::ENV_FILE)
+    }
+}
+
+/// Configuration for the `[barrier]` section.
+#[derive(Debug, Default)]
+pub struct BarrierConfig {
+    /// Token lifetime in seconds.
+    /// `None` → [`defaults::DEFAULT_BARRIER_TTL_SECS`] (3600).
+    pub ttl_secs: Option<u64>,
+}
+
+impl BarrierConfig {
+    /// Resolve the effective TTL.
+    #[must_use]
+    pub fn ttl_secs(&self) -> u64 {
+        self.ttl_secs
+            .unwrap_or(crate::defaults::DEFAULT_BARRIER_TTL_SECS)
+    }
+}
+
+/// Configuration for the `[paths]` section.
+#[derive(Debug, Default)]
+pub struct PathsConfig {
+    /// Repository-relative path of the recipients list file.
+    /// `None` → [`defaults::RECIPIENTS_FILE`] (`".secrets/recipients"`).
+    pub recipients_file: Option<String>,
+
+    /// Filename written by `gitvault materialize`.
+    /// `None` → [`defaults::MATERIALIZE_OUTPUT`] (`".env"`).
+    pub materialize_output: Option<String>,
+}
+
+impl PathsConfig {
+    /// Resolve the effective recipients file path.
+    #[must_use]
+    pub fn recipients_file(&self) -> &str {
+        self.recipients_file
+            .as_deref()
+            .unwrap_or(crate::defaults::RECIPIENTS_FILE)
+    }
+
+    /// Resolve the effective materialize output filename.
+    #[must_use]
+    pub fn materialize_output(&self) -> &str {
+        self.materialize_output
+            .as_deref()
+            .unwrap_or(crate::defaults::MATERIALIZE_OUTPUT)
+    }
+}
+
+/// Configuration for the `[keyring]` section.
+#[derive(Debug, Default)]
+pub struct KeyringConfig {
+    /// OS keyring service name.
+    /// `None` → [`defaults::KEYRING_SERVICE`] (`"gitvault"`).
+    pub service: Option<String>,
+
+    /// OS keyring account / username.
+    /// `None` → [`defaults::KEYRING_ACCOUNT`] (`"age-identity"`).
+    pub account: Option<String>,
+}
+
+impl KeyringConfig {
+    /// Resolve the effective keyring service name.
+    #[must_use]
+    pub fn service(&self) -> &str {
+        self.service
+            .as_deref()
+            .unwrap_or(crate::defaults::KEYRING_SERVICE)
+    }
+
+    /// Resolve the effective keyring account name.
+    #[must_use]
+    pub fn account(&self) -> &str {
+        self.account
+            .as_deref()
+            .unwrap_or(crate::defaults::KEYRING_ACCOUNT)
+    }
+}
+
 /// Top-level gitvault project configuration.
 #[derive(Debug, Default)]
 pub struct GitvaultConfig {
     /// Hook-manager configuration.
     pub hooks: HooksConfig,
+    /// Environment resolution configuration.
+    pub env: EnvConfig,
+    /// Production barrier configuration.
+    pub barrier: BarrierConfig,
+    /// Repository path layout configuration.
+    pub paths: PathsConfig,
+    /// OS keyring configuration.
+    pub keyring: KeyringConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -97,13 +228,49 @@ struct RawHooksConfig {
     adapter: Option<String>,
 }
 
+/// Intermediate TOML representation for `[env]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEnvConfig {
+    default: Option<String>,
+    prod_name: Option<String>,
+    env_file: Option<String>,
+}
+
+/// Intermediate TOML representation for `[barrier]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBarrierConfig {
+    ttl_secs: Option<u64>,
+}
+
+/// Intermediate TOML representation for `[paths]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPathsConfig {
+    recipients_file: Option<String>,
+    materialize_output: Option<String>,
+}
+
+/// Intermediate TOML representation for `[keyring]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawKeyringConfig {
+    service: Option<String>,
+    account: Option<String>,
+}
+
 /// Intermediate TOML representation for the whole config file.
 ///
 /// Unknown top-level sections are silently ignored; only recognised sections
-/// (`hooks`) are processed.
+/// are processed.
 #[derive(Debug, serde::Deserialize)]
 struct RawConfig {
     hooks: Option<RawHooksConfig>,
+    env: Option<RawEnvConfig>,
+    barrier: Option<RawBarrierConfig>,
+    paths: Option<RawPathsConfig>,
+    keyring: Option<RawKeyringConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +300,39 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
         }
     };
 
-    Ok(GitvaultConfig { hooks })
+    let env = raw.env.map_or_else(EnvConfig::default, |r| EnvConfig {
+        default_env: r.default.filter(|s| !s.is_empty()),
+        prod_name: r.prod_name.filter(|s| !s.is_empty()),
+        env_file: r.env_file.filter(|s| !s.is_empty()),
+    });
+
+    let barrier = raw
+        .barrier
+        .map_or_else(BarrierConfig::default, |r| BarrierConfig {
+            ttl_secs: r.ttl_secs,
+        });
+
+    let paths = raw
+        .paths
+        .map_or_else(PathsConfig::default, |r| PathsConfig {
+            recipients_file: r.recipients_file.filter(|s| !s.is_empty()),
+            materialize_output: r.materialize_output.filter(|s| !s.is_empty()),
+        });
+
+    let keyring = raw
+        .keyring
+        .map_or_else(KeyringConfig::default, |r| KeyringConfig {
+            service: r.service.filter(|s| !s.is_empty()),
+            account: r.account.filter(|s| !s.is_empty()),
+        });
+
+    Ok(GitvaultConfig {
+        hooks,
+        env,
+        barrier,
+        paths,
+        keyring,
+    })
 }
 
 /// Inner implementation for [`load_global_config`] that accepts an optional
@@ -180,8 +379,35 @@ fn effective_config_impl(
     // Repo config wins; fall back to global when repo has no value.
     let adapter = repo.hooks.adapter.or(global.hooks.adapter);
 
+    let env = EnvConfig {
+        default_env: repo.env.default_env.or(global.env.default_env),
+        prod_name: repo.env.prod_name.or(global.env.prod_name),
+        env_file: repo.env.env_file.or(global.env.env_file),
+    };
+
+    let barrier = BarrierConfig {
+        ttl_secs: repo.barrier.ttl_secs.or(global.barrier.ttl_secs),
+    };
+
+    let paths = PathsConfig {
+        recipients_file: repo.paths.recipients_file.or(global.paths.recipients_file),
+        materialize_output: repo
+            .paths
+            .materialize_output
+            .or(global.paths.materialize_output),
+    };
+
+    let keyring = KeyringConfig {
+        service: repo.keyring.service.or(global.keyring.service),
+        account: repo.keyring.account.or(global.keyring.account),
+    };
+
     Ok(GitvaultConfig {
         hooks: HooksConfig { adapter },
+        env,
+        barrier,
+        paths,
+        keyring,
     })
 }
 
@@ -559,6 +785,191 @@ mod tests {
         assert!(
             matches!(err, GitvaultError::Usage(_)),
             "expected Usage error, got: {err}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // [env] section tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_env_config_defaults() {
+        let cfg = EnvConfig::default();
+        assert_eq!(cfg.default_env(), crate::defaults::DEFAULT_ENV);
+        assert_eq!(cfg.prod_name(), crate::defaults::DEFAULT_PROD_ENV);
+        assert_eq!(cfg.env_file(), crate::defaults::ENV_FILE);
+    }
+
+    #[test]
+    fn test_parse_env_section_all_keys() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[env]\ndefault = \"staging\"\nprod_name = \"production\"\nenv_file = \".config/env\"\n",
+        );
+        let config = load_config(dir.path()).expect("env section should parse");
+        assert_eq!(config.env.default_env(), "staging");
+        assert_eq!(config.env.prod_name(), "production");
+        assert_eq!(config.env.env_file(), ".config/env");
+    }
+
+    #[test]
+    fn test_parse_env_section_unknown_key_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[env]\nunknown_key = \"bad\"\n");
+        let err = load_config(dir.path()).expect_err("unknown key in [env] should fail");
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    #[test]
+    fn test_env_empty_string_treated_as_unset() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[env]\ndefault = \"\"\n");
+        let config = load_config(dir.path()).expect("empty env.default should parse as unset");
+        assert_eq!(
+            config.env.default_env(),
+            crate::defaults::DEFAULT_ENV,
+            "empty string should fall back to built-in default"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // [barrier] section tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_barrier_config_defaults() {
+        let cfg = BarrierConfig::default();
+        assert_eq!(cfg.ttl_secs(), crate::defaults::DEFAULT_BARRIER_TTL_SECS);
+    }
+
+    #[test]
+    fn test_parse_barrier_ttl_secs() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[barrier]\nttl_secs = 7200\n");
+        let config = load_config(dir.path()).expect("barrier section should parse");
+        assert_eq!(config.barrier.ttl_secs(), 7200);
+    }
+
+    #[test]
+    fn test_parse_barrier_unknown_key_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[barrier]\nunknown = true\n");
+        let err = load_config(dir.path()).expect_err("unknown key in [barrier] should fail");
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // [paths] section tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_paths_config_defaults() {
+        let cfg = PathsConfig::default();
+        assert_eq!(cfg.recipients_file(), crate::defaults::RECIPIENTS_FILE);
+        assert_eq!(
+            cfg.materialize_output(),
+            crate::defaults::MATERIALIZE_OUTPUT
+        );
+    }
+
+    #[test]
+    fn test_parse_paths_section() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[paths]\nrecipients_file = \".keys/recipients\"\nmaterialize_output = \"env.out\"\n",
+        );
+        let config = load_config(dir.path()).expect("paths section should parse");
+        assert_eq!(config.paths.recipients_file(), ".keys/recipients");
+        assert_eq!(config.paths.materialize_output(), "env.out");
+    }
+
+    #[test]
+    fn test_parse_paths_unknown_key_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[paths]\nbad_key = \"x\"\n");
+        let err = load_config(dir.path()).expect_err("unknown key in [paths] should fail");
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // [keyring] section tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_keyring_config_defaults() {
+        let cfg = KeyringConfig::default();
+        assert_eq!(cfg.service(), crate::defaults::KEYRING_SERVICE);
+        assert_eq!(cfg.account(), crate::defaults::KEYRING_ACCOUNT);
+    }
+
+    #[test]
+    fn test_parse_keyring_section() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[keyring]\nservice = \"myapp\"\naccount = \"my-key\"\n",
+        );
+        let config = load_config(dir.path()).expect("keyring section should parse");
+        assert_eq!(config.keyring.service(), "myapp");
+        assert_eq!(config.keyring.account(), "my-key");
+    }
+
+    #[test]
+    fn test_parse_keyring_unknown_key_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[keyring]\nbad_key = \"x\"\n");
+        let err = load_config(dir.path()).expect_err("unknown key in [keyring] should fail");
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    // -----------------------------------------------------------------------
+    // effective_config merging for new sections
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_effective_config_env_repo_wins_over_global() {
+        let repo_dir = TempDir::new().unwrap();
+        make_config_file(&repo_dir, "[env]\ndefault = \"repo-env\"\n");
+        let home = TempDir::new().unwrap();
+        make_global_config_file(&home, "[env]\ndefault = \"global-env\"\n");
+        let config = effective_config_impl(repo_dir.path(), Some(home.path())).unwrap();
+        assert_eq!(config.env.default_env(), "repo-env");
+    }
+
+    #[test]
+    fn test_effective_config_env_global_fills_missing_repo() {
+        let repo_dir = TempDir::new().unwrap();
+        make_config_file(&repo_dir, "# no env section\n");
+        let home = TempDir::new().unwrap();
+        make_global_config_file(&home, "[env]\ndefault = \"global-env\"\n");
+        let config = effective_config_impl(repo_dir.path(), Some(home.path())).unwrap();
+        assert_eq!(config.env.default_env(), "global-env");
+    }
+
+    #[test]
+    fn test_effective_config_barrier_merge() {
+        let repo_dir = TempDir::new().unwrap();
+        make_config_file(&repo_dir, "[barrier]\nttl_secs = 1800\n");
+        let home = TempDir::new().unwrap();
+        make_global_config_file(&home, "[barrier]\nttl_secs = 900\n");
+        let config = effective_config_impl(repo_dir.path(), Some(home.path())).unwrap();
+        assert_eq!(config.barrier.ttl_secs(), 1800, "repo ttl_secs should win");
+    }
+
+    #[test]
+    fn test_effective_config_keyring_global_fills() {
+        let repo_dir = TempDir::new().unwrap();
+        make_config_file(&repo_dir, "# no keyring\n");
+        let home = TempDir::new().unwrap();
+        make_global_config_file(&home, "[keyring]\nservice = \"corp-vault\"\n");
+        let config = effective_config_impl(repo_dir.path(), Some(home.path())).unwrap();
+        assert_eq!(config.keyring.service(), "corp-vault");
+        assert_eq!(
+            config.keyring.account(),
+            crate::defaults::KEYRING_ACCOUNT,
+            "account not in global → built-in default"
         );
     }
 }

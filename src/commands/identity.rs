@@ -68,7 +68,16 @@ pub fn cmd_identity_create(
 
     // Store in keyring by default; also try when --out is given alongside.
     // If no --out, keyring is the only storage — fail if unavailable (REQ-62).
-    let keyring_result = keyring_store::keyring_set(secret_key.expose_secret());
+    let (ks, ka) = {
+        let repo_root =
+            crate::repo::find_repo_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let cfg = crate::config::effective_config(&repo_root).unwrap_or_default();
+        (
+            cfg.keyring.service().to_string(),
+            cfg.keyring.account().to_string(),
+        )
+    };
+    let keyring_result = keyring_store::keyring_set(secret_key.expose_secret(), &ks, &ka);
     match keyring_result {
         Ok(()) => stored_in_keyring = true,
         Err(e) => {

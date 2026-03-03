@@ -132,9 +132,9 @@ pub enum Commands {
     },
     /// Write a timed production allow token
     AllowProd {
-        /// Token lifetime in seconds
-        #[arg(long, default_value_t = crate::barrier::DEFAULT_TOKEN_TTL_SECS)]
-        ttl: u64,
+        /// Token lifetime in seconds (default: from [barrier].ttl_secs config, then 3600)
+        #[arg(long)]
+        ttl: Option<u64>,
     },
     /// Run as git merge driver for .env files
     /// Usage: git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"

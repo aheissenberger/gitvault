@@ -12,12 +12,15 @@ use zeroize::Zeroizing;
 
 /// Store the age identity key in the OS keyring (REQ-39).
 ///
+/// `service` and `account` identify the keyring entry.
+/// Use `cfg.keyring.service()` and `cfg.keyring.account()` as the values.
+///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be created or
 /// the password cannot be stored.
-pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
-    keyring_set_with(key, |service, username, key| {
+pub fn keyring_set(key: &str, service: &str, account: &str) -> Result<(), GitvaultError> {
+    keyring_set_with(key, service, account, |service, username, key| {
         let entry = keyring::Entry::new(service, username)
             .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
         entry
@@ -28,12 +31,15 @@ pub fn keyring_set(key: &str) -> Result<(), GitvaultError> {
 
 /// Retrieve the age identity key from the OS keyring (REQ-39).
 ///
+/// `service` and `account` identify the keyring entry.
+/// Use `cfg.keyring.service()` and `cfg.keyring.account()` as the values.
+///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be opened or
 /// the password cannot be retrieved.
-pub fn keyring_get() -> Result<Zeroizing<String>, GitvaultError> {
-    keyring_get_with(|service, username| {
+pub fn keyring_get(service: &str, account: &str) -> Result<Zeroizing<String>, GitvaultError> {
+    keyring_get_with(service, account, |service, username| {
         let entry = keyring::Entry::new(service, username)
             .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
         entry
@@ -45,12 +51,15 @@ pub fn keyring_get() -> Result<Zeroizing<String>, GitvaultError> {
 
 /// Delete the age identity key from the OS keyring (REQ-39).
 ///
+/// `service` and `account` identify the keyring entry.
+/// Use `cfg.keyring.service()` and `cfg.keyring.account()` as the values.
+///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be opened or
 /// the credential cannot be deleted.
-pub fn keyring_delete() -> Result<(), GitvaultError> {
-    keyring_delete_with(|service, username| {
+pub fn keyring_delete(service: &str, account: &str) -> Result<(), GitvaultError> {
+    keyring_delete_with(service, account, |service, username| {
         let entry = keyring::Entry::new(service, username)
             .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
         entry
@@ -66,11 +75,16 @@ pub fn keyring_delete() -> Result<(), GitvaultError> {
 /// # Errors
 ///
 /// Propagates any error returned by `set_password`.
-pub fn keyring_set_with<F>(key: &str, set_password: F) -> Result<(), GitvaultError>
+pub fn keyring_set_with<F>(
+    key: &str,
+    service: &str,
+    account: &str,
+    set_password: F,
+) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str, &str) -> Result<(), GitvaultError>,
 {
-    set_password(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT, key)
+    set_password(service, account, key)
 }
 
 /// Injectable variant of [`keyring_get`] — calls `get_password(service, username)`.
@@ -78,11 +92,15 @@ where
 /// # Errors
 ///
 /// Propagates any error returned by `get_password`.
-pub fn keyring_get_with<F>(get_password: F) -> Result<Zeroizing<String>, GitvaultError>
+pub fn keyring_get_with<F>(
+    service: &str,
+    account: &str,
+    get_password: F,
+) -> Result<Zeroizing<String>, GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<Zeroizing<String>, GitvaultError>,
 {
-    get_password(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT)
+    get_password(service, account)
 }
 
 /// Injectable variant of [`keyring_delete`] — calls `delete_credential(service, username)`.
@@ -90,11 +108,15 @@ where
 /// # Errors
 ///
 /// Propagates any error returned by `delete_credential`.
-pub fn keyring_delete_with<F>(delete_credential: F) -> Result<(), GitvaultError>
+pub fn keyring_delete_with<F>(
+    service: &str,
+    account: &str,
+    delete_credential: F,
+) -> Result<(), GitvaultError>
 where
     F: FnOnce(&str, &str) -> Result<(), GitvaultError>,
 {
-    delete_credential(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT)
+    delete_credential(service, account)
 }
 
 #[cfg(test)]
@@ -118,15 +140,20 @@ mod tests {
         install_mock_backend();
 
         // Entry::new() now succeeds; set_password stores into the entry — covers lines 17-21.
-        keyring_set("AGE-SECRET-KEY-1MOCKTESTVALUE").expect("mock set_password should succeed");
+        keyring_set(
+            "AGE-SECRET-KEY-1MOCKTESTVALUE",
+            defaults::KEYRING_SERVICE,
+            defaults::KEYRING_ACCOUNT,
+        )
+        .expect("mock set_password should succeed");
 
         // Entry::new() succeeds; get_password returns NoEntry (fresh entry, no shared store).
         // We only need the code path executed, not the value — covers lines 28-32.
-        let _ = keyring_get();
+        let _ = keyring_get(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT);
 
         // Entry::new() succeeds; delete_credential returns NoEntry (same reason).
         // Covers lines 39-43.
-        let _ = keyring_delete();
+        let _ = keyring_delete(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT);
     }
 
     // ── Real OS keyring smoke test (best-effort, tolerates CI with no daemon) ────
@@ -137,12 +164,14 @@ mod tests {
         install_mock_backend();
         let key = "AGE-SECRET-KEY-1TESTVALUE";
 
-        keyring_set(key).unwrap_or_else(|e| {
-            eprintln!("keyring_set skipped in this environment: {e}");
-        });
+        keyring_set(key, defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT).unwrap_or_else(
+            |e| {
+                eprintln!("keyring_set skipped in this environment: {e}");
+            },
+        );
 
-        let _ = keyring_get();
-        let _ = keyring_delete();
+        let _ = keyring_get(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT);
+        let _ = keyring_delete(defaults::KEYRING_SERVICE, defaults::KEYRING_ACCOUNT);
     }
 
     // ── Injectable helper tests (always run, platform-independent) ────────────
@@ -150,10 +179,15 @@ mod tests {
     #[test]
     fn keyring_set_with_passes_expected_metadata() {
         let mut captured: Option<(String, String, String)> = None;
-        keyring_set_with("k", |service, username, key| {
-            captured = Some((service.to_string(), username.to_string(), key.to_string()));
-            Ok(())
-        })
+        keyring_set_with(
+            "k",
+            defaults::KEYRING_SERVICE,
+            defaults::KEYRING_ACCOUNT,
+            |service, username, key| {
+                captured = Some((service.to_string(), username.to_string(), key.to_string()));
+                Ok(())
+            },
+        )
         .unwrap();
         assert_eq!(
             captured,
@@ -168,10 +202,14 @@ mod tests {
     #[test]
     fn keyring_get_with_passes_expected_metadata() {
         let mut captured: Option<(String, String)> = None;
-        let value = keyring_get_with(|service, username| {
-            captured = Some((service.to_string(), username.to_string()));
-            Ok(Zeroizing::new("secret".to_string()))
-        })
+        let value = keyring_get_with(
+            defaults::KEYRING_SERVICE,
+            defaults::KEYRING_ACCOUNT,
+            |service, username| {
+                captured = Some((service.to_string(), username.to_string()));
+                Ok(Zeroizing::new("secret".to_string()))
+            },
+        )
         .unwrap();
         assert_eq!(*value, "secret");
         assert_eq!(
@@ -186,10 +224,14 @@ mod tests {
     #[test]
     fn keyring_delete_with_passes_expected_metadata() {
         let mut captured: Option<(String, String)> = None;
-        keyring_delete_with(|service, username| {
-            captured = Some((service.to_string(), username.to_string()));
-            Ok(())
-        })
+        keyring_delete_with(
+            defaults::KEYRING_SERVICE,
+            defaults::KEYRING_ACCOUNT,
+            |service, username| {
+                captured = Some((service.to_string(), username.to_string()));
+                Ok(())
+            },
+        )
         .unwrap();
         assert_eq!(
             captured,
@@ -203,18 +245,29 @@ mod tests {
     #[test]
     fn keyring_helpers_propagate_errors() {
         assert!(
-            keyring_set_with("k", |_s, _u, _k| Err(GitvaultError::Keyring(
-                "set failed".to_string()
-            )))
+            keyring_set_with(
+                "k",
+                defaults::KEYRING_SERVICE,
+                defaults::KEYRING_ACCOUNT,
+                |_s, _u, _k| Err(GitvaultError::Keyring("set failed".to_string()))
+            )
             .is_err()
         );
         assert!(
-            keyring_get_with(|_s, _u| Err(GitvaultError::Keyring("get failed".to_string())))
-                .is_err()
+            keyring_get_with(
+                defaults::KEYRING_SERVICE,
+                defaults::KEYRING_ACCOUNT,
+                |_s, _u| Err(GitvaultError::Keyring("get failed".to_string()))
+            )
+            .is_err()
         );
         assert!(
-            keyring_delete_with(|_s, _u| Err(GitvaultError::Keyring("delete failed".to_string())))
-                .is_err()
+            keyring_delete_with(
+                defaults::KEYRING_SERVICE,
+                defaults::KEYRING_ACCOUNT,
+                |_s, _u| Err(GitvaultError::Keyring("delete failed".to_string()))
+            )
+            .is_err()
         );
     }
 }

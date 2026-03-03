@@ -14,22 +14,24 @@ use crate::{crypto, repo};
 /// key is invalid, or reading/writing the recipients file fails.
 pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
+    let cfg = crate::config::effective_config(&repo_root)?;
+    let recipients_file = cfg.paths.recipients_file();
     match action {
         RecipientAction::Add { pubkey } => {
             // Validate it's a valid age public key
             crypto::parse_recipient(&pubkey)?;
-            let mut recipients = repo::read_recipients(&repo_root)?;
+            let mut recipients = repo::read_recipients(&repo_root, recipients_file)?;
             if recipients.contains(&pubkey) {
                 return Err(GitvaultError::Usage(format!(
                     "Recipient already present: {pubkey}"
                 )));
             }
             recipients.push(pubkey.clone());
-            repo::write_recipients(&repo_root, &recipients)?;
+            repo::write_recipients(&repo_root, &recipients, recipients_file)?;
             crate::output::output_success(&format!("Added recipient: {pubkey}"), json);
         }
         RecipientAction::Remove { pubkey } => {
-            let mut recipients = repo::read_recipients(&repo_root)?;
+            let mut recipients = repo::read_recipients(&repo_root, recipients_file)?;
             let before = recipients.len();
             recipients.retain(|r| r != &pubkey);
             if recipients.len() == before {
@@ -37,11 +39,11 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
                     "Recipient not found: {pubkey}"
                 )));
             }
-            repo::write_recipients(&repo_root, &recipients)?;
+            repo::write_recipients(&repo_root, &recipients, recipients_file)?;
             crate::output::output_success(&format!("Removed recipient: {pubkey}"), json);
         }
         RecipientAction::List => {
-            let recipients = repo::read_recipients(&repo_root)?;
+            let recipients = repo::read_recipients(&repo_root, recipients_file)?;
             if json {
                 println!("{}", serde_json::json!({"recipients": recipients}));
             } else if recipients.is_empty() {
@@ -215,8 +217,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let pubkey = x25519::Identity::generate().to_public().to_string();
         // Write a non-empty recipients file so that line 330 (early return) executes.
-        repo::write_recipients(dir.path(), std::slice::from_ref(&pubkey))
-            .expect("write_recipients should succeed");
+        repo::write_recipients(
+            dir.path(),
+            std::slice::from_ref(&pubkey),
+            crate::defaults::RECIPIENTS_FILE,
+        )
+        .expect("write_recipients should succeed");
 
         let result =
             resolve_recipient_keys(dir.path(), vec![]).expect("should return recipients from file");
@@ -244,7 +250,8 @@ mod tests {
         cmd_recipient(RecipientAction::Remove { pubkey }, false)
             .expect("remove recipient should succeed");
 
-        let recipients = repo::read_recipients(dir.path()).expect("recipients should be readable");
+        let recipients = repo::read_recipients(dir.path(), crate::defaults::RECIPIENTS_FILE)
+            .expect("recipients should be readable");
         assert!(recipients.is_empty());
     }
 

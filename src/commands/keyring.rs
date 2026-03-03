@@ -15,12 +15,19 @@ use zeroize::Zeroizing;
 /// [`GitvaultError::Usage`] / [`GitvaultError::Decryption`] if the identity
 /// cannot be loaded or parsed.
 pub fn cmd_keyring(action: KeyringAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
+    let repo_root = crate::repo::find_repo_root()?;
+    let cfg = crate::config::effective_config(&repo_root)?;
+    let service = cfg.keyring.service().to_string();
+    let account = cfg.keyring.account().to_string();
+    let (s_set, a_set) = (service.clone(), account.clone());
+    let (s_get, a_get) = (service.clone(), account.clone());
+    let (s_del, a_del) = (service, account);
     cmd_keyring_with_ops(
         action,
         json,
-        keyring_store::keyring_set,
-        keyring_store::keyring_get,
-        keyring_store::keyring_delete,
+        move |key| keyring_store::keyring_set(key, &s_set, &a_set),
+        move || keyring_store::keyring_get(&s_get, &a_get),
+        move || keyring_store::keyring_delete(&s_del, &a_del),
     )
 }
 

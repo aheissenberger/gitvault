@@ -85,6 +85,7 @@ pub fn cmd_encrypt(
     json: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
+    let cfg = crate::config::effective_config(&repo_root)?;
     let input_path = PathBuf::from(&file);
 
     // REQ-33: each source file maps to exactly one .age artifact
@@ -159,7 +160,7 @@ pub fn cmd_encrypt(
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
 
-    let active_env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
+    let active_env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root, &cfg.env));
 
     repo::ensure_dirs(&repo_root, &active_env)?;
     let out_path = compute_output_path(&repo_root, &input_path, &active_env, keep_path)?;

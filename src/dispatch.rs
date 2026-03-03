@@ -81,7 +81,19 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             no_prompt: cli.no_prompt,
             selector: cli.identity_selector.clone(),
         }),
-        Commands::AllowProd { ttl } => crate::commands::admin::cmd_allow_prod(ttl, cli.json),
+        Commands::AllowProd { ttl } => {
+            let effective_ttl = if let Some(t) = ttl {
+                t
+            } else {
+                // Resolve from config, fall back to built-in default
+                let repo_root =
+                    crate::repo::find_repo_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                crate::config::effective_config(&repo_root)
+                    .map(|c| c.barrier.ttl_secs())
+                    .unwrap_or(crate::defaults::DEFAULT_BARRIER_TTL_SECS)
+            };
+            crate::commands::admin::cmd_allow_prod(effective_ttl, cli.json)
+        }
         Commands::MergeDriver { base, ours, theirs } => {
             crate::commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
         }
@@ -326,7 +338,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
-            command: Commands::AllowProd { ttl: 60 },
+            command: Commands::AllowProd { ttl: Some(60) },
         };
 
         let outcome = run(cli).expect("allow-prod dispatch should succeed");
@@ -474,7 +486,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
-            command: Commands::AllowProd { ttl: 60 },
+            command: Commands::AllowProd { ttl: Some(60) },
         };
         run(allow_cli).expect("allow-prod should succeed");
 
