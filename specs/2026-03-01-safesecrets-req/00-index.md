@@ -92,3 +92,4 @@ links: { issue: "", pr: "" }
 - `req-069.md` -> REQ-69
 - `req-070.md` -> REQ-70
 - `req-071.md` -> REQ-71
+- `req-072.md` -> REQ-72
