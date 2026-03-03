@@ -270,7 +270,7 @@ pub async fn cmd_ssm_set(
     prod: bool,
 ) -> Result<(), GitvaultError> {
     // REQ-13: prod barrier — only passes when --prod flag is explicitly provided
-    crate::barrier::check_prod_barrier(repo_root, env, prod, false)?;
+    crate::barrier::check_prod_barrier(repo_root, env, prod, false, crate::defaults::DEFAULT_PROD_ENV)?;
 
     let app = get_app_name(repo_root).await?;
     let client = aws.build_client().await?;
@@ -304,7 +304,7 @@ pub async fn cmd_ssm_push(
     prod: bool,
 ) -> Result<(), GitvaultError> {
     // REQ-13: prod barrier — only passes when --prod flag is explicitly provided
-    crate::barrier::check_prod_barrier(repo_root, env, prod, false)?;
+    crate::barrier::check_prod_barrier(repo_root, env, prod, false, crate::defaults::DEFAULT_PROD_ENV)?;
 
     let app = get_app_name(repo_root).await?;
     let client = aws.build_client().await?;

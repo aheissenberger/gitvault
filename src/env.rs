@@ -1,5 +1,4 @@
 use crate::config::EnvConfig;
-use crate::defaults;
 use crate::error::GitvaultError;
 use regex::Regex;
 use std::fs;

@@ -1,19 +1,19 @@
 {
   "packageName": "gitvault",
-  "packageVersion": "0.2.21",
-  "filesScanned": 38,
+  "packageVersion": "0.2.29",
+  "filesScanned": 46,
   "entries": [
     {
       "path": "src/aws_config.rs",
       "publicFunctions": [
-        "build_client",
-        "from_cli",
-        "is_configured"
+        "build_client"
       ],
       "publicTypes": [
         "AwsConfig"
       ],
-      "publicConstants": []
+      "publicConstants": [
+        "fn"
+      ]
     },
     {
       "path": "src/barrier.rs",
@@ -23,21 +23,25 @@
         "revoke_prod"
       ],
       "publicTypes": [],
-      "publicConstants": [
-        "DEFAULT_TOKEN_TTL_SECS"
-      ]
+      "publicConstants": []
     },
     {
       "path": "src/cli.rs",
       "publicFunctions": [],
       "publicTypes": [
+        "AiAction",
+        "AiPrintAction",
         "Cli",
         "Commands",
+        "IdentityAction",
+        "IdentityProfile",
         "KeyringAction",
         "RecipientAction",
         "SsmAction"
       ],
-      "publicConstants": []
+      "publicConstants": [
+        "OUTPUT_KEEP_PATH_SENTINEL"
+      ]
     },
     {
       "path": "src/commands/admin.rs",
@@ -53,18 +57,30 @@
       "publicConstants": []
     },
     {
+      "path": "src/commands/ai.rs",
+      "publicFunctions": [
+        "cmd_ai"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
       "path": "src/commands/decrypt.rs",
       "publicFunctions": [
         "cmd_decrypt"
       ],
-      "publicTypes": [],
+      "publicTypes": [
+        "DecryptOptions"
+      ],
       "publicConstants": []
     },
     {
       "path": "src/commands/effects.rs",
       "publicFunctions": [
         "execute_effects",
-        "execute_effects_with"
+        "execute_effects_with",
+        "new",
+        "with_selector"
       ],
       "publicTypes": [
         "CommandOutcome",
@@ -77,6 +93,15 @@
       "path": "src/commands/encrypt.rs",
       "publicFunctions": [
         "cmd_encrypt"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/identity.rs",
+      "publicFunctions": [
+        "cmd_identity",
+        "cmd_identity_create"
       ],
       "publicTypes": [],
       "publicConstants": []
@@ -118,7 +143,9 @@
       "publicFunctions": [
         "cmd_run"
       ],
-      "publicTypes": [],
+      "publicTypes": [
+        "RunOptions"
+      ],
       "publicConstants": []
     },
     {
@@ -127,29 +154,81 @@
         "enter",
         "global_test_lock",
         "init_git_repo",
+        "lock",
         "setup_identity_file",
         "with_env_var",
         "with_identity_env",
         "write_encrypted_env_file"
       ],
       "publicTypes": [
-        "CwdGuard"
+        "CwdGuard",
+        "GlobalTestMutex"
       ],
       "publicConstants": []
     },
     {
+      "path": "src/config.rs",
+      "publicFunctions": [
+        "account",
+        "default_env",
+        "effective_config",
+        "env_file",
+        "load_config",
+        "load_global_config",
+        "materialize_output",
+        "prod_name",
+        "recipients_file",
+        "service",
+        "ttl_secs"
+      ],
+      "publicTypes": [
+        "BarrierConfig",
+        "EnvConfig",
+        "GitvaultConfig",
+        "HookAdapter",
+        "HooksConfig",
+        "KeyringConfig",
+        "PathsConfig"
+      ],
+      "publicConstants": [
+        "fn"
+      ]
+    },
+    {
       "path": "src/crypto.rs",
       "publicFunctions": [
+        "as_identity",
         "decrypt",
         "decrypt_stream",
         "encrypt",
         "encrypt_stream",
         "parse_identity",
+        "parse_identity_any",
         "parse_recipient"
       ],
-      "publicTypes": [],
+      "publicTypes": [
+        "AnyIdentity"
+      ],
       "publicConstants": [
         "GITVAULT_FORMAT_VERSION"
+      ]
+    },
+    {
+      "path": "src/defaults.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": [
+        "BARRIER_TOKEN_FILE",
+        "DEFAULT_BARRIER_TTL_SECS",
+        "DEFAULT_ENV",
+        "DEFAULT_PROD_ENV",
+        "ENV_FILE",
+        "KEYRING_ACCOUNT",
+        "KEYRING_SERVICE",
+        "MATERIALIZE_OUTPUT",
+        "PLAIN_BASE_DIR",
+        "RECIPIENTS_FILE",
+        "SECRETS_DIR"
       ]
     },
     {
@@ -171,9 +250,7 @@
     },
     {
       "path": "src/error.rs",
-      "publicFunctions": [
-        "exit_code"
-      ],
+      "publicFunctions": [],
       "publicTypes": [
         "GitvaultError"
       ],
@@ -184,7 +261,8 @@
         "EXIT_ERROR",
         "EXIT_PLAINTEXT_LEAK",
         "EXIT_SUCCESS",
-        "EXIT_USAGE"
+        "EXIT_USAGE",
+        "fn"
       ]
     },
     {
@@ -205,13 +283,21 @@
       "path": "src/identity.rs",
       "publicFunctions": [
         "extract_identity_key",
+        "list_ssh_agent_keys",
         "load_identity",
         "load_identity_from_source",
+        "load_identity_from_source_with_selector",
         "load_identity_source",
         "load_identity_with",
+        "load_identity_with_selector",
+        "probe_identity_sources",
         "resolve_recipient_keys"
       ],
-      "publicTypes": [],
+      "publicTypes": [
+        "IdentitySourceState",
+        "SshAgentError",
+        "SshAgentKey"
+      ],
       "publicConstants": []
     },
     {
@@ -295,7 +381,8 @@
     {
       "path": "src/repo/hooks.rs",
       "publicFunctions": [
-        "install_git_hooks"
+        "install_git_hooks",
+        "resolve_hooks_dir"
       ],
       "publicTypes": [],
       "publicConstants": []
@@ -322,10 +409,18 @@
         "validate_write_path"
       ],
       "publicTypes": [],
-      "publicConstants": [
-        "PLAIN_BASE_DIR",
-        "SECRETS_DIR"
-      ]
+      "publicConstants": []
+    },
+    {
+      "path": "src/repo/plugin.rs",
+      "publicFunctions": [
+        "find_adapter_binary",
+        "invoke_adapter_harden"
+      ],
+      "publicTypes": [
+        "AdapterLookup"
+      ],
+      "publicConstants": []
     },
     {
       "path": "src/repo/recipients.rs",
@@ -334,9 +429,7 @@
         "write_recipients"
       ],
       "publicTypes": [],
-      "publicConstants": [
-        "RECIPIENTS_FILE"
-      ]
+      "publicConstants": []
     },
     {
       "path": "src/run.rs",
@@ -347,19 +440,46 @@
       "publicConstants": []
     },
     {
-      "path": "src/ssm.rs",
-      "publicFunctions": [
-        "cmd_ssm_diff",
-        "cmd_ssm_pull",
-        "cmd_ssm_push",
-        "cmd_ssm_set",
-        "refs_file_path",
-        "ssm_path"
-      ],
+      "path": "src/ssm/backend.rs",
+      "publicFunctions": [],
       "publicTypes": [
         "RealSsmBackend",
         "SsmBackend"
       ],
+      "publicConstants": []
+    },
+    {
+      "path": "src/ssm/commands.rs",
+      "publicFunctions": [
+        "cmd_ssm_diff",
+        "cmd_ssm_diff_with",
+        "cmd_ssm_pull",
+        "cmd_ssm_pull_with",
+        "cmd_ssm_push",
+        "cmd_ssm_push_with",
+        "cmd_ssm_set",
+        "cmd_ssm_set_with"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/ssm/mod.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/ssm/refs.rs",
+      "publicFunctions": [
+        "get_app_name",
+        "load_refs",
+        "refs_file_path",
+        "save_refs",
+        "ssm_path",
+        "validate_app_name"
+      ],
+      "publicTypes": [],
       "publicConstants": []
     },
     {

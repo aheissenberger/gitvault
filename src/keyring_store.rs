@@ -6,7 +6,6 @@
 //! - Linux: kernel keyutils (linux-native feature)
 //! - Windows: Credential Manager (windows-native feature)
 
-use crate::defaults;
 use crate::error::GitvaultError;
 use zeroize::Zeroizing;
 
@@ -122,6 +121,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::defaults;
 
     /// Install the in-memory mock backend for the duration of the process.
     /// Called once; subsequent calls are no-ops (the builder is already mock).
