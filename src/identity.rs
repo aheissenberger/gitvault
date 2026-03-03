@@ -14,13 +14,26 @@ use zeroize::Zeroizing;
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum IdentitySourceState {
     /// The source resolved successfully and provided a usable identity.
-    Resolved { source: String },
+    Resolved {
+        /// Human-readable name of the identity source (e.g. `"keyring"`).
+        source: String,
+    },
     /// The source was tried but the identity was not available (e.g. keyring empty,
     /// SSH-agent not running, env var not set).  The chain continues.
-    SourceNotAvailable { source: String, reason: String },
+    SourceNotAvailable {
+        /// Human-readable name of the identity source.
+        source: String,
+        /// Short explanation of why the source was unavailable.
+        reason: String,
+    },
     /// Multiple candidates exist and no selector was provided to disambiguate.
     /// The chain fails closed on this state.
-    Ambiguous { source: String, count: usize },
+    Ambiguous {
+        /// Human-readable name of the identity source.
+        source: String,
+        /// Number of ambiguous candidates that were found.
+        count: usize,
+    },
 }
 
 // ─── SSH-agent support ────────────────────────────────────────────────────────
