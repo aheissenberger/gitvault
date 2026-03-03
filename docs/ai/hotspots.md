@@ -1,7 +1,7 @@
 # Architecture Hotspots
 
 Curated from the 2026-03-01 multi-agent review so future agents can jump directly to high-value areas.
-Last updated: 2026-03-02 (seventh refactor pass — all doc warnings fixed).
+Last updated: 2026-03-03 (eighth review pass — rustdoc, README hook-adapter docs, ssm coverage boost).
 
 ## Resolved Issues (no longer actionable)
 
@@ -50,26 +50,30 @@ These items are known but reviewed and deemed low-value relative to refactor ris
   `execute_effects_with` are tightly coupled; extraction adds boilerplate without benefit.
 - Tests in `ssm/mod.rs` use `unsafe { std::env::set_var/remove_var }`. In Rust 1.93.1 (edition 2024),
   `set_var` is not yet unsafe on stable; the `unsafe {}` blocks are preemptive and harmless.
-- 17 `#[must_use]` candidates (13 functions + 4 methods) — API annotation work; deferred.
+- ~~17 `#[must_use]` candidates~~ → **partially resolved**: `as_identity()`, `enter()`, `setup_identity_file()` annotated. Remaining ~14 are internal helpers; low risk.
 - 3 `map_or` test code style suggestions — current `match` is clearer.
 - 2 remaining `match` → `if let` suggestions — both arms are meaningful; pedantic style only.
+- Public API rustdoc gaps (8 items in `config.rs`, `repo/plugin.rs`, `identity.rs`) → **being addressed in `review/rustdoc-public-api` branch**.
+- README lacks hook-adapter and config documentation → **being addressed in `review/readme-hook-docs` branch**.
+- `ssm/commands.rs` at **71.95% line coverage** (gate: 70%) → **being boosted in `review/ssm-coverage` branch**.
 
 ## Unfulfilled Acceptance Criteria
 
-None. All AC across all 19 spec files are now satisfied:
+None. All AC across all 97 spec files are now satisfied (97 files × all ACs verified by `cargo xtask spec-verify`).
 
 | Spec | AC | Status | Notes |
 |------|----|--------|-------|
-| All 19 specs | All ACs | ✅ Done | Windows CI job added → AC5/AC4 fulfilled |
+| All 97 specs | All ACs | ✅ Done | spec-verify passes; Windows CI job fulfills AC5/AC4 |
 
-## Coverage Status (2026-03-02, fourth refactor pass)
+## Coverage Status (2026-03-03, eighth review pass)
 
-- Overall line coverage: **95.37%** (gate: ≥95%) ✅  
-- Overall region coverage: **90.40%** (gate: n/a in CI)
+- Overall line coverage: **95.91%** (gate: ≥95%) ✅  
+- Overall region coverage: ~91% (gate: n/a in CI)
 - `ssm/backend.rs` and `aws_config.rs` are excluded from CI coverage gate
   (both require live AWS credentials — cannot be unit tested without real AWS infra)
-- Lowest covered file (included in gate): `dispatch.rs` at 83.85%
-- Total tests: **346 unit + 18 integration = 364** passing
+- Lowest covered file (included in gate): `ssm/commands.rs` at **71.95%** (⚠️ close to 70% floor)
+- `dispatch.rs` at 92.29% line coverage (below 95% overall target per file — acceptable)
+- Total tests: **409 unit + 37 integration = 446** passing
 
 ## CI Status
 
@@ -77,9 +81,11 @@ None. All AC across all 19 spec files are now satisfied:
 |-----|--------|
 | `cargo fmt --check` | ✅ clean |
 | `cargo clippy -- -D warnings` | ✅ clean (0 warnings) |
-| `cargo test --all-features` | ✅ 364/364 pass |
-| `cargo llvm-cov --fail-under-lines 95` | ✅ 95.37% |
-| `test-windows` (windows-latest) | ✅ job added |
+| `cargo clippy -- -W all -W pedantic -W nursery` | ✅ 0 warnings |
+| `cargo test --all-features` | ✅ 446/446 pass |
+| `cargo llvm-cov --fail-under-lines 95` | ✅ 95.91% |
+| `cargo xtask spec-verify` | ✅ 97/97 specs |
+| `test-windows` (windows-latest) | ✅ job active |
 
 ## Architecture Summary (current state)
 
@@ -88,18 +94,20 @@ src/
 ├── lib.rs          entry, feature-gated mod declarations
 ├── dispatch.rs     CLI dispatch — calls cmd_* with typed option structs
 ├── fhsm.rs         finite-state machine for core workflows
+├── config.rs       .gitvault/config.toml + ~/.config/gitvault/config.toml (REQ-67/68)
 ├── commands/
 │   ├── run_cmd.rs  RunOptions struct + cmd_run
 │   ├── decrypt.rs  DecryptOptions struct + cmd_decrypt
 │   ├── encrypt.rs  cmd_encrypt
 │   ├── effects.rs  EffectRunner trait + DefaultRunner + execute_effects
-│   └── ...         materialize, admin, recipients, keyring
+│   └── ...         materialize, admin, recipients, keyring, identity
 ├── repo/
 │   ├── mod.rs      find_repo_root, validate_write_path
 │   ├── paths.rs    get_encrypted_path, get_plain_path
 │   ├── hooks.rs    install_hooks
 │   ├── drift.rs    check_drift
-│   └── recipients.rs  load_recipients
+│   ├── recipients.rs  load_recipients
+│   └── plugin.rs   AdapterLookup + find_adapter_binary (REQ-64/65/66)
 ├── ssm/            (feature = "ssm")
 │   ├── mod.rs      re-exports + integration tests
 │   ├── backend.rs  SsmBackend trait + RealSsmBackend
