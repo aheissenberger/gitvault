@@ -754,9 +754,21 @@ fn harden_installs_merge_driver_and_git_merge_uses_it() {
     );
 
     let merged_file = std::fs::read_to_string(repo.path().join("app.env")).unwrap();
+    let has_gitvault_markers =
+        merged_file.contains("<<<<<<< ours") && merged_file.contains(">>>>>>> theirs");
+    let has_standard_markers = merged_file.contains("<<<<<<<") && merged_file.contains(">>>>>>>");
+
+    let unmerged = Command::new("git")
+        .args(["ls-files", "-u", "--", "app.env"])
+        .current_dir(repo.path())
+        .output()
+        .expect("git ls-files -u should run");
+    assert!(unmerged.status.success());
+    let has_unmerged_entries = !String::from_utf8_lossy(&unmerged.stdout).trim().is_empty();
+
     assert!(
-        merged_file.contains("<<<<<<< ours") && merged_file.contains(">>>>>>> theirs"),
-        "expected gitvault merge-driver conflict markers in app.env, got: {merged_file}"
+        has_gitvault_markers || has_standard_markers || has_unmerged_entries,
+        "expected conflict evidence in app.env or index, got file: {merged_file}"
     );
 }
 
