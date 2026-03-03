@@ -252,6 +252,7 @@ fn r064_s1_husky_adapter_discovery_is_deterministic() {
     // Run with a PATH that does not contain gitvault-husky.
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -303,6 +304,7 @@ fn r064_s3_husky_pre_commit_blocks_plaintext() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -325,6 +327,7 @@ fn r064_s4_husky_pre_push_blocks_drift() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -346,6 +349,7 @@ fn r064_s5_husky_install_later_activates_without_rebuild() {
 
     let first = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("first harden should run");
@@ -356,6 +360,7 @@ fn r064_s5_husky_install_later_activates_without_rebuild() {
 
     let second = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("second harden should run");
@@ -384,6 +389,7 @@ fn r065_s1_pre_commit_adapter_discovery_is_deterministic() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -434,6 +440,7 @@ fn r065_s3_pre_commit_blocks_plaintext() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -455,6 +462,7 @@ fn r065_s4_pre_commit_blocks_drift_on_push_path() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -476,6 +484,7 @@ fn r065_s5_pre_commit_config_is_preserved() {
 
     bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("first harden should run");
@@ -484,6 +493,7 @@ fn r065_s5_pre_commit_config_is_preserved() {
 
     bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("second harden should run");
@@ -510,6 +520,7 @@ fn r066_s1_lefthook_adapter_discovery_is_deterministic() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -560,6 +571,7 @@ fn r066_s3_lefthook_pre_commit_blocks_plaintext() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -581,6 +593,7 @@ fn r066_s4_lefthook_pre_push_blocks_drift() {
 
     let out = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("harden should run");
@@ -602,6 +615,7 @@ fn r066_s5_lefthook_repeated_runs_are_idempotent() {
 
     let first = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("first harden should run");
@@ -611,6 +625,7 @@ fn r066_s5_lefthook_repeated_runs_are_idempotent() {
 
     let second = bin()
         .arg("harden")
+        .env_remove("CI")
         .current_dir(repo.path())
         .output()
         .expect("second harden should run");
@@ -749,9 +764,15 @@ fn harden_installs_merge_driver_and_git_merge_uses_it() {
 fn check_without_identity_fails_usage() {
     let repo = TempDir::new().unwrap();
     init_git_repo(repo.path());
+    let home = TempDir::new().unwrap();
+    let xdg_config_home = home.path().join(".config");
 
     let out = bin()
         .arg("check")
+        .env_remove("GITVAULT_IDENTITY")
+        .env_remove("SSH_AUTH_SOCK")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", &xdg_config_home)
         .current_dir(repo.path())
         .output()
         .expect("check should run");
