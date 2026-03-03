@@ -13,6 +13,8 @@ acceptance:
     text: "REQ-11: environment resolution priority is GITVAULT_ENV, then .secrets/env, then default dev."
   - id: "AC2"
     text: "REQ-12: each worktree resolves environments independently without cross-contamination."
+  - id: "AC3"
+    text: "encrypt --env <ENV> overrides the resolved environment for the output path, placing the artifact under secrets/<ENV>/ instead of the default resolved environment."
 verification:
   commands:
     - "cargo test --all"

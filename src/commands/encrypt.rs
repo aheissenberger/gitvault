@@ -78,6 +78,7 @@ fn compute_output_path(
 pub fn cmd_encrypt(
     file: String,
     recipient_keys: Vec<String>,
+    env_override: Option<String>,
     keep_path: bool,
     fields: Option<String>,
     value_only: bool,
@@ -158,7 +159,7 @@ pub fn cmd_encrypt(
         })
         .collect::<Result<Vec<_>, GitvaultError>>()?;
 
-    let active_env = env::resolve_env(&repo_root);
+    let active_env = env_override.unwrap_or_else(|| env::resolve_env(&repo_root));
 
     repo::ensure_dirs(&repo_root, &active_env)?;
     let out_path = compute_output_path(&repo_root, &input_path, &active_env, keep_path)?;
@@ -209,6 +210,7 @@ mod tests {
         let err = cmd_encrypt(
             in_path.to_string_lossy().to_string(),
             vec![],
+            None,
             false,
             None,
             false,
@@ -235,6 +237,7 @@ mod tests {
             cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![recipient],
+                None,
                 false,
                 None,
                 true,
@@ -263,6 +266,7 @@ mod tests {
             cmd_encrypt(
                 json_file.to_string_lossy().to_string(),
                 vec![recipient.clone()],
+                None,
                 false,
                 Some("secret".to_string()),
                 false,
@@ -307,6 +311,7 @@ mod tests {
             let err = cmd_encrypt(
                 nonexistent.to_string_lossy().to_string(),
                 vec![recipient],
+                None,
                 false,
                 Some("field".to_string()),
                 false,
@@ -338,6 +343,7 @@ mod tests {
         let err = cmd_encrypt(
             plain_file.to_string_lossy().to_string(),
             vec![bad_recipient.to_string()],
+            None,
             false,
             None,
             false,
@@ -364,8 +370,16 @@ mod tests {
         // The path "." has no meaningful filename (file_name() returns Some(".")).
         // Use "/" which has no file_name().
         with_identity_env(identity_file.path(), || {
-            let err = cmd_encrypt("/".to_string(), vec![recipient], false, None, false, false)
-                .expect_err("root path should fail with no filename");
+            let err = cmd_encrypt(
+                "/".to_string(),
+                vec![recipient],
+                None,
+                false,
+                None,
+                false,
+                false,
+            )
+            .expect_err("root path should fail with no filename");
             // Either Usage (no filename) or Io (can't read /) is acceptable.
             assert!(
                 matches!(err, GitvaultError::Usage(_) | GitvaultError::Io(_)),
@@ -394,6 +408,7 @@ mod tests {
             let err = cmd_encrypt(
                 outside_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 true, // --keep-path
                 None,
                 false,
@@ -429,6 +444,7 @@ mod tests {
             cmd_encrypt(
                 plain_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 true,
                 None,
                 false,
@@ -441,6 +457,40 @@ mod tests {
             dir.path()
                 .join("secrets/dev/app/platform/service/config/service.env.age")
                 .exists()
+        );
+    }
+
+    #[test]
+    fn test_cmd_encrypt_env_override_writes_to_named_env() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let plain_file = dir.path().join("app.env");
+        std::fs::write(&plain_file, "KEY=value\n").unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_encrypt(
+                plain_file.to_string_lossy().to_string(),
+                vec![identity.to_public().to_string()],
+                Some("staging".to_string()),
+                false,
+                None,
+                false,
+                false,
+            )
+            .expect("encrypt with --env staging should succeed");
+        });
+
+        assert!(
+            dir.path().join("secrets/staging/app.env.age").exists(),
+            "output should be under secrets/staging/"
+        );
+        assert!(
+            !dir.path().join("secrets/dev/app.env.age").exists(),
+            "output must NOT fall back to the default dev env"
         );
     }
 }

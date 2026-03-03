@@ -124,6 +124,10 @@ gitvault encrypt app.env \
   --recipient age1xyz...      # teammate's key
 # Output: secrets/<active-env>/app.env.age  (safe to commit)
 
+# Encrypt into a specific environment:
+gitvault encrypt app.env --env staging --recipient age1abc...
+# Output: secrets/staging/app.env.age
+
 # Field-level encryption (JSON/YAML/TOML — only named fields are encrypted):
 gitvault encrypt config.json --fields db.password,api_key \
   --recipient age1abc...
@@ -209,7 +213,7 @@ Commands:
 
 ### High-signal command details
 
-- `encrypt`: supports `--keep-path`, `--fields`, and `--value-only`.
+- `encrypt`: supports `--env`, `--keep-path`, `--fields`, and `--value-only`.
 - `decrypt`: supports optional `--output [path]`, `--fields`, `--value-only`, and `--reveal`.
 - `run`: supports `--clear-env` plus `--pass <VARS>` for controlled pass-through.
 - `harden`: installs/updates hooks; with adapter config it delegates to external hook manager.

@@ -91,13 +91,15 @@ Encrypt a secret file. Output: `secrets/<env>/<name>.age` (whole-file) or in-pla
 | Option | Description |
 |--------|-------------|
 | `-r, --recipient <PUBKEY>` | age public key (repeat for multi-recipient; defaults to local identity) |
+| `-e, --env <ENV>` | Environment to use (overrides `GITVAULT_ENV` and `.secrets/env`); controls output path `secrets/<ENV>/` |
 | `--keep-path` | Preserve input path relative to repo root under `secrets/<env>/` |
 | `--fields <FIELDS>` | Comma-separated key paths for JSON/YAML/TOML field-level encryption |
 | `--value-only` | Encrypt each `.env` VALUE individually (`KEY=enc:base64`) instead of whole file |
 
 **Examples:**
 ```bash
-gitvault encrypt app.env -r age1abc...                    # whole-file
+gitvault encrypt app.env -r age1abc...                    # whole-file, active env
+gitvault encrypt app.env -r age1abc... --env staging      # whole-file, staging env
 gitvault encrypt config.json --fields db.password,api_key  # field-level
 gitvault encrypt .env --value-only                          # per-value
 ```

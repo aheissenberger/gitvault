@@ -51,6 +51,9 @@ pub enum Commands {
         /// Recipient age public key (repeat for multi-recipient; defaults to local identity if omitted)
         #[arg(short, long = "recipient")]
         recipients: Vec<String>,
+        /// Environment to use (overrides `GITVAULT_ENV` and .secrets/env)
+        #[arg(short, long)]
+        env: Option<String>,
         /// Preserve input path relative to repo root under secrets/<env>/
         #[arg(long)]
         keep_path: bool,

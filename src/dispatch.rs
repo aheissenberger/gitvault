@@ -23,11 +23,12 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Encrypt {
             file,
             recipients,
+            env,
             keep_path,
             fields,
             value_only,
         } => crate::commands::encrypt::cmd_encrypt(
-            file, recipients, keep_path, fields, value_only, cli.json,
+            file, recipients, env, keep_path, fields, value_only, cli.json,
         ),
         Commands::Decrypt {
             file,
@@ -271,6 +272,7 @@ mod tests {
             command: Commands::Encrypt {
                 file: plain_file.to_string_lossy().to_string(),
                 recipients: vec![identity.to_public().to_string()],
+                env: None,
                 keep_path: false,
                 fields: None,
                 value_only: false,

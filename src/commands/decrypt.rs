@@ -314,6 +314,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 json_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 false,
                 Some("secret".to_string()),
                 false,
@@ -361,6 +362,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 false,
                 None,
                 true, // value_only
@@ -419,6 +421,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 false,
                 None,
                 true, // value_only
@@ -459,6 +462,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 false,
                 None,
                 true, // value_only
@@ -506,6 +510,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 plain_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 true,
                 None,
                 false,
@@ -628,6 +633,7 @@ mod tests {
             crate::commands::encrypt::cmd_encrypt(
                 env_file.to_string_lossy().to_string(),
                 vec![identity.to_public().to_string()],
+                None,
                 false,
                 None,
                 true, // value_only
