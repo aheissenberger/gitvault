@@ -511,7 +511,10 @@ mod tests {
         let bad_dir = make_invalid_app_dir(&parent);
         let aws = AwsConfig::from_cli(None, None);
         let result = cmd_ssm_diff(&bad_dir, "dev", &aws, true, false).await;
-        assert!(result.is_err(), "reveal diff should fail for invalid app name");
+        assert!(
+            result.is_err(),
+            "reveal diff should fail for invalid app name"
+        );
     }
 
     // ── cmd_ssm_set (public) ──────────────────────────────────────────────────
