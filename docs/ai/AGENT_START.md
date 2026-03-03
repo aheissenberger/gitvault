@@ -44,3 +44,4 @@ See `docs/ai/hotspots.md` for the curated list of critical and architectural iss
 - `cargo fmt` clean
 - Relevant tests/checks executed and reported
 - Any follow-up risks documented
+- **`docs/ai/skill.md` updated** if any CLI commands, options, flags, env vars, or exit codes were added or changed (this file is embedded in the binary and is the canonical AI reference for the tool)
