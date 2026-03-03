@@ -25,7 +25,7 @@ After the user chooses a bump type:
 4. Run verification:
    - `cargo verify`
    - Verify required coverage by running the CLI:
-     - `cargo run -- coverage-check`
+     - `cargo llvm-cov --workspace --all-features --fail-under-lines 95`
 5. Commit with message:
    - `chore(release): v<new-version>`
 6. Create annotated tag:
