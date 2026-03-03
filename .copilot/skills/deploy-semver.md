@@ -46,21 +46,26 @@ After the bump type is known:
 
 1. Read current version from `Cargo.toml` (`[package].version`).
 2. Run verification:
-   - `cargo verify`
+   - `cargo verify > /dev/null 2>&1`
    - Verify required coverage by running the CLI:
      - `cargo llvm-cov --workspace --all-features --ignore-filename-regex "aws_config\.rs|ssm/backend\.rs" --fail-under-lines 95 > /dev/null 2>&1`
-3. Compute next version:
+3. Normalize transient verification artifacts and require a clean tree:
+   - `git restore Cargo.lock`
+   - `git status --short` must be empty before continuing.
+4. Compute next version:
    - `major`: `X+1.0.0`
    - `minor`: `X.Y+1.0`
    - `patch`: `X.Y.Z+1`
-4. Update `Cargo.toml` version.
-5. Commit with message:
+5. Update `Cargo.toml` version.
+6. Commit with message:
    - `chore(release): v<new-version>`
-6. Create annotated tag:
+7. Create annotated tag:
    - `git tag -a v<new-version> -m "v<new-version>"`
-7. Run release gate:
+8. Require clean tree before release gate:
+   - `git status --short` must be empty.
+9. Run release gate:
    - `cargo xtask release-check`
-8. Push commit and tag:
+10. Push commit and tag:
    - `git push origin main`
    - `git push origin v<new-version>`
 
@@ -68,6 +73,7 @@ After the bump type is known:
 
 - Abort if working tree is dirty before version bump and show the blocking files.
 - Abort if verification fails; do not tag or push.
+- If verification tools modify transient files (for example `Cargo.lock`), restore them before version bump and continue only if the tree is clean.
 - Never create lightweight tags.
 - Never skip `cargo xtask release-check`.
 
