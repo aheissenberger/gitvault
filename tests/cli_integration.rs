@@ -766,10 +766,18 @@ fn check_without_identity_fails_usage() {
     init_git_repo(repo.path());
     let home = TempDir::new().unwrap();
     let xdg_config_home = home.path().join(".config");
+    let missing_identity = home.path().join("missing.agekey");
 
     let out = bin()
-        .arg("check")
-        .env_remove("GITVAULT_IDENTITY")
+        .args([
+            "check",
+            "--identity",
+            missing_identity.to_string_lossy().as_ref(),
+        ])
+        .env(
+            "GITVAULT_IDENTITY",
+            missing_identity.to_string_lossy().as_ref(),
+        )
         .env_remove("SSH_AUTH_SOCK")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", &xdg_config_home)

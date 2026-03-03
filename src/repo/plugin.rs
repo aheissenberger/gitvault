@@ -149,6 +149,7 @@ mod tests {
 
     #[test]
     fn test_which_binary_not_found_returns_err() {
+        let _lock = global_test_lock().lock().unwrap();
         let original_path = std::env::var_os("PATH");
         unsafe {
             std::env::set_var("PATH", "/tmp/__no_such_dir_gitvault_test__");
@@ -205,6 +206,7 @@ mod tests {
 
     #[test]
     fn test_find_adapter_binary_found_when_on_path() {
+        let _lock = global_test_lock().lock().unwrap();
         // Create a temp directory with a fake gitvault-husky script, then prepend
         // that directory to PATH so find_adapter_binary returns Found.
         let tmp = tempfile::TempDir::new().expect("temp dir");
