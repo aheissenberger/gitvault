@@ -4,17 +4,45 @@ Use this skill when the user asks to deploy or release.
 
 Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../../.github/instructions/rust.instructions.md).
 
-## Required first question
+## Determine bump type first
 
-Ask exactly this before doing any release mutation:
+Before doing any release mutation, detect whether the user prompt already specifies one of these bump types: `major`, `minor`, or `patch`.
+
+- If the prompt includes exactly one valid bump type, use it directly and do not ask a follow-up question.
+- If the prompt includes none, ask using VS Code Copilot Chat UI question elements (quick-pick / single-select), not plain free text.
+- Use this exact prompt text in the UI question:
 
 `Which semantic version upgrade should I apply: major, minor, or patch?`
 
-If the user does not choose one of `major|minor|patch`, ask again with only these options.
+- Present exactly these options in the UI picker: `major`, `minor`, `patch`.
+- If the user response is not one of `major|minor|patch`, ask again using the same UI picker with only those options.
+
+### Implementation hint (Copilot Chat UI)
+
+When asking for bump type, use `ask_questions` with one single-select question and three options.
+
+Example structure:
+
+```json
+{
+   "questions": [
+      {
+         "header": "Semver",
+         "question": "Which semantic version upgrade should I apply: major, minor, or patch?",
+         "multiSelect": false,
+         "options": [
+            { "label": "major" },
+            { "label": "minor" },
+            { "label": "patch" }
+         ]
+      }
+   ]
+}
+```
 
 ## Execution flow
 
-After the user chooses a bump type:
+After the bump type is known:
 
 1. Read current version from `Cargo.toml` (`[package].version`).
 2. Compute next version:
