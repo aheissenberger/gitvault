@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "gitvault"
-version = "0.2.23"
+version = "0.2.24"
 dependencies = [
  "age",
  "async-trait",
