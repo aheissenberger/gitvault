@@ -222,38 +222,36 @@ Commands:
 
 ---
 
-## Environment variables
+## Defaults & configuration reference
 
-### `GITVAULT_*`
+All built-in defaults can be overridden via config file and, where marked, via a `GITVAULT_*`
+environment variable. Precedence (highest → lowest): CLI flag → `GITVAULT_*` env var → project
+`.gitvault/config.toml` → user-global `~/.config/gitvault/config.toml` → built-in default.
 
-| Variable | Purpose |
-|----------|---------|
-| `GITVAULT_ENV` | Active environment name; overrides `.secrets/env` file and the `dev` default |
-| `GITVAULT_IDENTITY` | Path to age identity key file (alternative to `--identity`) |
-| `GITVAULT_IDENTITY_SELECTOR` | SSH-agent key selector for disambiguation (alternative to `--identity-selector`) |
-| `GITVAULT_SSH_AGENT` | Set to `1` to enable SSH-agent as an identity source |
-| `GITVAULT_KEYRING` | Set to `1` to use the OS keyring as the identity source |
+| Setting | Default | Config file key | `GITVAULT_*` env var |
+|---------|---------|-----------------|----------------------|
+| Active environment | `dev` | `[env] default` | `GITVAULT_ENV` |
+| Production env name | `prod` | `[env] prod_name` | — |
+| Environment name file | `.secrets/env` | `[env] env_file` | — |
+| Prod allow-token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
+| Recipients file | `.secrets/recipients` | `[paths] recipients_file` | — |
+| Materialize output file | `.env` | `[paths] materialize_output` | — |
+| Keyring service name | `gitvault` | `[keyring] service` | — |
+| Keyring account name | `age-identity` | `[keyring] account` | — |
+| Hook manager adapter | *(none)* | `[hooks] adapter` | — |
+| Prod allow-token file | `.secrets/.prod-token` | *(planned)* | — |
+| Encrypted secrets dir | `secrets/` | *(planned)* | — |
+| Decrypted plaintext dir | `.secrets/plain/` | *(planned)* | — |
+| Identity key path/string | — | — | `GITVAULT_IDENTITY` |
+| SSH-agent key selector | — | — | `GITVAULT_IDENTITY_SELECTOR` |
+| SSH-agent enabled | off | — | `GITVAULT_SSH_AGENT=1` |
+| OS keyring as identity | off | — | `GITVAULT_KEYRING=1` |
+| Non-interactive mode | off | — | `CI=1` |
+| AWS profile (SSM) | — | — | `AWS_PROFILE` |
+| AWS role ARN (SSM) | — | — | `AWS_ROLE_ARN` |
 
-### System
-
-| Variable | Purpose |
-|----------|---------|
-| `CI` | Set to `1`, `true`, or `yes` to enable non-interactive mode automatically |
-| `SSH_AUTH_SOCK` | Standard SSH socket; presence enables SSH-agent as an identity source |
-| `AWS_PROFILE` | AWS profile for the SSM backend (alternative to `--aws-profile`) |
-| `AWS_ROLE_ARN` | AWS role ARN to assume for the SSM backend (alternative to `--aws-role-arn`) |
-
-## Environment resolution
-
-Priority order:
-
-| Priority | Source |
-|----------|--------|
-| 1 | `GITVAULT_ENV` environment variable |
-| 2 | `.secrets/env` file in the worktree root |
-| 3 | `dev` (default) |
-
-Each Git worktree resolves its environment independently. The active environment can also be overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `check`).
+Each Git worktree resolves its active environment independently. The environment can also be
+overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `check`).
 
 ---
 
@@ -305,52 +303,30 @@ Priority order for loading the age identity:
 
 ## Configuration
 
-gitvault supports two optional TOML configuration file layers. Both files are optional — a missing file (or missing section) silently uses built-in defaults.
+gitvault supports two optional TOML configuration file layers. Both files are optional — a missing
+file (or missing section) silently uses built-in defaults. See the
+[Defaults & configuration reference](#defaults--configuration-reference) table above for all keys.
 
 | File | Scope |
 |------|-------|
 | `.gitvault/config.toml` | Repository-level; committed with the project |
 | `~/.config/gitvault/config.toml` | User-global; personal defaults for all repos |
 
-**Precedence** (highest → lowest):
-
-1. CLI flags / environment variables
-2. Project `.gitvault/config.toml`
-3. User-global `~/.config/gitvault/config.toml`
-4. Built-in defaults
-
 ---
 
-### `[env]` section
-
-Controls environment resolution (which environment name is active).
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `default` | string | `dev` | Environment name used when neither `GITVAULT_ENV` nor the `.secrets/env` file is set. |
-| `prod_name` | string | `prod` | The environment name that triggers the production barrier check. Change this if your production environment is named differently (e.g. `production`). |
-| `env_file` | string | `.secrets/env` | Repository-relative path of the file that stores the active environment name. |
-
-**Example:**
+### `[env]` — environment resolution
 
 ```toml
 # .gitvault/config.toml
 [env]
 default = "staging"         # treat staging as the default environment
 prod_name = "production"    # barrier triggers on "production" instead of "prod"
+env_file = ".config/env"    # custom path for the env-name file
 ```
 
 ---
 
-### `[barrier]` section
-
-Controls the production allow-token behaviour.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ttl_secs` | integer | `3600` | Lifetime in seconds for a production allow-token written by `gitvault allow-prod`. The `--ttl` flag overrides this per invocation. |
-
-**Example:**
+### `[barrier]` — production allow-token
 
 ```toml
 # .gitvault/config.toml
@@ -360,16 +336,7 @@ ttl_secs = 1800   # 30-minute production windows instead of 60
 
 ---
 
-### `[paths]` section
-
-Controls repository-relative file locations.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `recipients_file` | string | `.secrets/recipients` | Repository-relative path of the persistent recipients list read and written by `recipient add/remove/list` and `rotate`. |
-| `materialize_output` | string | `.env` | Repository-relative path written by `gitvault materialize`. Change to `.env.local` or any other filename your toolchain expects. |
-
-**Example:**
+### `[paths]` — file locations
 
 ```toml
 # .gitvault/config.toml
@@ -380,59 +347,32 @@ recipients_file = ".gitvault/recipients"
 
 ---
 
-### `[keyring]` section
-
-Controls which OS keyring slot gitvault uses to store and retrieve the age identity.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `service` | string | `gitvault` | OS keyring service name used to namespace gitvault credentials. |
-| `account` | string | `age-identity` | OS keyring account / username under which the age identity key is stored. |
-
-**Example:**
+### `[keyring]` — OS keyring slot
 
 ```toml
 # ~/.config/gitvault/config.toml
 [keyring]
-service = "my-company-gitvault"   # avoid collisions if running multiple gitvault instances
+service = "my-company-gitvault"   # avoid collisions with other gitvault instances
 account = "default-identity"
 ```
 
 ---
 
-### `[hooks]` section
+### `[hooks]` — Git hook manager adapter
 
-Controls how `gitvault harden` installs Git hooks into the repository.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `adapter` | string | *(none)* | Hook-manager adapter to delegate to. When set, `gitvault harden` delegates to the adapter's binary instead of writing native Git hooks directly. Accepted values: `husky`, `pre-commit`, `lefthook`. An empty string is treated as unset and the next precedence layer applies. |
-
-**Adapter binaries invoked:**
-
-| Value | Binary on `PATH` |
-|-------|-----------------|
+| Adapter value | Binary on `PATH` |
+|---------------|-----------------|
 | `husky` | `gitvault-husky` |
 | `pre-commit` | `gitvault-pre-commit` |
 | `lefthook` | `gitvault-lefthook` |
 
-**Example — project config:**
-
 ```toml
 # .gitvault/config.toml
 [hooks]
-adapter = "husky"   # delegate hook installation to gitvault-husky
+adapter = "husky"
 ```
 
-**Example — user-global config:**
-
-```toml
-# ~/.config/gitvault/config.toml
-[hooks]
-adapter = "lefthook"   # personal default; overridden by any project config
-```
-
-> **Validation:** unknown keys inside any known section produce a `Usage` error (exit `2`) with an actionable message. Unknown top-level sections are silently ignored for forward compatibility.
+> **Validation:** unknown keys inside any known section produce a `Usage` error (exit `2`). Unknown top-level sections are silently ignored for forward compatibility.
 
 ---
 
