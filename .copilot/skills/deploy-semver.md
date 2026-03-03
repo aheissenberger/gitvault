@@ -58,15 +58,23 @@ After the bump type is known:
    - `minor`: `X.Y+1.0`
    - `major`: `X+1.0.0`
 6. Update `Cargo.toml` version.
-7. Commit with message:
+7. Sync lockfile package version:
+   - Run `cargo check --workspace --all-features`.
+   - Require `Cargo.lock` to reflect the same `gitvault` package version as `Cargo.toml`.
+   - Check lockfile diff scope with:
+     - `git diff -- Cargo.lock`
+     - Allow only the `[[package]]` block for `name = "gitvault"` with `version` change from old to new release version.
+   - Abort if lockfile changes include unrelated dependency churn.
+8. Commit with message:
    - `chore(release): v<new-version>`
-8. Create annotated tag:
+   - Commit both `Cargo.toml` and `Cargo.lock` together.
+9. Create annotated tag:
    - `git tag -a v<new-version> -m "v<new-version>"`
-9. Require clean tree before release gate:
+10. Require clean tree before release gate:
    - `git status --short` must be empty.
-10. Run release gate:
+11. Run release gate:
    - `cargo xtask release-check`
-11. Push commit and tag:
+12. Push commit and tag:
    - `git push origin main`
    - `git push origin v<new-version>`
 
@@ -75,6 +83,9 @@ After the bump type is known:
 - Abort if working tree is dirty before verification and show the blocking files.
 - Abort if verification fails; do not tag or push.
 - Abort if the tree is dirty after verification; do not auto-restore files during release.
+- Keep `Cargo.toml` and `Cargo.lock` in sync in the same release commit.
+- Require an explicit `git diff -- Cargo.lock` review; allow only the root `gitvault` package version delta.
+- Abort if lockfile updates include unrelated dependency/version changes.
 - Never create lightweight tags.
 - Never skip `cargo xtask release-check`.
 
