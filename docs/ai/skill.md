@@ -70,7 +70,7 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 | Production env name | `prod` | `[env] prod_name` | — |
 | Env name file | `.secrets/env` | `[env] env_file` | — |
 | Prod token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
-| Recipients file | `.secrets/recipients` | `[paths] recipients_file` | — |
+| Recipients directory | `.secrets/recipients/` | `[paths] recipients_file` | — |
 | Materialize output | `.env` | `[paths] materialize_output` | — |
 | Keyring service | `gitvault` | `[keyring] service` | — |
 | Keyring account | `age-identity` | `[keyring] account` | — |
@@ -99,7 +99,9 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 ├── secrets/<env>/          # encrypted artifacts (commit these)
 │   └── app.env.age
 ├── .secrets/
-│   ├── recipients          # persistent recipient public keys (one per line)
+│   ├── recipients/         # one .pub file per recipient (named per-person)
+│   │   ├── alice.pub
+│   │   └── bob.pub
 │   ├── env                 # active environment name (optional)
 │   ├── .prod-token         # timed production allow-token (gitignored)
 │   └── plain/<env>/        # decrypted plaintext (gitignored)
@@ -110,6 +112,35 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 ---
 
 ## Commands
+
+### `gitvault init`
+
+Interactive onboarding for a new team member. Runs through identity creation, recipient
+registration, and repository hardening in a single guided flow.
+
+Steps performed:
+1. Creates an age identity (stored in OS keyring by default)
+2. Adds own public key to `.secrets/recipients/<your-name>.pub`
+3. Hardens the repo (`.gitignore`, git hooks, `.gitattributes`)
+4. Creates `.gitvault/config.toml` if missing
+
+**Recipient ceremony flow:**
+```bash
+# New member runs:
+gitvault init
+git add .secrets/recipients/ && git commit -m "onboard: add <name> as recipient"
+git push && gh pr create
+
+# Maintainer merges PR then rekeyes:
+gitvault rekey
+git add .secrets/ && git commit -m "rekey: add <name>"
+git push
+
+# New member pulls and materializes:
+git pull && gitvault materialize
+```
+
+---
 
 ### `gitvault encrypt <FILE> [OPTIONS]`
 
@@ -219,11 +250,28 @@ Preflight validation of identity, recipients, and secrets dir — no side effect
 
 ---
 
-### `gitvault harden`
+### `gitvault harden [<FILE>] [OPTIONS]`
 
-Add `.env` and `.secrets/plain/` to `.gitignore`, install pre-commit / pre-push git hooks, and
-register the `.env` merge driver in `.gitattributes`. Delegates to external hook manager
-(husky / lefthook / pre-commit) when configured in `.gitvault/config.toml`.
+Without a file argument: add `.env` and `.secrets/plain/` to `.gitignore`, install pre-commit /
+pre-push git hooks, and register the `.env` merge driver in `.gitattributes`. Delegates to
+external hook manager (husky / lefthook / pre-commit) when configured in `.gitvault/config.toml`.
+
+With a file argument: imports an existing plaintext file — encrypts it, runs `git rm --cached`,
+and adds it to `.gitignore`.
+
+| Option | Description |
+|--------|-------------|
+| `-e, --env <ENV>` | Target environment for the imported file |
+| `--dry-run` | Show what would happen without making changes |
+| `--remove` | Delete the plaintext source file after encrypting |
+| `-r, --recipient <PUBKEY>` | Recipient key (repeat for multi-recipient) |
+
+**Examples:**
+```bash
+gitvault harden                          # repo hardening only
+gitvault harden .env --env dev           # import, encrypt, gitignore .env
+gitvault harden secrets.yaml --env prod --dry-run
+```
 
 ---
 
@@ -245,17 +293,26 @@ Revoke the production allow-token immediately.
 
 ### `gitvault recipient <SUBCOMMAND>`
 
-Manage persistent recipients stored in `.secrets/recipients`.
+Manage persistent recipients stored in `.secrets/recipients/` (one `.pub` file per person).
 
 | Subcommand | Arguments | Description |
 |------------|-----------|-------------|
-| `add` | `<PUBKEY>` | Add an age public key |
-| `remove` | `<PUBKEY>` | Remove an age public key |
+| `add` | `<PUBKEY> [--name <NAME>]` | Add an age public key; saves to `<name>.pub` |
+| `remove` | `<NAME\|PUBKEY>` | Remove a recipient by name or public key |
 | `list` | — | List current recipients |
+| `add-self` | `[--name <NAME>]` | Resolve own public key from keyring and add as recipient |
+
+**Examples:**
+```bash
+gitvault recipient add age1abc... --name alice
+gitvault recipient add-self --name bob
+gitvault recipient list
+gitvault recipient remove alice
+```
 
 ---
 
-### `gitvault rotate [OPTIONS]`
+### `gitvault rekey [OPTIONS]`
 
 Re-encrypt all secrets in `secrets/` for the current recipient list. Phase-1 decrypts all files
 before any write to avoid mixed-key state on failure.
@@ -263,6 +320,16 @@ before any write to avoid mixed-key state on failure.
 | Option | Description |
 |--------|-------------|
 | `-i, --identity <FILE>` | Identity key file path |
+| `--dry-run` | Show which files would be re-encrypted without writing |
+| `-e, --env <ENV>` | Rekey only the specified environment |
+| `--json` | Emit machine-readable JSON output |
+
+**Example:**
+```bash
+gitvault rekey                          # rekey all envs
+gitvault rekey --dry-run                # preview only
+gitvault rekey --env staging --json
+```
 
 ---
 
@@ -284,10 +351,20 @@ Manage local age identity keys.
 
 | Subcommand | Options | Description |
 |------------|---------|-------------|
-| `create` | `--profile classic\|hybrid`, `--out <PATH>` | Generate a new identity key; stores in keyring unless `--out` is given |
+| `create` | `--profile classic\|hybrid`, `--out <PATH>`, `--add-recipient` | Generate a new identity key; stores in keyring unless `--out` is given; `--add-recipient` immediately registers the public key |
+| `pubkey` | — | Print own public key (from keyring or `GITVAULT_IDENTITY`) for piping |
 
 `--profile classic` — age X25519 (default)  
 `--profile hybrid` — age X25519 with PQ-ready label
+
+**Examples:**
+```bash
+gitvault identity create                          # stores in keyring
+gitvault identity create --out ~/.age/id.key      # export to file
+gitvault identity create --add-recipient          # create + register as recipient
+gitvault identity pubkey                          # print public key
+gitvault identity pubkey | gitvault recipient add # pipe to add
+```
 
 ---
 
@@ -335,10 +412,12 @@ AWS credentials: `--aws-profile` / `--aws-role-arn` (global options) or standard
 ## Typical agent workflow
 
 ```bash
-# Bootstrap
-gitvault identity create --out ~/.age/id.key   # one-time: generate identity
-gitvault harden                                  # install hooks, update .gitignore
-gitvault recipient add age1abc...               # add team member
+# Bootstrap (new member)
+gitvault init                                    # interactive: identity + recipient + harden
+# OR manual:
+gitvault identity create --add-recipient         # generate identity and register as recipient
+git add .secrets/recipients/ && git commit -m "onboard: add me as recipient"
+git push && gh pr create                         # PR for maintainer to merge + rekey
 
 # Encrypt and commit
 gitvault encrypt app.env -r age1abc...
@@ -351,9 +430,10 @@ gitvault check --json                 # preflight; exits non-zero on misconfigur
 gitvault materialize                  # writes .env (0600, atomic)
 gitvault run -- ./start-server        # fileless injection (preferred over .env)
 
-# Rotate after adding/removing a recipient
-gitvault recipient add age1xyz...
-gitvault rotate -i ~/.age/id.key
-git add secrets/ .secrets/recipients && git commit -m "chore: rotate recipients"
+# Rekey after adding/removing a recipient
+gitvault recipient add age1xyz... --name alice
+gitvault rekey --dry-run              # preview
+gitvault rekey
+git add secrets/ .secrets/recipients/ && git commit -m "rekey: add alice"
 ```
 
