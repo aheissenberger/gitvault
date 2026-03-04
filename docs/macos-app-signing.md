@@ -1,35 +1,48 @@
-Perfekt — so startest du auf einem deutschen macOS, um in deinem Apple-Developer-Account eine zweite Developer-ID-Signatur zu erstellen.
+# macOS Developer ID Signing Certificate Setup
 
-Auf dem Mac (CSR erzeugen)
+This guide explains how to create a second macOS Developer ID signing certificate and configure it as GitHub Actions secrets for the gitvault release pipeline. Follow these steps on a macOS machine with Apple Developer account access.
 
-Öffne Schlüsselbundverwaltung.
-In der Menüleiste: Schlüsselbundverwaltung → Zertifikatsassistent → Zertifikat von einer Zertifizierungsstelle anfordern…
-Trage deine Apple-Developer-E-Mail und einen Namen ein.
-Wähle „Auf Festplatte sichern“ (nicht direkt an CA senden).
-Speichere die Datei als developer-id-second.csr.
-Im Apple Developer Account (zweites Zertifikat erstellen)
+## On your Mac (generate a CSR)
 
-Gehe zu developer.apple.com → Certificates, Identifiers & Profiles.
-Öffne Certificates und klicke auf +.
-Wähle Developer ID Application.
-Lade die eben erstellte developer-id-second.csr hoch.
-Lade das neue Zertifikat (.cer) herunter.
-Zurück auf dem Mac (installieren & prüfen)
+1. Open **Keychain Access**.
+2. In the menu bar: **Keychain Access → Certificate Assistant → Request a Certificate From a Certificate Authority…**
+3. Enter your Apple Developer email address and a name.
+4. Select **Saved to disk** (do not send directly to the CA).
+5. Save the file as `developer-id-second.csr`.
 
-Doppelklicke die .cer-Datei, damit sie in der Schlüsselbundverwaltung importiert wird.
-In Anmeldung → Meine Zertifikate prüfen:
-Neues Developer ID Application: ... ist sichtbar.
-Darunter ist ein Privater Schlüssel vorhanden (wichtig).
-Identitäten anzeigen:
-`security find-identity -v -p codesigning`
-Für GitHub Actions exportieren
+## In the Apple Developer portal (create the second certificate)
 
-In Schlüsselbundverwaltung: Rechtsklick auf das neue Zertifikat (+ Schlüssel) → Exportieren…
-Format: Persönliche Informationen austauschen (.p12).
-Danach Base64 erzeugen:
-`base64 -i developer-id-signing-2.p12 | tr -d '\n' > developer-id-signing-2.p12.b64`
-Neue Secrets setzen (z. B. MACOS_CERTIFICATE_P12_BASE64_2, MACOS_CERTIFICATE_PASSWORD_2, MACOS_SIGNING_IDENTITY_2).
-Wichtig
+1. Go to [developer.apple.com](https://developer.apple.com) → **Certificates, Identifiers & Profiles**.
+2. Open **Certificates** and click **+**.
+3. Select **Developer ID Application**.
+4. Upload the `developer-id-second.csr` file you just created.
+5. Download the new certificate (`.cer` file).
 
-Der Wert für MACOS_SIGNING_IDENTITY muss exakt einer Zeile aus security find-identity entsprechen.
-Falls Apple das Zertifikatslimit erreicht meldet: altes, ungenutztes Developer-ID-Zertifikat widerrufen und neu erstellen.
+## Back on your Mac (install and verify)
+
+1. Double-click the `.cer` file to import it into Keychain Access.
+2. In **Login → My Certificates**, verify:
+   - The new **Developer ID Application: ...** entry is visible.
+   - A **private key** is nested beneath it (this is required).
+3. List available signing identities:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+## Export for GitHub Actions
+
+1. In Keychain Access: right-click the new certificate (with its key) → **Export…**
+2. Choose format: **Personal Information Exchange (.p12)**.
+3. Then generate the Base64-encoded string:
+
+```bash
+base64 -i developer-id-signing-2.p12 | tr -d '\n' > developer-id-signing-2.p12.b64
+```
+
+4. Set the new secrets (e.g. `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY`) in your GitHub repository settings.
+
+## Important
+
+- The value for `MACOS_SIGNING_IDENTITY` must exactly match one line from the output of `security find-identity`.
+- If Apple reports that the certificate limit has been reached: revoke an old, unused Developer ID certificate and create a new one.

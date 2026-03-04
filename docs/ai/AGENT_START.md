@@ -58,6 +58,7 @@ See `docs/ai/hotspots.md` for the curated list of critical and architectural iss
 | File | Purpose |
 |------|---------|
 | `README.md` | User-facing reference (CLI, configuration, exit codes, identity resolution) |
+| `docs/reference.md` | Canonical CLI reference: all commands, flags, env vars, config, exit codes |
 | `docs/identity-setup.md` | Identity setup guide (OS keyring, age files, SSH keys, SSH agent, FD-based) |
 | `docs/recipient-management.md` | Recipient lifecycle: onboarding, offboarding, rekeying, team scaling patterns |
 | `docs/cicd-recipes.md` | CI/CD best practices (GitHub Actions, Docker, Kubernetes recipes) |

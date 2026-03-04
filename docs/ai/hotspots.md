@@ -10,10 +10,10 @@ description: Guides agents to operate gitvault safely and predictably. Use when 
 - User needs CI/CD-safe secret handling with deterministic git diffs and stable exit codes.
 - User needs production-gated operations (`allow-prod` / `revoke-prod`, `--prod`).
 - User needs identity setup via age key file, env var, keyring, or SSH agent.
-- User needs AI helper output (`gitvault ai skill print`, `gitvault ai context print`).
+- User needs AI helper output (`gitvault ai skill`, `gitvault ai context`).
 
 ## Core model
-- `gitvault` stores age-encrypted files in `secrets/<env>/...`.
+- `gitvault` stores age-encrypted files in `.gitvault/store/<env>/...`.
 - Plaintext is never committed; guardrails detect leakage and enforce barriers.
 - Environment selection and identity resolution are deterministic.
 - Exit codes are stable and suitable for automation.
@@ -117,7 +117,7 @@ Missing files are ignored.
 | `3` | Plaintext secret detected in tracked files or committed history |
 | `4` | Decryption error (wrong key or corrupt file) |
 | `5` | Production barrier not satisfied |
-| `6` | Secrets drift (uncommitted changes in `secrets/`) |
+| `6` | Secrets drift (uncommitted changes in `.gitvault/store/`) |
 
 ## Repository layout
 
@@ -138,13 +138,13 @@ Missing files are ignored.
 ## Command catalog
 
 ### `gitvault encrypt <FILE> [OPTIONS]`
-Encrypt secret file content into `secrets/<env>/<name>.age` (whole-file) or transform content in field/value modes.
+Encrypt secret file content into `.gitvault/store/<env>/<name>.age` (whole-file) or transform content in field/value modes.
 
 | Option | Description |
 |--------|-------------|
 | `-r, --recipient <PUBKEY>` | age public key (repeatable; defaults to local identity) |
 | `-e, --env <ENV>` | Environment override for output path and policy |
-| `--keep-path` | Preserve relative input path under `secrets/<env>/` |
+| `--keep-path` | Preserve relative input path under `.gitvault/store/<env>/` |
 | `--fields <FIELDS>` | Comma-separated JSON/YAML/TOML key paths |
 | `--value-only` | Encrypt each `.env` value as `KEY=enc:base64` |
 
@@ -177,14 +177,14 @@ Inject secrets into child process environment without writing `.env`.
 | `-i, --identity <FILE>` | Identity key path |
 | `--prod` | Required for prod environment |
 | `--clear-env` | Start child process with empty env |
-| `--pass <VARS>` | Comma-separated passthrough list for `--clear-env` |
+| `--keep-vars <VARS>` | Comma-separated passthrough list for `--clear-env` (alias `--pass`) |
 
 ### `gitvault status [OPTIONS]`
 Safety status check; never decrypts.
 
 | Option | Description |
 |--------|-------------|
-| `--fail-if-dirty` | Exit `6` when `secrets/` has uncommitted changes |
+| `--fail-if-dirty` | Exit `6` when `.gitvault/store/` has uncommitted changes |
 
 ### `gitvault check [OPTIONS]`
 Preflight validation (identity, recipients, secrets dir), no side effects. Also scans committed git history for plaintext leaks.
@@ -193,13 +193,13 @@ Preflight validation (identity, recipients, secrets dir), no side effects. Also 
 |--------|-------------|
 | `-e, --env <ENV>` | Environment to validate |
 | `-i, --identity <FILE>` | Identity key path |
-| `--skip-history-check` | Skip committed-history plaintext scan |
+| `-H, --skip-history-check` | Skip committed-history plaintext scan |
 
 ### `gitvault harden`
 Updates `.gitignore`, installs git hooks, and registers `.env` merge driver. Delegates to configured adapter (`husky` / `lefthook` / `pre-commit`) when set.
 
 ### `gitvault allow-prod [OPTIONS]`
-Write timed prod allow-token to `.secrets/.prod-token`.
+Write timed prod allow-token to `.git/gitvault/.prod-token`.
 
 | Option | Description |
 |--------|-------------|
@@ -209,16 +209,17 @@ Write timed prod allow-token to `.secrets/.prod-token`.
 Revoke production allow-token immediately.
 
 ### `gitvault recipient <SUBCOMMAND>`
-Manage `.secrets/recipients`.
+Manage `.gitvault/recipients/`.
 
 | Subcommand | Arguments | Description |
 |------------|-----------|-------------|
 | `add` | `<PUBKEY>` | Add recipient |
 | `remove` | `<PUBKEY>` | Remove recipient |
 | `list` | — | List recipients |
+| `add-self` | — | Add own public key to recipients dir |
 
-### `gitvault rotate [OPTIONS]`
-Re-encrypt all `secrets/` files for current recipients. Uses decrypt-all-before-write strategy to avoid mixed-key state.
+### `gitvault rekey [OPTIONS]`
+Re-encrypt all `.gitvault/store/` files for current recipients. Uses decrypt-all-before-write strategy to avoid mixed-key state.
 
 | Option | Description |
 |--------|-------------|
@@ -232,13 +233,16 @@ Manage age identity in OS keyring.
 | `set` | `-i, --identity <FILE>` | Store identity |
 | `get` | — | Show public key of stored identity |
 | `delete` | — | Remove stored identity |
+| `set-passphrase` | — | Store SSH key passphrase in keyring |
+| `get-passphrase` | — | Retrieve SSH key passphrase from keyring |
+| `delete-passphrase` | — | Remove SSH key passphrase from keyring |
 
 ### `gitvault identity <SUBCOMMAND>`
 Manage local age identity keys.
 
 | Subcommand | Options | Description |
 |------------|---------|-------------|
-| `create` | `--profile classic\|hybrid`, `--out <PATH>` | Generate identity; stores in keyring unless `--out` is given |
+| `create` | `--profile classic\|hybrid`, `--output <PATH>` (alias `--out`) | Generate identity; stores in keyring unless `--output` is given |
 
 Profiles:
 - `classic`: age X25519 (default)
@@ -258,8 +262,8 @@ Embedded AI helper content.
 
 | Subcommand | Description |
 |------------|-------------|
-| `skill print` | Print embedded canonical skill doc |
-| `context print` | Print embedded agent onboarding context |
+| `skill` | Print embedded canonical skill doc |
+| `context` | Print embedded agent onboarding context |
 
 `--json` envelope format:
 ```json
@@ -282,7 +286,7 @@ AWS credentials can come from `--aws-profile` / `--aws-role-arn` or standard AWS
 
 ### Bootstrap
 ```bash
-gitvault identity create --out ~/.age/id.key
+gitvault identity create --output ~/.age/id.key
 gitvault harden
 gitvault recipient add age1abc...
 ```
@@ -305,8 +309,8 @@ gitvault run -- ./start-server
 ### Recipient change + rotation
 ```bash
 gitvault recipient add age1xyz...
-gitvault rotate -i ~/.age/id.key
-git add secrets/ .secrets/recipients && git commit -m "chore: rotate recipients"
+gitvault rekey -i ~/.age/id.key
+git add .gitvault/store/ .gitvault/recipients/ && git commit -m "chore: rotate recipients"
 ```
 
 ## Guardrails
@@ -317,5 +321,5 @@ git add secrets/ .secrets/recipients && git commit -m "chore: rotate recipients"
 
 ## Resources
 - Canonical command list: `gitvault --help`
-- AI onboarding context: `gitvault ai context print`
-- Embedded skill output: `gitvault ai skill print`
+- AI onboarding context: `gitvault ai context`
+- Embedded skill output: `gitvault ai skill`

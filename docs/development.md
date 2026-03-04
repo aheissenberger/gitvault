@@ -67,7 +67,7 @@ All source files maintain ≥95% line coverage (LCOV). Current coverage highligh
 | `cargo xtask wt-create <branch> <dir>` | Create a new worktree |
 | `cargo xtask wt-remove <dir>` | Remove a worktree |
 
-Release procedures are documented in the maintainer runbook: [releasing.md](releasing.md).
+Release procedures: [releasing.md](releasing.md). CLI reference: [reference.md](reference.md).
 
 ## Architecture: FHSM and testability
 
@@ -136,7 +136,9 @@ execute_effects_with(effects, &repo_root, &fake).unwrap();
 
 | Module | Purpose |
 |--------|---------|
-| `src/main.rs` | CLI dispatch (`run`), `cmd_*` command handlers, `EffectRunner` trait + `RealEffectRunner`, `execute_effects_with` |
+| `src/main.rs` | Binary entry point; parses CLI and calls `gitvault::dispatch::run` |
+| `src/dispatch.rs` | CLI dispatch; maps parsed `Cli` to command implementations |
+| `src/commands/` | Command handler modules (`encrypt`, `decrypt`, `run`, `materialize`, and more) |
 | `src/identity.rs` | Identity key loading: `load_identity*`, `extract_identity_key`, `resolve_recipient_keys` |
 | `src/merge.rs` | Env file parsing and three-way merge: `merge_env_content`, `parse_env_pairs`, `parse_env_key_from_line`, `rewrite_env_assignment_line` |
 | `src/fhsm.rs` | Pure finite state machine: `transition(&Event) -> Vec<Effect>` |
@@ -178,15 +180,15 @@ implementation files.
 |----------|-------|-----------|
 | `defaults::DEFAULT_ENV` | `dev` | `[env] default` |
 | `defaults::DEFAULT_PROD_ENV` | `prod` | `[env] prod_name` |
-| `defaults::ENV_FILE` | `.secrets/env` | `[env] env_file` |
+| `defaults::ENV_FILE` | `.git/gitvault/env` | `[env] env_file` |
 | `defaults::DEFAULT_BARRIER_TTL_SECS` | `3600` | `[barrier] ttl_secs` |
-| `defaults::RECIPIENTS_FILE` | `.secrets/recipients` | `[paths] recipients_file` |
+| `defaults::RECIPIENTS_DIR` | `.gitvault/recipients` | `[paths] recipients_dir` |
 | `defaults::MATERIALIZE_OUTPUT` | `.env` | `[paths] materialize_output` |
 | `defaults::KEYRING_SERVICE` | `gitvault` | `[keyring] service` |
 | `defaults::KEYRING_ACCOUNT` | `age-identity` | `[keyring] account` |
-| `defaults::BARRIER_TOKEN_FILE` | `.secrets/.prod-token` | *(not yet configurable)* |
-| `defaults::SECRETS_DIR` | `secrets` | *(not yet configurable)* |
-| `defaults::PLAIN_BASE_DIR` | `.secrets/plain` | *(not yet configurable)* |
+| `defaults::BARRIER_TOKEN_FILE` | `.git/gitvault/.prod-token` | *(not yet configurable)* |
+| `defaults::SECRETS_DIR` | `.gitvault/store` | *(not yet configurable)* |
+| `defaults::PLAIN_BASE_DIR` | `.git/gitvault/plain` | *(not yet configurable)* |
 
 ---
 
@@ -215,7 +217,3 @@ rustc --version   # stable channel version
 cargo --version
 ```
 
-## Quality Checks
-
- /fleet As a senior developer for rust and as a software architect i do a deep review of best practice rust coding and structuring. read all specs and compare with implementation. suggest improvement to code quality and architecture. list all not fullfilled
-  acceptance criterias based on specs. use worktrees to isolate multiple parallel ai coding agents. 

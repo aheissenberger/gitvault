@@ -98,6 +98,7 @@ After tag push or manual dispatch, verify this workflow:
 
 - No signing key secret is required (Cosign keyless uses GitHub OIDC).
 - Homebrew tap automation still requires `HOMEBREW_TAP_TOKEN`.
+- macOS codesigning (`MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY`): see [docs/macos-app-signing.md](macos-app-signing.md) for certificate setup instructions.
 
 ## Signature verification
 
@@ -152,3 +153,4 @@ Raw binaries are also available.
 - `release-check` fails on tag mismatch: create the correct `v<version>` tag for current `Cargo.toml`.
 - `release-check` fails on lightweight tag: recreate as annotated (`git tag -a ...`).
 - `release-check` fails on dirty tree: commit or discard local changes before tagging.
+- macOS certificate issues: see [docs/macos-app-signing.md](macos-app-signing.md) for how to create and export a Developer ID certificate.
