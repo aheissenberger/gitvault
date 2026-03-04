@@ -29,6 +29,22 @@ pub fn run_command(
     clear_env: bool,
     pass_vars: &[String],
 ) -> Result<i32, GitvaultError> {
+    // REQ-110: validate secret key names before env injection.
+    // A key containing '=' or '\0' can cause undefined behavior on some platforms
+    // (POSIX requires env key names to not contain these characters).
+    for (key, _) in secrets {
+        if key.contains('=') || key.contains('\0') {
+            return Err(GitvaultError::Usage(format!(
+                "invalid secret key name {key:?}: must not contain '=' or null bytes"
+            )));
+        }
+        if key.is_empty() {
+            return Err(GitvaultError::Usage(
+                "invalid secret key name: must not be empty".to_string(),
+            ));
+        }
+    }
+
     // REQ-105: Guard against PATH injection via injected secrets.
     // If a secret key is named "PATH" (or platform equivalent), the command
     // binary lookup would use the attacker-supplied PATH instead of the system PATH.
@@ -241,5 +257,44 @@ mod tests {
             128 + 15,
             "signal-killed process should return 128 + signal"
         );
+    }
+
+    // ── SEC-003: secret key name validation ──────────────────────────────────
+
+    #[test]
+    fn test_empty_key_name_returns_err() {
+        let secrets = vec![("".to_string(), "value".to_string())];
+        let result = run_command(&secrets, "true", &[], false, &[]);
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "empty key name should return Usage error"
+        );
+    }
+
+    #[test]
+    fn test_key_with_equals_returns_err() {
+        let secrets = vec![("KEY=EVIL".to_string(), "value".to_string())];
+        let result = run_command(&secrets, "true", &[], false, &[]);
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "key containing '=' should return Usage error"
+        );
+    }
+
+    #[test]
+    fn test_key_with_null_byte_returns_err() {
+        let secrets = vec![("KEY\0EVIL".to_string(), "value".to_string())];
+        let result = run_command(&secrets, "true", &[], false, &[]);
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "key containing null byte should return Usage error"
+        );
+    }
+
+    #[test]
+    fn test_valid_key_name_passes_through() {
+        let secrets = vec![("VALID_KEY_123".to_string(), "value".to_string())];
+        let result = run_command(&secrets, "true", &[], false, &[]);
+        assert!(result.is_ok(), "valid key name should not return an error");
     }
 }

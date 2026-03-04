@@ -65,10 +65,10 @@ pub fn write_recipients(
     key: &str,
 ) -> Result<(), GitvaultError> {
     let dir_path = repo_root.join(recipients_dir);
-    std::fs::create_dir_all(&dir_path)?;
+    crate::fs_util::ensure_dir(&dir_path)?;
     let file_path = dir_path.join(format!("{name}.pub"));
     let content = format!("{key}\n");
-    std::fs::write(&file_path, content)?;
+    crate::fs_util::atomic_write(&file_path, content.as_bytes())?;
     Ok(())
 }
 

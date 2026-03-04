@@ -19,7 +19,7 @@ pub fn resolve_env(worktree_root: &Path, cfg: &EnvConfig) -> String {
     // Priority 1: GITVAULT_ENV env var
     if let Ok(env) = std::env::var("GITVAULT_ENV") {
         let env = env.trim().to_string();
-        if !env.is_empty() {
+        if !env.is_empty() && env.len() <= crate::defaults::MAX_ENV_NAME_BYTES {
             return env;
         }
     }
@@ -28,9 +28,11 @@ pub fn resolve_env(worktree_root: &Path, cfg: &EnvConfig) -> String {
     let env_file = worktree_root.join(crate::defaults::ENV_FILE);
     if let Ok(content) = fs::read_to_string(&env_file) {
         let env = content.trim().to_string();
-        if !env.is_empty() {
+        // REQ-111: reject suspiciously long env names (>255 bytes) to avoid memory abuse.
+        if !env.is_empty() && env.len() <= crate::defaults::MAX_ENV_NAME_BYTES {
             return env;
         }
+        // Too long or empty — fall through to default
     }
 
     // Priority 3: configured default (or built-in "dev")
@@ -198,5 +200,43 @@ mod tests {
         assert!(validate_env_name("my env").is_err());
         assert!(validate_env_name("prod;rm -rf /").is_err());
         assert!(validate_env_name("prod\n").is_err());
+    }
+
+    // ── SEC-007: size limit on env name sources ───────────────────────────────
+
+    #[test]
+    fn test_env_var_longer_than_255_bytes_falls_through_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        unsafe {
+            std::env::remove_var("GITVAULT_ENV");
+        }
+        let long_env = "a".repeat(256);
+        unsafe {
+            std::env::set_var("GITVAULT_ENV", &long_env);
+        }
+        let env = resolve_env(dir.path(), &Default::default());
+        unsafe {
+            std::env::remove_var("GITVAULT_ENV");
+        }
+        assert_eq!(env, "dev", "oversized env var should fall through to default");
+    }
+
+    #[test]
+    fn test_env_file_longer_than_255_bytes_falls_through_to_default() {
+        let _guard = env_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        unsafe {
+            std::env::remove_var("GITVAULT_ENV");
+        }
+        fs::create_dir_all(dir.path().join(".git/gitvault")).unwrap();
+        let long_env = "b".repeat(256);
+        fs::write(dir.path().join(".git/gitvault").join("env"), &long_env).unwrap();
+
+        let env = resolve_env(dir.path(), &Default::default());
+        assert_eq!(
+            env, "dev",
+            "oversized env file content should fall through to default"
+        );
     }
 }
