@@ -195,7 +195,7 @@ pub enum Commands {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
-    /// Write a timed production allow token
+    /// Write a timed production allow token to .git/gitvault/.prod-token
     AllowProd {
         /// Token lifetime in seconds [default: 3600; override with barrier.ttl_secs config key]
         #[arg(long)]
@@ -282,7 +282,7 @@ pub enum RecipientAction {
     },
     /// List current recipients
     List,
-    /// Add own public key to the recipients directory (equivalent to `identity create --add-recipient`)
+    /// Add own public key to the recipients directory
     AddSelf,
 }
 
@@ -298,10 +298,8 @@ pub enum KeyringAction {
     Get,
     /// Remove stored identity from OS keyring
     Delete,
-    /// Store the SSH identity file passphrase in the OS keyring.
-    ///
-    /// Once stored, gitvault automatically retrieves the passphrase when loading
-    /// a passphrase-encrypted SSH identity file, enabling non-interactive operation.
+    /// Store the SSH identity file passphrase in the OS keyring; once stored,
+    /// gitvault retrieves it automatically when loading an encrypted SSH identity.
     SetPassphrase {
         /// Passphrase value; if omitted, reads from `GITVAULT_IDENTITY_PASSPHRASE`
         #[arg(value_name = "PASSPHRASE")]
@@ -317,7 +315,7 @@ pub enum KeyringAction {
 pub enum IdentityAction {
     /// Create a new identity key
     Create {
-        /// Identity profile: classic (age X25519) or hybrid (age X25519 + future PQ-ready label)
+        /// Identity profile: classic (age X25519) or hybrid (age X25519 key with a post-quantum-ready annotation, for future migration)
         #[arg(long, value_enum, default_value = "classic")]
         profile: IdentityProfile,
         /// Export identity to file (optional; default: store in OS keyring)
