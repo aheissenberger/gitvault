@@ -39,6 +39,18 @@ pub struct DecryptOptions {
 /// Returns [`GitvaultError`] if the identity cannot be loaded, the input file cannot
 /// be read, decryption fails, or the output path is outside the repository root.
 pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError> {
+    // Treat `-o -` (output path literally "-") as --reveal for POSIX stdout convention.
+    let reveal = opts.reveal || opts.output.as_deref() == Some("-");
+    let output = if opts.output.as_deref() == Some("-") {
+        None
+    } else {
+        opts.output.clone()
+    };
+    let opts = DecryptOptions {
+        reveal,
+        output,
+        ..opts
+    };
     // Use FHSM to resolve the identity source; file I/O remains here.
     let event = fhsm::Event::Decrypt {
         file: opts.file.clone(),

@@ -33,29 +33,49 @@ CONFIG FILES (override built-in defaults):
 )]
 pub struct Cli {
     /// Output results as JSON
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = "Global Options")]
     pub json: bool,
 
     /// Disable interactive prompts
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = "Global Options")]
     pub no_prompt: bool,
 
-    /// Explicit identity selector for SSH-agent key disambiguation
-    #[arg(long, global = true, env = "GITVAULT_IDENTITY_SELECTOR")]
+    /// Select which SSH-agent key to use, by fingerprint or comment (when multiple keys are loaded)
+    #[arg(
+        long,
+        global = true,
+        env = "GITVAULT_IDENTITY_SELECTOR",
+        help_heading = "Global Options"
+    )]
     pub identity_selector: Option<String>,
 
     /// Read identity key from stdin instead of a file path (pipe-friendly)
-    #[arg(long, global = true, conflicts_with = "identity_selector")]
+    #[arg(
+        long,
+        global = true,
+        conflicts_with = "identity_selector",
+        help_heading = "Global Options"
+    )]
     pub identity_stdin: bool,
 
     /// AWS profile name for SSM backend
     #[cfg(feature = "ssm")]
-    #[arg(long, global = true, env = "AWS_PROFILE")]
+    #[arg(
+        long,
+        global = true,
+        env = "AWS_PROFILE",
+        help_heading = "Global Options"
+    )]
     pub aws_profile: Option<String>,
 
     /// AWS role ARN to assume for SSM backend
     #[cfg(feature = "ssm")]
-    #[arg(long, global = true, env = "AWS_ROLE_ARN")]
+    #[arg(
+        long,
+        global = true,
+        env = "AWS_ROLE_ARN",
+        help_heading = "Global Options"
+    )]
     pub aws_role_arn: Option<String>,
 
     #[command(subcommand)]
@@ -102,10 +122,10 @@ pub enum Commands {
         /// Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML)
         #[arg(long, value_name = "FIELDS")]
         fields: Option<String>,
-        /// Print decrypted content to stdout instead of writing to file
+        /// Print decrypted content to stdout instead of writing to file (shorthand for `-o -`)
         #[arg(long)]
         reveal: bool,
-        /// Decrypt .env values individually (reverse of --value-only encrypt)
+        /// Decrypt .env values individually (reverse of `encrypt --value-only`)
         #[arg(long)]
         value_only: bool,
     },
@@ -132,7 +152,7 @@ pub enum Commands {
         /// Target environment to activate (writes to .secrets/env)
         #[arg(short, long)]
         env: Option<String>,
-        /// Path to export identity file (forwarded to identity create)
+        /// Export the newly created identity key to this file (instead of storing in OS keyring)
         #[arg(long, alias = "out", value_name = "PATH")]
         output: Option<String>,
     },
@@ -181,6 +201,8 @@ pub enum Commands {
         #[arg(long)]
         ttl: Option<u64>,
     },
+    /// Revoke the production allow token immediately
+    RevokeProd,
     /// Run as git merge driver for .env files
     #[command(hide = true)]
     MergeDriver {
@@ -222,11 +244,9 @@ pub enum Commands {
         #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
         /// Skip the committed-history plaintext leak scan
-        #[arg(long)]
+        #[arg(short = 'H', long)]
         skip_history_check: bool,
     },
-    /// Revoke the production allow token immediately.
-    RevokeProd,
 
     /// Manage local identity keys
     Identity {
@@ -234,7 +254,7 @@ pub enum Commands {
         action: IdentityAction,
     },
 
-    /// AI tooling helpers (skill and context print)
+    /// AI tooling: print skill or context files for Copilot/agent integration
     Ai {
         #[command(subcommand)]
         action: AiAction,
@@ -262,7 +282,7 @@ pub enum RecipientAction {
     },
     /// List current recipients
     List,
-    /// Add own public key to the recipients directory
+    /// Add own public key to the recipients directory (equivalent to `identity create --add-recipient`)
     AddSelf,
 }
 
@@ -287,7 +307,7 @@ pub enum KeyringAction {
         #[arg(value_name = "PASSPHRASE")]
         passphrase: Option<String>,
     },
-    /// Show whether an SSH identity passphrase is stored in the OS keyring
+    /// Show whether an SSH identity passphrase is stored in the OS keyring (does not print the passphrase value)
     GetPassphrase,
     /// Remove the stored SSH identity passphrase from the OS keyring
     DeletePassphrase,
@@ -303,7 +323,7 @@ pub enum IdentityAction {
         /// Export identity to file (optional; default: store in OS keyring)
         #[arg(long, alias = "out", value_name = "PATH")]
         output: Option<String>,
-        /// After creating identity, add own public key to .secrets/recipients/
+        /// After creating identity, add own public key to .secrets/recipients/ (equivalent to running `recipient add-self` afterwards)
         #[arg(long)]
         add_recipient: bool,
     },
