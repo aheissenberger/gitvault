@@ -6,6 +6,44 @@ use crate::error::GitvaultError;
 use crate::identity::{load_identity_with_selector, resolve_recipient_keys};
 use crate::{crypto, repo};
 
+/// Sanitise a git username into a filesystem-safe recipient name (REQ-72 AC14).
+///
+/// Rules:
+/// 1. Lowercase the name.
+/// 2. Replace every character outside `[a-z0-9_-]` with `-`.
+/// 3. Collapse consecutive dashes into one.
+/// 4. Truncate to 64 characters.
+/// 5. If the result is empty, fall back to `"self"`.
+fn sanitise_name(name: &str) -> String {
+    let lower = name.to_lowercase();
+    // Replace non-allowed characters with `-`
+    let replaced: String = lower
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .collect();
+    // Collapse consecutive dashes
+    let mut collapsed = String::with_capacity(replaced.len());
+    let mut prev_dash = false;
+    for c in replaced.chars() {
+        if c == '-' {
+            if !prev_dash {
+                collapsed.push(c);
+            }
+            prev_dash = true;
+        } else {
+            collapsed.push(c);
+            prev_dash = false;
+        }
+    }
+    // Truncate to 64 chars (char boundary safe for ASCII)
+    let truncated: String = collapsed.chars().take(64).collect();
+    if truncated.is_empty() {
+        "self".to_string()
+    } else {
+        truncated
+    }
+}
+
 /// Derive a recipient name from the git `user.name` config, falling back to
 /// a short prefix of the public key.
 fn derive_recipient_name(pubkey: &str) -> String {
@@ -24,23 +62,93 @@ fn derive_recipient_name(pubkey: &str) -> String {
         .filter(|s| !s.is_empty());
 
     if let Some(name) = git_name {
-        // Sanitize: keep alphanumeric, hyphen, underscore; replace others with '_'
-        name.chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-            .collect()
+        sanitise_name(&name)
     } else {
         // Fall back: use the first 12 chars of the pubkey (after "age1")
         pubkey.get(4..16).unwrap_or("default").to_string()
     }
 }
 
-/// Manage persistent recipients (REQ-37, REQ-72 AC15)
+/// Add own public key to the recipients directory (REQ-72 AC14).
+///
+/// Idempotent: if the own key is already present in any `.pub` file the
+/// function prints a notice and returns `CommandOutcome::Success`.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] (exit code 2) when no identity can be resolved.
+pub fn cmd_recipient_add_self(
+    identity_selector: Option<String>,
+    json: bool,
+) -> Result<CommandOutcome, GitvaultError> {
+    // 1. Resolve identity — exit code 2 if none found.
+    let key =
+        crate::identity::load_identity_with_selector(None, identity_selector.as_deref())
+            .map_err(|_| {
+                GitvaultError::Usage(
+                    "No identity resolved. Use GITVAULT_IDENTITY, --identity-selector, \
+                     or store an identity in the OS keyring."
+                        .to_string(),
+                )
+            })?;
+
+    // 2. Derive public key.
+    let identity = crypto::parse_identity(&key)?;
+    let pubkey = identity.to_public().to_string();
+
+    // 3. Locate repo root and load config.
+    let repo_root = crate::repo::find_repo_root()?;
+    let cfg = crate::config::effective_config(&repo_root)?;
+    let recipients_dir = cfg.paths.recipients_dir();
+
+    // 4. Check for idempotency — already registered?
+    let existing = repo::read_recipients(&repo_root, recipients_dir)?;
+    if existing.contains(&pubkey) {
+        crate::output::output_success("Already registered as a recipient", json);
+        return Ok(CommandOutcome::Success);
+    }
+
+    // 5. Derive filename from git user.name.
+    let git_name = std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let name = git_name.as_deref().map_or_else(|| "self".to_string(), sanitise_name);
+
+    // 6. Write .pub file.
+    repo::write_recipients(&repo_root, recipients_dir, &name, &pubkey)?;
+
+    // 7. Print success and reminder.
+    crate::output::output_success(&format!("Added self as recipient: {name}.pub"), json);
+    if !json {
+        println!(
+            "  Hint: git add .secrets/recipients/{name}.pub && git commit"
+        );
+    }
+
+    Ok(CommandOutcome::Success)
+}
+
+
 ///
 /// # Errors
 ///
 /// Returns [`GitvaultError`] if the repository root cannot be found, the recipient
 /// key is invalid, or reading/writing the recipients directory fails.
-pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
+pub fn cmd_recipient(
+    action: RecipientAction,
+    identity_selector: Option<String>,
+    json: bool,
+) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let cfg = crate::config::effective_config(&repo_root)?;
     let recipients_dir = cfg.paths.recipients_dir();
@@ -78,6 +186,9 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
                     println!("{name}: {key}");
                 }
             }
+        }
+        RecipientAction::AddSelf => {
+            return cmd_recipient_add_self(identity_selector, json);
         }
     }
     Ok(CommandOutcome::Success)
@@ -265,13 +376,14 @@ mod tests {
             RecipientAction::Add {
                 pubkey: pubkey.clone(),
             },
+            None,
             true,
         )
         .expect("add recipient should succeed");
 
-        cmd_recipient(RecipientAction::List, false).expect("list recipient should succeed");
+        cmd_recipient(RecipientAction::List, None, false).expect("list recipient should succeed");
 
-        cmd_recipient(RecipientAction::Remove { pubkey }, false)
+        cmd_recipient(RecipientAction::Remove { pubkey }, None, false)
             .expect("remove recipient should succeed");
 
         let recipients = repo::read_recipients(dir.path(), crate::defaults::RECIPIENTS_DIR)
@@ -291,11 +403,12 @@ mod tests {
             RecipientAction::Add {
                 pubkey: pubkey.clone(),
             },
+            None,
             true,
         )
         .unwrap();
 
-        let err = cmd_recipient(RecipientAction::Add { pubkey }, true).unwrap_err();
+        let err = cmd_recipient(RecipientAction::Add { pubkey }, None, true).unwrap_err();
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
@@ -307,7 +420,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         let missing = x25519::Identity::generate().to_public().to_string();
-        let err = cmd_recipient(RecipientAction::Remove { pubkey: missing }, true).unwrap_err();
+        let err = cmd_recipient(RecipientAction::Remove { pubkey: missing }, None, true).unwrap_err();
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
@@ -319,10 +432,10 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         let pubkey = x25519::Identity::generate().to_public().to_string();
-        cmd_recipient(RecipientAction::Add { pubkey }, false).expect("add should succeed");
+        cmd_recipient(RecipientAction::Add { pubkey }, None, false).expect("add should succeed");
 
         // json=true covers the JSON recipients output branch (line 881).
-        cmd_recipient(RecipientAction::List, true).expect("list json should succeed");
+        cmd_recipient(RecipientAction::List, None, true).expect("list json should succeed");
     }
 
     #[test]
@@ -333,7 +446,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         // No recipients added → empty list message (lines 883-884).
-        cmd_recipient(RecipientAction::List, false).expect("list empty plain should succeed");
+        cmd_recipient(RecipientAction::List, None, false).expect("list empty plain should succeed");
     }
 
     #[test]
@@ -363,5 +476,101 @@ mod tests {
                 "expected Encryption error, got: {err:?}"
             );
         });
+    }
+
+    // ── add-self tests (REQ-72 AC14) ─────────────────────────────────────────
+
+    #[test]
+    fn test_add_self_writes_pub_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let expected_pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_recipient_add_self(None, false)
+                .expect("add-self should succeed");
+        });
+
+        // Verify at least one .pub file exists and contains the pubkey
+        let recipients_dir = dir.path().join(".secrets/recipients");
+        let entries: Vec<_> = std::fs::read_dir(&recipients_dir)
+            .expect("recipients dir should exist")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("pub"))
+            .collect();
+        assert!(!entries.is_empty(), "at least one .pub file should exist");
+
+        let found = entries.iter().any(|e| {
+            std::fs::read_to_string(e.path())
+                .map(|c| c.trim() == expected_pubkey)
+                .unwrap_or(false)
+        });
+        assert!(found, "own pubkey should be in a .pub file");
+    }
+
+    #[test]
+    fn test_add_self_idempotent() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_recipient_add_self(None, false)
+                .expect("first add-self should succeed");
+            // Second call should also succeed (idempotent)
+            cmd_recipient_add_self(None, false)
+                .expect("second add-self should succeed (idempotent)");
+        });
+
+        // Only one .pub file should exist (not two)
+        let recipients_dir = dir.path().join(".secrets/recipients");
+        let pub_count = std::fs::read_dir(&recipients_dir)
+            .expect("recipients dir should exist")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("pub"))
+            .count();
+        assert_eq!(pub_count, 1, "idempotent: only one .pub file should exist");
+    }
+
+    #[test]
+    fn test_add_self_sanitises_name() {
+        // Test the sanitise_name function directly
+        assert_eq!(sanitise_name("Alice Smith"), "alice-smith");
+        assert_eq!(sanitise_name("João da Silva"), "jo-o-da-silva");
+        assert_eq!(sanitise_name("user@example.com"), "user-example-com");
+        assert_eq!(sanitise_name("hello---world"), "hello-world");
+        assert_eq!(sanitise_name(""), "self");
+        assert_eq!(sanitise_name("   "), "-");
+        // Truncation to 64 chars
+        let long_name = "a".repeat(80);
+        assert_eq!(sanitise_name(&long_name).len(), 64);
+        // Allowed chars pass through
+        assert_eq!(sanitise_name("alice_bob-123"), "alice_bob-123");
+    }
+
+    #[test]
+    fn test_add_self_no_identity_returns_usage_error() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Install mock keyring (no entries) so keyring lookup fails gracefully
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+
+        let err = with_env_var("GITVAULT_IDENTITY", None, || {
+            cmd_recipient_add_self(None, false)
+        })
+        .expect_err("add-self without identity should fail");
+
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error, got: {err:?}"
+        );
     }
 }

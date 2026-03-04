@@ -222,6 +222,8 @@ pub enum RecipientAction {
     },
     /// List current recipients
     List,
+    /// Add own public key to the recipients directory
+    AddSelf,
 }
 
 #[derive(Subcommand)]

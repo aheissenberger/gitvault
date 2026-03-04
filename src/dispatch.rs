@@ -98,7 +98,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             crate::commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
         }
         Commands::Recipient { action } => {
-            crate::commands::recipients::cmd_recipient(action, cli.json)
+            crate::commands::recipients::cmd_recipient(action, cli.identity_selector.clone(), cli.json)
         }
         Commands::Rekey { identity } => crate::commands::recipients::cmd_rekey(
             identity,
