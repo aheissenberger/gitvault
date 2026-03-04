@@ -743,4 +743,87 @@ mod tests {
         let err = run(cli).expect_err("ssm push in prod without --prod must fail closed");
         assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
     }
+
+    /// Covers `Commands::AllowProd { ttl: None }` dispatch (lines 111-115):
+    /// the else branch that resolves TTL from config / built-in default.
+    #[test]
+    fn test_run_dispatch_allow_prod_ttl_none_uses_default() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // ttl = None exercises the else branch (config / built-in default).
+        let cli = make_cli(true, true, Commands::AllowProd { ttl: None });
+        let outcome = run(cli).expect("allow-prod with ttl=None should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+        assert!(dir.path().join(".git/gitvault/.prod-token").exists());
+    }
+
+    /// Covers `Commands::Ai { action }` dispatch (line 157).
+    #[test]
+    fn test_run_dispatch_ai_skill_arm() {
+        // cmd_ai does not touch the filesystem; no git repo needed.
+        let cli = make_cli(
+            false,
+            true,
+            Commands::Ai {
+                action: crate::cli::AiAction::Skill,
+            },
+        );
+        let outcome = run(cli).expect("ai skill dispatch should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    /// Covers `Commands::Ai { action: Context }` dispatch.
+    #[test]
+    fn test_run_dispatch_ai_context_arm() {
+        let cli = make_cli(
+            false,
+            true,
+            Commands::Ai {
+                action: crate::cli::AiAction::Context,
+            },
+        );
+        let outcome = run(cli).expect("ai context dispatch should succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
+
+    /// Covers `Commands::Init { env, output }` dispatch (lines 158-159).
+    #[test]
+    fn test_run_dispatch_init_arm() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        // Configure git user so recipients filename derivation works.
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config user.name should succeed");
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config user.email should succeed");
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            let cli = make_cli(
+                true,
+                true,
+                Commands::Init {
+                    env: None,
+                    output: None,
+                },
+            );
+            let outcome = run(cli).expect("init dispatch should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
 }

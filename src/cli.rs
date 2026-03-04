@@ -382,6 +382,16 @@ mod tests {
             _ => panic!("expected encrypt command"),
         }
     }
+
+    #[test]
+    fn test_identity_profile_display_classic() {
+        assert_eq!(IdentityProfile::Classic.to_string(), "classic");
+    }
+
+    #[test]
+    fn test_identity_profile_display_hybrid() {
+        assert_eq!(IdentityProfile::Hybrid.to_string(), "hybrid");
+    }
 }
 
 /// AI subcommand: choose between skill and context printing.

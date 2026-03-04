@@ -678,4 +678,33 @@ mod tests {
         let content = std::fs::read_to_string(&out_file).unwrap();
         assert_eq!(content, "SECRET=abc\n");
     }
+
+    /// Covers line 45: `output = Some("-")` branch — treated as `--reveal` (stdout).
+    #[test]
+    fn test_cmd_decrypt_output_dash_is_stdout() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // Write an encrypted file.
+        write_encrypted_env_file(dir.path(), "dev", "dash.env.age", &identity, "DASH=1\n");
+        let encrypted_path = crate::repo::get_env_encrypted_path(dir.path(), "dev", "dash.env.age");
+
+        // Passing output="-" should be treated as reveal=true (POSIX -o - convention).
+        let outcome = cmd_decrypt(DecryptOptions {
+            file: encrypted_path.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            output: Some("-".to_string()),
+            fields: None,
+            reveal: false,
+            value_only: false,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect("output='-' should be treated as reveal and succeed");
+        assert_eq!(outcome, CommandOutcome::Success);
+    }
 }

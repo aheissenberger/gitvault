@@ -801,4 +801,177 @@ mod tests {
             assert_eq!(outcome, CommandOutcome::Success);
         });
     }
+
+    /// Covers line 71: `derive_recipient_name` returns the sanitised git user.name
+    /// when git is configured (the `if let Some(name)` branch).
+    #[test]
+    fn test_cmd_recipient_add_with_git_username_derives_name() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        // Configure git user so derive_recipient_name uses the name branch.
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Alice Test"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config user.name should succeed");
+        std::process::Command::new("git")
+            .args(["config", "user.email", "alice@example.com"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config user.email should succeed");
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let pubkey = x25519::Identity::generate().to_public().to_string();
+        cmd_recipient(
+            RecipientAction::Add {
+                pubkey: pubkey.clone(),
+            },
+            None,
+            false,
+        )
+        .expect("add recipient with git username should succeed");
+
+        // Verify a .pub file with the sanitised name exists.
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        let alice_pub = recipients_dir.join("alice-test.pub");
+        assert!(
+            alice_pub.exists(),
+            "alice-test.pub should be created from git user.name"
+        );
+        let content = std::fs::read_to_string(&alice_pub).unwrap();
+        assert_eq!(content.trim(), pubkey);
+    }
+
+    /// Covers line 183: `RecipientAction::AddSelf` arm in `cmd_recipient`.
+    #[test]
+    fn test_cmd_recipient_add_self_via_cmd_recipient() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Self User"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config user.name should succeed");
+        std::process::Command::new("git")
+            .args(["config", "user.email", "self@example.com"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git config user.email should succeed");
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+        let expected_pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            // AddSelf via cmd_recipient exercises line 183.
+            let outcome = cmd_recipient(RecipientAction::AddSelf, None, false)
+                .expect("add-self via cmd_recipient should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        let found = std::fs::read_dir(&recipients_dir)
+            .expect("recipients dir should exist")
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.path().extension().and_then(|x| x.to_str()) == Some("pub")
+                    && std::fs::read_to_string(e.path())
+                        .map(|c| c.trim() == expected_pubkey)
+                        .unwrap_or(false)
+            });
+        assert!(found, "own pubkey should be registered via AddSelf");
+    }
+
+    /// Covers lines 284–311: `cmd_rekey --dry-run --json` output path.
+    #[test]
+    fn test_rekey_dry_run_json_output() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        write_encrypted_env_file(dir.path(), "dev", "dry.env.age", &identity, "X=1\n");
+
+        with_identity_env(identity_file.path(), || {
+            // dry_run=true, json=true → exercises the json dry-run output section.
+            let outcome =
+                cmd_rekey(None, None, true, None, true).expect("dry-run json rekey should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
+
+    /// Covers lines 321–326: dry-run non-JSON output for Skipped files.
+    /// A file encrypted with a different identity produces `FileOutcome::Skipped`.
+    #[test]
+    fn test_rekey_dry_run_plain_with_skipped_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _identity) = setup_identity_file();
+
+        // Encrypt with a DIFFERENT identity so our key gets Skipped.
+        let other_identity = x25519::Identity::generate();
+        write_encrypted_env_file(dir.path(), "dev", "other.env.age", &other_identity, "Y=2\n");
+
+        with_identity_env(identity_file.path(), || {
+            // dry_run=true, json=false, file is skipped → exercises lines 321–326.
+            let outcome = cmd_rekey(None, None, false, None, true)
+                .expect("dry-run plain with skipped file should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
+
+    /// Covers lines 367–375: JSON rekey output with `Skipped` outcomes.
+    /// The test has one rekeyed file and one skipped file; json=true exercises
+    /// both the `Rekeyed` and `Skipped` branches in the JSON output map.
+    #[test]
+    fn test_rekey_json_output_with_mixed_outcomes() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        // One file we can decrypt (Rekeyed) and one we cannot (Skipped).
+        write_encrypted_env_file(dir.path(), "dev", "mine.env.age", &identity, "MINE=1\n");
+        let other_identity = x25519::Identity::generate();
+        write_encrypted_env_file(
+            dir.path(),
+            "staging",
+            "other.env.age",
+            &other_identity,
+            "OTHER=2\n",
+        );
+
+        with_identity_env(identity_file.path(), || {
+            // json=true, dry_run=false → exercises the JSON output section (lines 359–391)
+            // with both Rekeyed and Skipped FileOutcome variants.
+            let outcome = cmd_rekey(None, None, true, None, false)
+                .expect("json rekey with mixed outcomes should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
+
+    /// Covers line 348: `NamedTempFile::new_in(path.parent()...)?` in Phase 2 of rekey.
+    /// Performs a successful non-dry-run rekey with json=true so the json summary
+    /// path (line 359) is also exercised for the Rekeyed-only case.
+    #[test]
+    fn test_rekey_json_output_rekeyed_only() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        write_encrypted_env_file(dir.path(), "dev", "json_rekey.env.age", &identity, "R=1\n");
+
+        with_identity_env(identity_file.path(), || {
+            let outcome = cmd_rekey(None, None, true, Some("dev".to_string()), false)
+                .expect("json rekey single file should succeed");
+            assert_eq!(outcome, CommandOutcome::Success);
+        });
+    }
 }
