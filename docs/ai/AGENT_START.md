@@ -51,3 +51,15 @@ See `docs/ai/hotspots.md` for the curated list of critical and architectural iss
 - Relevant tests/checks executed and reported
 - Any follow-up risks documented
 - **`docs/ai/skill.md` updated** if any CLI commands, options, flags, env vars, or exit codes were added or changed (this file is embedded in the binary and is the canonical AI reference for the tool)
+- Before updating `README.md`, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json`
+
+## Documentation Structure
+
+| File | Purpose |
+|------|---------|
+| `README.md` | User-facing reference (CLI, configuration, exit codes, identity resolution) |
+| `docs/identity-setup.md` | Identity setup guide (OS keyring, age files, SSH keys, SSH agent, FD-based) |
+| `docs/cicd-recipes.md` | CI/CD best practices (GitHub Actions, Docker, Kubernetes recipes) |
+| `docs/secret-formats.md` | Secret formats cookbook (.env, JSON, YAML, TOML) |
+| `docs/ai/skill.md` | AI skill reference (embedded in binary; canonical AI reference for the tool) |
+| `docs/ai/hotspots.md` | Architecture hotspots and curated risk areas (read before touching core modules) |

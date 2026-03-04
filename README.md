@@ -100,7 +100,8 @@ GITVAULT_IDENTITY="$SECRET_KEY" gitvault run --no-prompt -- node server.js
 ```
 gitvault [OPTIONS] <COMMAND>
 
-Global options:  --json  --no-prompt  --identity-stdin  --identity-selector  --aws-profile  --aws-role-arn
+Global options:  --json  --no-prompt  --identity-stdin  --identity-selector
+                 (--aws-profile  --aws-role-arn  only with --features ssm)
 
 Commands:
   init          Onboard a new team member (identity, recipient, repo hardening)
@@ -109,16 +110,15 @@ Commands:
   decrypt       Decrypt a .age file (--output, --fields, --value-only, --reveal)
   materialize   Materialize secrets to root .env
   status        Check repository safety status
-  run           Inject secrets into child process env (--clear-env, --pass)
+  run           Inject secrets into child process env (--clear-env, --keep-vars)
   allow-prod    Write a timed production allow token
   revoke-prod   Revoke the production allow token immediately
-  merge-driver  Git merge driver for .env files (register via `gitvault harden`)
   recipient     Manage recipients: add | remove | list | add-self
   rekey         Re-encrypt all secrets for current recipients (--dry-run, --env, --json)
   keyring       Manage identity key in OS keyring: set | get | delete | set-passphrase | get-passphrase | delete-passphrase
   identity      Manage identities: create [--add-recipient] | pubkey
-  check         Preflight validation without side effects
-  ai            Print embedded skill/context for AI agents (--json for MCP envelope)
+  check         Preflight validation without side effects (-H / --skip-history-check)
+  ai            Print embedded skill or context file for AI agents: ai skill | ai context
   ssm           AWS SSM Parameter Store sync (--features ssm)
 ```
 
@@ -133,9 +133,9 @@ Commands:
 | Encrypt `.env` per-value | `gitvault encrypt .env --value-only` |
 | Decrypt to stdout | `gitvault decrypt <file.age> --reveal` |
 | Materialize root `.env` | `gitvault materialize` |
-| Run command with injected secrets | `gitvault run -- <cmd> [args...]` |
+| Run command with injected secrets | `gitvault run --keep-vars <VARS> -- <cmd> [args...]` |
 | Safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |
-| Validate setup (no side effects) | `gitvault check [--env <env>]` |
+| Validate setup (no side effects) | `gitvault check [-H] [--env <env>]` |
 | Enable prod operation window | `gitvault allow-prod [--ttl <secs>]` |
 | Revoke prod window | `gitvault revoke-prod` |
 | Manage recipients | `gitvault recipient add\|remove\|list\|add-self` |
@@ -144,6 +144,8 @@ Commands:
 | Print own public key | `gitvault identity pubkey` |
 | OS keyring | `gitvault keyring set\|get\|delete` |
 | SSH identity passphrase (keyring) | `gitvault keyring set-passphrase\|get-passphrase\|delete-passphrase` |
+| AI skill / context for agents | `gitvault ai skill` / `gitvault ai context` |
+| Decrypt to stdout (POSIX) | `gitvault decrypt <file.age> -o -` |
 
 ---
 
@@ -298,12 +300,20 @@ Hook manager adapters require the corresponding binary on `PATH` (`gitvault-husk
 
 ---
 
-## Contributor and maintainer docs
+## Documentation
 
+- Getting started: this README
+- Identity setup guide: [docs/identity-setup.md](docs/identity-setup.md)
+- CI/CD recipes: [docs/cicd-recipes.md](docs/cicd-recipes.md)
+- Secret formats cookbook: [docs/secret-formats.md](docs/secret-formats.md)
 - Development workflows: [docs/development.md](docs/development.md)
-- AI agent onboarding and architecture hotspots: [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md), [docs/ai/hotspots.md](docs/ai/hotspots.md)
-- Regenerate AI code index: `cargo xtask ai-index` → `docs/ai/code-index.json`
+- AI agent onboarding: [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md)
 - Release runbook: [docs/releasing.md](docs/releasing.md)
+
+Additional developer references:
+- Architecture hotspots: [docs/ai/hotspots.md](docs/ai/hotspots.md)
+- AI skill reference (embedded in binary): [docs/ai/skill.md](docs/ai/skill.md)
+- Regenerate AI code index: `cargo xtask ai-index` → `docs/ai/code-index.json`
 
 ---
 

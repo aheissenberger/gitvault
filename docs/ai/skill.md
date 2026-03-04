@@ -15,10 +15,10 @@ exit codes make it CI/CD safe.
 | `--no-prompt` | `CI=true` | Fail instead of prompting; auto-enabled when `CI=true` |
 | `--identity-stdin` | — | Read identity key from stdin (pipe-friendly; requires non-TTY stdin) |
 | `--identity-selector <SEL>` | `GITVAULT_IDENTITY_SELECTOR` | SSH-agent key disambiguation hint |
-| `--aws-profile <PROFILE>` | `AWS_PROFILE` | AWS profile for SSM backend |
-| `--aws-role-arn <ARN>` | `AWS_ROLE_ARN` | AWS role ARN to assume for SSM backend |
 | `-h, --help` | — | Print help |
 | `-V, --version` | — | Print version |
+
+> **Note:** The SSM backend (compiled with `--features ssm`) adds `--aws-profile` and `--aws-role-arn` global flags.
 
 ---
 
@@ -104,7 +104,7 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 | `3` | Plaintext secret detected in tracked files or committed history |
 | `4` | Decryption error (wrong key or corrupt file) |
 | `5` | Production barrier not satisfied |
-| `6` | Secrets drift (uncommitted changes in `secrets/`) |
+| `6` | Secrets drift (uncommitted changes in `.gitvault/store/`) |
 
 ---
 
@@ -149,6 +149,10 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 
 Interactive onboarding for a new team member. Runs through identity creation, recipient
 registration, and repository hardening in a single guided flow.
+
+| Option | Description |
+|--------|-------------|
+| `--output <PATH>` | Write the new age identity key to a file instead of the OS keyring (alias: `--out`) |
 
 Steps performed:
 1. Creates an age identity (stored in OS keyring by default)
@@ -203,9 +207,9 @@ Decrypt a `.age` encrypted file.
 | Option | Description |
 |--------|-------------|
 | `-i, --identity <FILE>` | Identity key file path (or use `GITVAULT_IDENTITY`) |
-| `-o, --output [<PATH>]` | Output path (default: strip `.age`); bare `--output` preserves original path |
+| `-o, --output [<PATH>]` | Output path (default: strip `.age`); bare `--output` preserves original path; `-o -` writes to stdout (equivalent to `--reveal`) |
 | `--fields <FIELDS>` | Comma-separated key paths for JSON/YAML/TOML field-level decryption |
-| `--reveal` | Print decrypted content to stdout instead of writing to file |
+| `--reveal` | Print decrypted content to stdout instead of writing to file (shorthand: `-o -`) |
 | `--value-only` | Decrypt each `.env` VALUE individually (reverse of `--value-only` encrypt) |
 
 **Examples:**
@@ -245,13 +249,13 @@ Inject secrets as environment variables into a child process — no `.env` writt
 | `-i, --identity <FILE>` | Identity key file path |
 | `--prod` | Require production barrier (mandatory when env=prod) |
 | `--clear-env` | Start child with an empty environment |
-| `--pass <VARS>` | Comma-separated vars to pass through when `--clear-env` is set |
+| `--keep-vars <VARS>` | Comma-separated vars to pass through when `--clear-env` is set (alias: `--pass`) |
 
 **Examples:**
 ```bash
 gitvault run -- ./start-server
 gitvault run --env prod --prod -- python manage.py migrate
-gitvault run --clear-env --pass PATH,HOME -- make test
+gitvault run --clear-env --keep-vars PATH,HOME -- make test
 ```
 
 ---
@@ -279,7 +283,7 @@ Preflight validation of identity, recipients, and secrets dir — no side effect
 |--------|-------------|
 | `-e, --env <ENV>` | Environment to validate |
 | `-i, --identity <FILE>` | Identity key file path |
-| `--skip-history-check` | Skip committed-history plaintext scan (fast mode) |
+| `-H, --skip-history-check` | Skip committed-history plaintext scan (fast mode) |
 
 ---
 
@@ -296,7 +300,7 @@ and adds it to `.gitignore`.
 |--------|-------------|
 | `-e, --env <ENV>` | Target environment for the imported file |
 | `--dry-run` | Show what would happen without making changes |
-| `--remove` | Delete the plaintext source file after encrypting |
+| `--delete-source` | Delete the plaintext source file after encrypting (alias: `--remove`) |
 | `-r, --recipient <PUBKEY>` | Recipient key (repeat for multi-recipient) |
 
 **Examples:**
@@ -387,7 +391,7 @@ Manage local age identity keys.
 
 | Subcommand | Options | Description |
 |------------|---------|-------------|
-| `create` | `--profile classic\|hybrid`, `--out <PATH>`, `--add-recipient` | Generate a new identity key; stores in keyring unless `--out` is given; `--add-recipient` immediately registers the public key |
+| `create` | `--profile classic\|hybrid`, `--output <PATH>` (alias `--out`), `--add-recipient` | Generate a new identity key; stores in keyring unless `--output` is given; `--add-recipient` immediately registers the public key |
 | `pubkey` | — | Print own public key (from keyring or `GITVAULT_IDENTITY`) for piping |
 
 `--profile classic` — age X25519 (default)  
@@ -420,8 +424,8 @@ AI tooling helpers. Content is embedded in the binary at build time.
 
 | Subcommand | Description |
 |------------|-------------|
-| `skill print` | Print this canonical skill document (embedded `docs/ai/skill.md`) |
-| `context print` | Print project AI onboarding context (embedded `docs/ai/AGENT_START.md`) |
+| `skill` | Print this canonical skill document (embedded `docs/ai/skill.md`) |
+| `context` | Print project AI onboarding context (embedded `docs/ai/AGENT_START.md`) |
 
 Use `--json` for MCP-style envelope output:
 ```json
