@@ -1212,7 +1212,7 @@ fn check_succeeds_with_valid_setup() {
     );
 }
 
-/// Integration: gitvault rotate re-encrypts secrets to current recipients.
+/// Integration: gitvault rekey re-encrypts secrets to current recipients.
 #[test]
 fn rotate_re_encrypts_secrets() {
     let repo = TempDir::new().unwrap();
@@ -1246,17 +1246,17 @@ fn rotate_re_encrypts_secrets() {
         String::from_utf8_lossy(&enc.stderr)
     );
 
-    // Rotate secrets.
-    let rotate = bin()
-        .args(["rotate"])
+    // Rekey secrets.
+    let rekey = bin()
+        .args(["rekey"])
         .env("GITVAULT_IDENTITY", &identity_path)
         .current_dir(repo.path())
         .output()
-        .expect("rotate should run");
+        .expect("rekey should run");
     assert!(
-        rotate.status.success(),
-        "rotate failed: {}",
-        String::from_utf8_lossy(&rotate.stderr)
+        rekey.status.success(),
+        "rekey failed: {}",
+        String::from_utf8_lossy(&rekey.stderr)
     );
 }
 
@@ -1289,17 +1289,17 @@ fn allow_and_revoke_prod_round_trip() {
     );
 }
 
-/// REQ-36: A removed recipient can no longer decrypt after a rotate.
+/// REQ-36: A removed recipient can no longer decrypt after a rekey.
 ///
 /// Workflow:
 ///  1. Encrypt a secret using the *old* keypair as the only recipient.
 ///  2. Add a *new* keypair as a persistent recipient.
 ///  3. Remove the *old* keypair from the persistent recipients list.
-///  4. Rotate — re-encrypts all secrets to the current (new-only) recipient set.
+///  4. Rekey — re-encrypts all secrets to the current (new-only) recipient set.
 ///  5. Decryption attempt with the old identity must fail.
 ///  6. Decryption with the new identity must succeed.
 #[test]
-fn removed_recipient_cannot_decrypt_after_rotate() {
+fn removed_recipient_cannot_decrypt_after_rekey() {
     let repo = TempDir::new().unwrap();
     init_git_repo(repo.path());
 
@@ -1359,19 +1359,19 @@ fn removed_recipient_cannot_decrypt_after_rotate() {
         String::from_utf8_lossy(&remove_old.stderr)
     );
 
-    // Rotate: the old identity can still decrypt the current ciphertext, and
-    // the rotate command re-encrypts everything to the current recipient list
+    // Rekey: the old identity can still decrypt the current ciphertext, and
+    // the rekey command re-encrypts everything to the current recipient list
     // (new key only).
-    let rotate = bin()
-        .args(["rotate"])
+    let rekey = bin()
+        .args(["rekey"])
         .env("GITVAULT_IDENTITY", &old_identity_path)
         .current_dir(repo.path())
         .output()
-        .expect("rotate should run");
+        .expect("rekey should run");
     assert!(
-        rotate.status.success(),
-        "rotate failed: {}",
-        String::from_utf8_lossy(&rotate.stderr)
+        rekey.status.success(),
+        "rekey failed: {}",
+        String::from_utf8_lossy(&rekey.stderr)
     );
 
     // After rotation the old key must NOT be able to decrypt.

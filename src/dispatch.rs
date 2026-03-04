@@ -100,7 +100,7 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Recipient { action } => {
             crate::commands::recipients::cmd_recipient(action, cli.json)
         }
-        Commands::Rotate { identity } => crate::commands::recipients::cmd_rotate(
+        Commands::Rekey { identity } => crate::commands::recipients::cmd_rekey(
             identity,
             cli.identity_selector.clone(),
             cli.json,
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_dispatch_rotate_succeeds() {
+    fn test_run_dispatch_rekey_succeeds() {
         let _lock = global_test_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -356,7 +356,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        write_encrypted_env_file(dir.path(), "dev", "rotate.env.age", &identity, "A=1\n");
+        write_encrypted_env_file(dir.path(), "dev", "rekey.env.age", &identity, "A=1\n");
 
         with_identity_env(identity_file.path(), || {
             let cli = Cli {
@@ -365,10 +365,10 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
-                command: Commands::Rotate { identity: None },
+                command: Commands::Rekey { identity: None },
             };
 
-            let outcome = run(cli).expect("rotate dispatch should succeed");
+            let outcome = run(cli).expect("rekey dispatch should succeed");
             assert_eq!(outcome, CommandOutcome::Success);
         });
     }

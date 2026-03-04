@@ -58,8 +58,8 @@ mod tests {
         with_identity_env(identity_file.path(), || {
             cmd_materialize(None, None, false, false, true, None)
                 .expect("materialize should decrypt env-scoped secrets");
-            crate::commands::recipients::cmd_rotate(None, None, true)
-                .expect("rotate should process env-scoped files");
+            crate::commands::recipients::cmd_rekey(None, None, true)
+                .expect("rekey should process env-scoped files");
         });
 
         let materialized =

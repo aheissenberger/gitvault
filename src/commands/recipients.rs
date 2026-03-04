@@ -58,14 +58,14 @@ pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutco
     Ok(CommandOutcome::Success)
 }
 
-/// Re-encrypt all secrets with the current recipients list (REQ-38)
+/// Re-encrypt all secrets with the current recipients list (REQ-72)
 ///
 /// # Errors
 ///
 /// Returns [`GitvaultError`] if the repository root cannot be found, the identity
 /// cannot be loaded, or re-encryption of any secret file fails.
 #[allow(clippy::needless_pass_by_value)]
-pub fn cmd_rotate(
+pub fn cmd_rekey(
     identity_path: Option<String>,
     selector: Option<String>,
     json: bool,
@@ -114,7 +114,7 @@ pub fn cmd_rotate(
     }
     crate::output::output_success(
         &format!(
-            "Rotated {rotated} secret(s) to {} recipient(s)",
+            "Rekeyed {rotated} secret(s) to {} recipient(s)",
             recipient_keys.len()
         ),
         json,
@@ -311,8 +311,8 @@ mod tests {
     }
 
     #[test]
-    fn test_cmd_rotate_with_invalid_crypto_recipient_fails() {
-        // Covers the error branch of the recipient-map closure in cmd_rotate.
+    fn test_cmd_rekey_with_invalid_crypto_recipient_fails() {
+        // Covers the error branch of the recipient-map closure in cmd_rekey.
         // The key passes read_recipients (matches age1[0-9a-z]+) but fails parse_recipient.
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
@@ -320,8 +320,8 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        // Write an encrypted file so cmd_rotate has something to iterate over.
-        write_encrypted_env_file(dir.path(), "dev", "rotate.env.age", &identity, "K=1\n");
+        // Write an encrypted file so cmd_rekey has something to iterate over.
+        write_encrypted_env_file(dir.path(), "dev", "rekey.env.age", &identity, "K=1\n");
 
         // Write a recipient that passes the regex but fails actual crypto parsing.
         let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -330,8 +330,8 @@ mod tests {
         std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err = cmd_rotate(None, None, false)
-                .expect_err("rotate with invalid recipient should fail");
+            let err =
+                cmd_rekey(None, None, false).expect_err("rekey with invalid recipient should fail");
             assert!(
                 matches!(err, GitvaultError::Encryption(_)),
                 "expected Encryption error, got: {err:?}"

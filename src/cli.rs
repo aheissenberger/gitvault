@@ -166,7 +166,7 @@ pub enum Commands {
         action: RecipientAction,
     },
     /// Re-encrypt all secrets with the current recipients list
-    Rotate {
+    Rekey {
         /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
