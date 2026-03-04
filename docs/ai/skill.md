@@ -1,7 +1,7 @@
 # gitvault — AI Agent Skill Reference
 
 `gitvault` is a Git-native secrets manager. Secrets are age-encrypted and stored as `.age` files
-under `secrets/<env>/` in the repository. Any authorised recipient can decrypt; deterministic
+under `.gitvault/store/<env>/` in the repository. Any authorised recipient can decrypt; deterministic
 re-encryption keeps git diffs minimal. A production barrier, plaintext-leak detection, and stable
 exit codes make it CI/CD safe.
 
@@ -25,8 +25,9 @@ exit codes make it CI/CD safe.
 
 | Variable | Default | Config file key | Description |
 |----------|---------|-----------------|-------------|
-| `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.secrets/env` file |
+| `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.git/gitvault/env` file |
 | `GITVAULT_IDENTITY` | — | — | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string |
+| `GITVAULT_IDENTITY_PASSPHRASE` | — | — | Passphrase for passphrase-encrypted SSH identity keys; checked before OS keyring; CI-safe |
 | `GITVAULT_IDENTITY_SELECTOR` | — | — | Key disambiguation hint for keyring / SSH agent |
 | `GITVAULT_SSH_AGENT` | off | — | Set `1` to enable SSH-agent as an identity source |
 | `CI` | off | — | Set `true` to auto-enable `--no-prompt` |
@@ -40,12 +41,16 @@ exit codes make it CI/CD safe.
 3. OS keyring (always tried automatically)
 4. SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set
 
+**SSH passphrase unlock:** passphrase-encrypted SSH keys are unlocked automatically via
+`GITVAULT_IDENTITY_PASSPHRASE` (env var, CI-safe) or the OS keyring passphrase store.
+Manage with `gitvault keyring set-passphrase | get-passphrase | delete-passphrase`.
+
 ---
 
 ## Environment resolution order (highest → lowest priority)
 
 1. `GITVAULT_ENV` environment variable
-2. `.secrets/env` file in the worktree root (path overridable via `[env] env_file` config)
+2. `.git/gitvault/env` file in the worktree root (path overridable via `[env] env_file` config)
 3. `[env] default` in config file
 4. `dev` (built-in default)
 
@@ -68,9 +73,10 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 |---------|---------|------------|----------------------|
 | Active environment | `dev` | `[env] default` | `GITVAULT_ENV` |
 | Production env name | `prod` | `[env] prod_name` | — |
-| Env name file | `.secrets/env` | `[env] env_file` | — |
+| Env name file | `.git/gitvault/env` | `[env] env_file` | — |
 | Prod token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
-| Recipients directory | `.secrets/recipients/` | `[paths] recipients_file` | — |
+| Recipients directory | `.gitvault/recipients/` | `[paths] recipients_dir` | — |
+| Encrypted secrets dir | `.gitvault/store/` | — | — |
 | Materialize output | `.env` | `[paths] materialize_output` | — |
 | Keyring service | `gitvault` | `[keyring] service` | — |
 | Keyring account | `age-identity` | `[keyring] account` | — |
@@ -96,17 +102,19 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 
 ```
 <repo>/
-├── secrets/<env>/          # encrypted artifacts (commit these)
-│   └── app.env.age
-├── .secrets/
-│   ├── recipients/         # one .pub file per recipient (named per-person)
+├── .gitvault/
+│   ├── store/<env>/         # encrypted artifacts (commit these)
+│   │   └── app.env.age
+│   ├── recipients/          # one .pub file per recipient (commit these)
 │   │   ├── alice.pub
 │   │   └── bob.pub
-│   ├── env                 # active environment name (optional)
-│   ├── .prod-token         # timed production allow-token (gitignored)
-│   └── plain/<env>/        # decrypted plaintext (gitignored)
-├── .env                    # materialized root env (gitignored)
-└── .gitignore              # managed by `gitvault harden`
+│   ├── plain/<env>/         # decrypted plaintext (gitignored)
+│   └── config.toml          # optional repo-level config
+├── .git/gitvault/
+│   ├── env                  # active environment name (optional, gitignored)
+│   └── .prod-token          # timed production allow-token (gitignored)
+├── .env                     # materialized root env (gitignored)
+└── .gitignore               # managed by `gitvault harden`
 ```
 
 ---
@@ -120,7 +128,7 @@ registration, and repository hardening in a single guided flow.
 
 Steps performed:
 1. Creates an age identity (stored in OS keyring by default)
-2. Adds own public key to `.secrets/recipients/<your-name>.pub`
+2. Adds own public key to `.gitvault/recipients/<your-name>.pub`
 3. Hardens the repo (`.gitignore`, git hooks, `.gitattributes`)
 4. Creates `.gitvault/config.toml` if missing
 
@@ -128,12 +136,12 @@ Steps performed:
 ```bash
 # New member runs:
 gitvault init
-git add .secrets/recipients/ && git commit -m "onboard: add <name> as recipient"
+git add .gitvault/recipients/ && git commit -m "onboard: add <name> as recipient"
 git push && gh pr create
 
 # Maintainer merges PR then rekeyes:
 gitvault rekey
-git add .secrets/ && git commit -m "rekey: add <name>"
+git add .gitvault/ && git commit -m "rekey: add <name>"
 git push
 
 # New member pulls and materializes:
@@ -144,13 +152,13 @@ git pull && gitvault materialize
 
 ### `gitvault encrypt <FILE> [OPTIONS]`
 
-Encrypt a secret file. Output: `secrets/<env>/<name>.age` (whole-file) or in-place (field/value modes).
+Encrypt a secret file. Output: `.gitvault/store/<env>/<name>.age` (whole-file) or in-place (field/value modes).
 
 | Option | Description |
 |--------|-------------|
 | `-r, --recipient <PUBKEY>` | age public key (repeat for multi-recipient; defaults to local identity) |
-| `-e, --env <ENV>` | Environment to use (overrides `GITVAULT_ENV` and `.secrets/env`); controls output path `secrets/<ENV>/` |
-| `--keep-path` | Preserve input path relative to repo root under `secrets/<env>/` |
+| `-e, --env <ENV>` | Environment to use (overrides `GITVAULT_ENV` and `.git/gitvault/env`); controls output path `.gitvault/store/<ENV>/` |
+| `--keep-path` | Preserve input path relative to repo root under `.gitvault/store/<env>/` |
 | `--fields <FIELDS>` | Comma-separated key paths for JSON/YAML/TOML field-level encryption |
 | `--value-only` | Encrypt each `.env` VALUE individually (`KEY=enc:base64`) instead of whole file |
 
@@ -178,9 +186,9 @@ Decrypt a `.age` encrypted file.
 
 **Examples:**
 ```bash
-gitvault decrypt secrets/dev/app.env.age -i ~/.age/id.key
-gitvault decrypt secrets/dev/app.env.age --reveal           # stdout only
-gitvault decrypt config.json.age --fields db.password       # field-level
+gitvault decrypt .gitvault/store/dev/app.env.age -i ~/.age/id.key
+gitvault decrypt .gitvault/store/dev/app.env.age --reveal        # stdout only
+gitvault decrypt config.json.age --fields db.password            # field-level
 ```
 
 ---
@@ -191,7 +199,7 @@ Decrypt all secrets for the active environment and write a root `.env` (atomic, 
 
 | Option | Description |
 |--------|-------------|
-| `-e, --env <ENV>` | Environment to use (overrides `GITVAULT_ENV` and `.secrets/env`) |
+| `-e, --env <ENV>` | Environment to use (overrides `GITVAULT_ENV` and `.git/gitvault/env`) |
 | `-i, --identity <FILE>` | Identity key file path |
 | `--prod` | Require production barrier (mandatory when env=prod) |
 
@@ -252,7 +260,7 @@ Preflight validation of identity, recipients, and secrets dir — no side effect
 
 ### `gitvault harden [<FILE>] [OPTIONS]`
 
-Without a file argument: add `.env` and `.secrets/plain/` to `.gitignore`, install pre-commit /
+Without a file argument: add `.env` and `.gitvault/plain/` to `.gitignore`, install pre-commit /
 pre-push git hooks, and register the `.env` merge driver in `.gitattributes`. Delegates to
 external hook manager (husky / lefthook / pre-commit) when configured in `.gitvault/config.toml`.
 
@@ -277,7 +285,7 @@ gitvault harden secrets.yaml --env prod --dry-run
 
 ### `gitvault allow-prod [OPTIONS]`
 
-Write a timed production allow-token to `.secrets/.prod-token`.
+Write a timed production allow-token to `.git/gitvault/.prod-token`.
 
 | Option | Description |
 |--------|-------------|
@@ -293,7 +301,7 @@ Revoke the production allow-token immediately.
 
 ### `gitvault recipient <SUBCOMMAND>`
 
-Manage persistent recipients stored in `.secrets/recipients/` (one `.pub` file per person).
+Manage persistent recipients stored in `.gitvault/recipients/` (one `.pub` file per person).
 
 | Subcommand | Arguments | Description |
 |------------|-----------|-------------|
@@ -335,13 +343,16 @@ gitvault rekey --env staging --json
 
 ### `gitvault keyring <SUBCOMMAND>`
 
-Manage the age identity key in the OS keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager).
+Manage the age identity key and SSH passphrase in the OS keyring (macOS Keychain, Linux Secret Service, Windows Credential Manager).
 
 | Subcommand | Options | Description |
 |------------|---------|-------------|
 | `set` | `-i, --identity <FILE>` | Store identity key in OS keyring |
 | `get` | — | Show public key of stored identity |
 | `delete` | — | Remove stored identity from OS keyring |
+| `set-passphrase` | `[<PASSPHRASE>]` | Store SSH identity passphrase (omit arg to read from `GITVAULT_IDENTITY_PASSPHRASE`) |
+| `get-passphrase` | — | Report whether an SSH passphrase is stored |
+| `delete-passphrase` | — | Remove stored SSH passphrase from OS keyring |
 
 ---
 
@@ -416,12 +427,12 @@ AWS credentials: `--aws-profile` / `--aws-role-arn` (global options) or standard
 gitvault init                                    # interactive: identity + recipient + harden
 # OR manual:
 gitvault identity create --add-recipient         # generate identity and register as recipient
-git add .secrets/recipients/ && git commit -m "onboard: add me as recipient"
+git add .gitvault/recipients/ && git commit -m "onboard: add me as recipient"
 git push && gh pr create                         # PR for maintainer to merge + rekey
 
 # Encrypt and commit
 gitvault encrypt app.env -r age1abc...
-git add secrets/ && git commit -m "chore: encrypt secrets"
+git add .gitvault/store/ && git commit -m "chore: encrypt secrets"
 
 # CI — materialize and run
 export GITVAULT_IDENTITY="$SECRET_AGE_KEY"
@@ -434,6 +445,6 @@ gitvault run -- ./start-server        # fileless injection (preferred over .env)
 gitvault recipient add age1xyz... --name alice
 gitvault rekey --dry-run              # preview
 gitvault rekey
-git add secrets/ .secrets/recipients/ && git commit -m "rekey: add alice"
+git add .gitvault/ && git commit -m "rekey: add alice"
 ```
 

@@ -11,7 +11,7 @@ services required.
 | **Encryption** | age standard format; whole-file or per-field (JSON/YAML/TOML); streaming crypto |
 | **Multi-recipient** | encrypt once for every team member; per-person `.pub` files |
 | **Deterministic diffs** | unchanged field values keep existing ciphertext → minimal git noise |
-| **Environments** | `GITVAULT_ENV` → `.secrets/env` → `dev`; per-worktree resolution |
+| **Environments** | `GITVAULT_ENV` → `.git/gitvault/env` → `dev`; per-worktree resolution |
 | **Onboarding** | `gitvault init` guides identity → recipient → hardening in one command |
 | **Recipient ceremony** | PR-based zero-shared-secret onboarding; `identity pubkey`, `recipient add-self` |
 | **Rekeying** | `rekey` re-encrypts all secrets to current recipient set; `--dry-run` supported |
@@ -45,7 +45,7 @@ cargo build --release
 gitvault init              # identity → add-self → harden → config.toml
 
 # Commit your public key and open a PR:
-git add .secrets/recipients/ && git commit -m "onboard: add <your-name>"
+git add .gitvault/recipients/ && git commit -m "onboard: add <your-name>"
 git push && gh pr create
 ```
 
@@ -69,7 +69,7 @@ gitvault encrypt .env --env dev
 
 ```bash
 gitvault rekey             # re-encrypt all secrets to current recipients
-git add .secrets/ && git commit -m "rekey: update recipients"
+git add .gitvault/ && git commit -m "rekey: update recipients"
 ```
 
 ### CI/CD
@@ -105,7 +105,7 @@ Commands:
   merge-driver  Git merge driver for .env files (register via `gitvault harden`)
   recipient     Manage recipients: add | remove | list | add-self
   rekey         Re-encrypt all secrets for current recipients (--dry-run, --env, --json)
-  keyring       Manage identity key in OS keyring: set | get | delete
+  keyring       Manage identity key in OS keyring: set | get | delete | set-passphrase | get-passphrase | delete-passphrase
   identity      Manage identities: create [--add-recipient] | pubkey
   check         Preflight validation without side effects
   ai            Print embedded skill/context for AI agents (--json for MCP envelope)
@@ -133,6 +133,7 @@ Commands:
 | Create identity | `gitvault identity create [--profile classic\|hybrid] [--add-recipient]` |
 | Print own public key | `gitvault identity pubkey` |
 | OS keyring | `gitvault keyring set\|get\|delete` |
+| SSH identity passphrase (keyring) | `gitvault keyring set-passphrase\|get-passphrase\|delete-passphrase` |
 
 ---
 
@@ -146,17 +147,16 @@ environment variable. Precedence (highest → lowest): CLI flag → `GITVAULT_*`
 |---------|---------|-----------------|----------------------|
 | Active environment | `dev` | `[env] default` | `GITVAULT_ENV` |
 | Production env name | `prod` | `[env] prod_name` | — |
-| Environment name file | `.secrets/env` | `[env] env_file` | — |
+| Environment name file | `.git/gitvault/env` | `[env] env_file` | — |
 | Prod allow-token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
-| Recipients directory | `.secrets/recipients/` | `[paths] recipients_dir` | — |
+| Recipients directory | `.gitvault/recipients/` | `[paths] recipients_dir` | — |
+| Encrypted secrets dir | `.gitvault/store/` | — | — |
 | Materialize output file | `.env` | `[paths] materialize_output` | — |
 | Keyring service name | `gitvault` | `[keyring] service` | — |
 | Keyring account name | `age-identity` | `[keyring] account` | — |
 | Hook manager adapter | *(none)* | `[hooks] adapter` | — |
-| Prod allow-token file | `.secrets/.prod-token` | *(planned)* | — |
-| Encrypted secrets dir | `secrets/` | *(planned)* | — |
-| Decrypted plaintext dir | `.secrets/plain/` | *(planned)* | — |
 | Identity key path/string | — | — | `GITVAULT_IDENTITY` |
+| SSH identity passphrase | — | — | `GITVAULT_IDENTITY_PASSPHRASE` |
 | SSH-agent key selector | — | — | `GITVAULT_IDENTITY_SELECTOR` |
 | SSH-agent enabled | off | — | `GITVAULT_SSH_AGENT=1` |
 | Non-interactive mode | off | — | `CI=1` |
@@ -186,20 +186,20 @@ overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `ch
 
 ```
 <repo>/
-├── secrets/               # encrypted artifacts (commit these; one .age per secret file)
-│   ├── app.env.age
-│   └── db.json.age
-├── .secrets/
-│   ├── recipients/        # one .pub file per recipient (e.g. alice.pub, bob.pub)
+├── .gitvault/
+│   ├── store/<env>/         # encrypted artifacts (commit these)
+│   │   └── app.env.age
+│   ├── recipients/          # one .pub file per recipient (commit these)
 │   │   ├── alice.pub
 │   │   └── bob.pub
-│   ├── env                # active environment name (optional)
-│   ├── .prod-token        # timed production allow-token (gitignored)
-│   └── plain/
-│       └── dev/           # decrypted plaintext (gitignored)
-├── .env                   # materialized root env (gitignored)
-├── .gitattributes         # optional: register merge driver for .env
-└── .gitignore             # managed by `gitvault harden`
+│   ├── plain/<env>/         # decrypted plaintext (gitignored)
+│   └── config.toml          # optional repo-level config
+├── .git/gitvault/
+│   ├── env                  # active environment name (optional, gitignored)
+│   └── .prod-token          # timed production allow-token (gitignored)
+├── .env                     # materialized root env (gitignored)
+├── .gitattributes           # optional: register merge driver for .env
+└── .gitignore               # managed by `gitvault harden`
 ```
 
 ---
@@ -214,6 +214,17 @@ Priority order for loading the age identity:
 | 2 | `GITVAULT_IDENTITY` environment variable (key file path or raw `AGE-SECRET-KEY-` string) |
 | 3 | OS keyring (always tried automatically) |
 | 4 | SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set |
+
+**SSH passphrase unlock:** if an SSH private key is passphrase-encrypted, gitvault
+unlocks it automatically by checking `GITVAULT_IDENTITY_PASSPHRASE` first, then the OS
+keyring. In CI (`--no-prompt` / `CI=1`) only the env var is tried.
+
+Manage the stored passphrase with:
+```bash
+gitvault keyring set-passphrase [<passphrase>]   # store (omit arg to read from env var)
+gitvault keyring get-passphrase                  # check if stored
+gitvault keyring delete-passphrase               # remove
+```
 
 ---
 
@@ -232,14 +243,14 @@ Two optional TOML config layers (both optional — missing file/section silently
 [env]
 default = "staging"         # default environment (built-in: "dev")
 prod_name = "production"    # name that triggers the production barrier (built-in: "prod")
-env_file = ".config/env"    # path to env-name file (built-in: ".secrets/env")
+env_file = ".config/env"    # path to env-name file (built-in: ".git/gitvault/env")
 
 [barrier]
 ttl_secs = 1800             # production allow-token lifetime in seconds (built-in: 3600)
 
 [paths]
 materialize_output = ".env.local"            # built-in: ".env"
-recipients_dir = ".gitvault/recipients"      # built-in: ".secrets/recipients"
+recipients_dir = ".gitvault/recipients"      # built-in: ".gitvault/recipients"
 
 [hooks]
 adapter = "husky"           # hook manager: husky | pre-commit | lefthook

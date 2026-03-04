@@ -58,4 +58,4 @@ Guarantee script-safe operation and cloud auth compatibility for automated workf
 Check mode should validate policy, access, and drift without mutation.
 
 ## Current Verification Status
-REQ-48 (non-interactive CI): baseline support is complete (`GITVAULT_IDENTITY` + CI auto-detection), now extended in-progress to cover deterministic optional keyring/SSH-agent precedence and ambiguity handling. REQ-50 (preflight check): baseline check command is complete and remains in scope for validating new identity-source preconditions. REQ-49 (AWS role-based auth): complete and unchanged by this extension.
+REQ-48 (non-interactive CI): complete — `GITVAULT_IDENTITY` + CI auto-detection + deterministic keyring/SSH-agent precedence with `GITVAULT_IDENTITY_PASSPHRASE` for CI-safe SSH passphrase unlock. REQ-50 (preflight check): complete. REQ-49 (AWS role-based auth): complete and unchanged.
