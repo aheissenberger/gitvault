@@ -972,7 +972,7 @@ mod tests {
         // Write a valid recipient into the directory model
         let (_, identity) = setup_identity_file();
         let pubkey = identity.to_public().to_string();
-        let recipients_dir = dir.path().join(".secrets/recipients");
+        let recipients_dir = dir.path().join(".gitvault/recipients");
         std::fs::create_dir_all(&recipients_dir).expect("create recipients dir");
         std::fs::write(recipients_dir.join("default.pub"), format!("{pubkey}\n"))
             .expect("write recipient pub file");

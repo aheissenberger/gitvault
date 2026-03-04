@@ -18,7 +18,10 @@ pub fn ssm_path(app: &str, env: &str, key: &str) -> String {
 /// Path: `{repo_root}/secrets/{env}/.ssm-refs.json`
 #[must_use]
 pub fn refs_file_path(repo_root: &Path, env: &str) -> PathBuf {
-    repo_root.join("secrets").join(env).join(".ssm-refs.json")
+    repo_root
+        .join(crate::defaults::SECRETS_DIR)
+        .join(env)
+        .join(".ssm-refs.json")
 }
 
 /// Validate that an SSM app name only contains safe path characters.

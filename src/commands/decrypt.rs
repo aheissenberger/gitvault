@@ -184,23 +184,21 @@ fn resolve_output_path(
                     ))
                 })?;
 
-            let mut components = rel_input.components();
-            let first = components
-                .next()
-                .and_then(|c| c.as_os_str().to_str())
-                .unwrap_or_default();
-            let _env = components
-                .next()
-                .and_then(|c| c.as_os_str().to_str())
-                .unwrap_or_default();
-            if first != "secrets" {
-                return Err(GitvaultError::Usage(
-                    "--output without value expects encrypted input under secrets/<env>/..."
-                        .to_string(),
-                ));
-            }
+            let secrets_dir = std::path::Path::new(crate::defaults::SECRETS_DIR);
+            let after_secrets = rel_input.strip_prefix(secrets_dir).map_err(|_| {
+                GitvaultError::Usage(format!(
+                    "--output without value expects encrypted input under {}/{{env}}/...",
+                    crate::defaults::SECRETS_DIR
+                ))
+            })?;
 
-            let rest = components.collect::<PathBuf>();
+            let mut env_components = after_secrets.components();
+            let _env = env_components
+                .next()
+                .and_then(|c| c.as_os_str().to_str())
+                .unwrap_or_default();
+
+            let rest = env_components.collect::<PathBuf>();
             let name = rest.file_name().ok_or_else(|| {
                 GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
             })?;
@@ -522,7 +520,7 @@ mod tests {
         std::fs::remove_file(&plain_file).unwrap();
         let encrypted = dir
             .path()
-            .join("secrets/dev/service/api/v1/config/app.env.age");
+            .join(".gitvault/store/dev/service/api/v1/config/app.env.age");
 
         cmd_decrypt(DecryptOptions {
             file: encrypted.to_string_lossy().to_string(),
@@ -612,8 +610,8 @@ mod tests {
         );
         let msg = err.to_string();
         assert!(
-            msg.contains("secrets"),
-            "error should mention secrets/<env>/: {msg}"
+            msg.contains(crate::defaults::SECRETS_DIR),
+            "error should mention the secrets store path: {msg}"
         );
     }
 

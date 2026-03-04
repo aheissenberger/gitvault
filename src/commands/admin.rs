@@ -248,7 +248,7 @@ pub fn cmd_check(
     for key in &recipients {
         crypto::parse_recipient(key).map_err(|e| {
             GitvaultError::Usage(format!(
-                "Invalid recipient in .secrets/recipients: {key}: {e}"
+                "Invalid recipient in .gitvault/recipients: {key}: {e}"
             ))
         })?;
     }
@@ -700,7 +700,10 @@ mod tests {
         let gitignore = std::fs::read_to_string(dir.path().join(".gitignore"))
             .expect("gitignore should exist after harden");
         assert!(gitignore.contains(".env"));
-        assert!(gitignore.contains(".secrets/plain/"));
+        assert!(
+            !gitignore.contains(".secrets/plain/"),
+            "plain dir is under .git/ and must not be in .gitignore"
+        );
 
         let pre_push = std::fs::read_to_string(dir.path().join(".git/hooks/pre-push"))
             .expect("pre-push hook should be created");
@@ -729,8 +732,8 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        std::fs::create_dir_all(dir.path().join("secrets/dev")).unwrap();
-        std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
+        std::fs::create_dir_all(dir.path().join(".gitvault/store/dev")).unwrap();
+        std::fs::write(dir.path().join(".gitvault/store/dev/app.env.age"), b"x").unwrap();
 
         let err = cmd_status(true, true).unwrap_err();
         assert!(matches!(err, GitvaultError::Drift(_)));
@@ -769,7 +772,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, _identity) = setup_identity_file();
 
-        let recipients_dir = dir.path().join(".secrets/recipients");
+        let recipients_dir = dir.path().join(".gitvault/recipients");
         std::fs::create_dir_all(&recipients_dir).unwrap();
         std::fs::write(recipients_dir.join("bad.pub"), "not-a-valid-recipient\n").unwrap();
 
@@ -921,11 +924,11 @@ mod tests {
 
         // Create a token first so revoke has something to remove.
         cmd_allow_prod(60, false).expect("allow-prod should create token");
-        assert!(dir.path().join(".secrets/.prod-token").exists());
+        assert!(dir.path().join(".git/gitvault/.prod-token").exists());
 
         cmd_revoke_prod(false).expect("revoke-prod should succeed");
         // After revoking, the token should be gone.
-        assert!(!dir.path().join(".secrets/.prod-token").exists());
+        assert!(!dir.path().join(".git/gitvault/.prod-token").exists());
 
         // Also test json=true path.
         cmd_allow_prod(60, false).expect("allow-prod for json test");
@@ -967,7 +970,7 @@ mod tests {
 
         // This key matches age1[0-9a-z]+ but has an invalid bech32 checksum.
         let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let recipients_dir = dir.path().join(".secrets/recipients");
+        let recipients_dir = dir.path().join(".gitvault/recipients");
         std::fs::create_dir_all(&recipients_dir).unwrap();
         std::fs::write(recipients_dir.join("bad.pub"), format!("{bad_key}\n")).unwrap();
 
@@ -1174,7 +1177,7 @@ mod tests {
         });
 
         // The .age artifact should exist.
-        let age_path = dir.path().join("secrets/dev/.env.age");
+        let age_path = dir.path().join(".gitvault/store/dev/.env.age");
         assert!(age_path.exists(), ".env.age should have been created");
 
         // .gitignore should contain the source filename.
@@ -1230,7 +1233,7 @@ mod tests {
         });
 
         // The .age artifact should still exist.
-        assert!(dir.path().join("secrets/dev/.env.age").exists());
+        assert!(dir.path().join(".gitvault/store/dev/.env.age").exists());
     }
 
     /// Empty files vec → delegates to existing repo-harden behaviour, no file logic runs.
@@ -1294,7 +1297,7 @@ mod tests {
 
         // The .age artifact must NOT have been created.
         assert!(
-            !dir.path().join("secrets/dev/.env.age").exists(),
+            !dir.path().join(".gitvault/store/dev/.env.age").exists(),
             "dry-run must not write any .age artifact"
         );
     }

@@ -80,7 +80,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, _identity) = setup_identity_file();
 
-        let env_dir = dir.path().join("secrets/dev");
+        let env_dir = dir.path().join(".gitvault/store/dev");
         std::fs::create_dir_all(&env_dir).unwrap();
         std::fs::write(env_dir.join("broken.env.age"), b"not-age-data").unwrap();
 

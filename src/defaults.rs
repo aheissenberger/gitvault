@@ -20,7 +20,7 @@ pub const DEFAULT_ENV: &str = "dev";
 pub const DEFAULT_PROD_ENV: &str = "prod";
 
 /// Repository-relative path of the file that stores the active environment name.
-pub const ENV_FILE: &str = ".secrets/env";
+pub const ENV_FILE: &str = ".git/gitvault/env";
 
 // ── Production barrier ────────────────────────────────────────────────────────
 
@@ -28,19 +28,23 @@ pub const ENV_FILE: &str = ".secrets/env";
 pub const DEFAULT_BARRIER_TTL_SECS: u64 = 3600;
 
 /// Repository-relative path of the production allow-token file.
-pub const BARRIER_TOKEN_FILE: &str = ".secrets/.prod-token";
+/// Stored under `.git/gitvault/` — never tracked, no `.gitignore` entry needed.
+pub const BARRIER_TOKEN_FILE: &str = ".git/gitvault/.prod-token";
 
 // ── Repository layout ─────────────────────────────────────────────────────────
 
 /// Directory under the repo root that holds encrypted `.age` artifacts (REQ-7).
-pub const SECRETS_DIR: &str = "secrets";
+/// Configurable via `[paths] store_dir` in `.gitvault/config.toml`.
+pub const SECRETS_DIR: &str = ".gitvault/store";
 
 /// Base directory under the repo root for decrypted plaintext outputs (REQ-8).
-pub const PLAIN_BASE_DIR: &str = ".secrets/plain";
+/// Stored under `.git/gitvault/` — never tracked, no `.gitignore` entry needed.
+pub const PLAIN_BASE_DIR: &str = ".git/gitvault/plain";
 
 /// Repository-relative path of the persistent recipients directory (REQ-72 AC15).
 /// Each recipient is stored as a `<name>.pub` file inside this directory.
-pub const RECIPIENTS_DIR: &str = ".secrets/recipients";
+/// Configurable via `[paths] recipients_dir` in `.gitvault/config.toml`.
+pub const RECIPIENTS_DIR: &str = ".gitvault/recipients";
 
 /// Repository-relative path written by `gitvault materialize` (REQ-16).
 pub const MATERIALIZE_OUTPUT: &str = ".env";

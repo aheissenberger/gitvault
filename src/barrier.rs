@@ -246,10 +246,9 @@ mod tests {
     fn prod_with_expired_token_fails() {
         let dir = root();
         // Write an already-expired token (expiry = 1 second past epoch)
-        let token_path = dir.path().join(".secrets/.prod-token");
+        let token_path = dir.path().join(".git/gitvault/.prod-token");
         std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
         std::fs::write(&token_path, "1").unwrap(); // expired in 1970
-
         let err = check_prod_barrier(dir.path(), "prod", true, true, defaults::DEFAULT_PROD_ENV)
             .unwrap_err();
         assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
@@ -275,7 +274,7 @@ mod tests {
     #[test]
     fn token_path_constant_is_under_secrets_dir() {
         // The token path itself: just verify the constant is sane
-        assert!(defaults::BARRIER_TOKEN_FILE.starts_with(".secrets/"));
+        assert!(defaults::BARRIER_TOKEN_FILE.starts_with(".git/gitvault/"));
     }
 
     #[test]
@@ -375,7 +374,7 @@ mod tests {
     #[test]
     fn malformed_token_content_is_treated_as_invalid() {
         let dir = root();
-        let token_path = dir.path().join(".secrets/.prod-token");
+        let token_path = dir.path().join(".git/gitvault/.prod-token");
         std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
         std::fs::write(&token_path, "not-a-timestamp").unwrap();
 
@@ -442,8 +441,8 @@ mod tests {
     #[test]
     fn allow_prod_fails_when_secrets_path_is_a_file() {
         let dir = root();
-        // Write a regular file at `.secrets` so create_dir_all fails.
-        std::fs::write(dir.path().join(".secrets"), "not a directory").unwrap();
+        // Write a regular file at `.git` so create_dir_all for `.git/gitvault/` fails.
+        std::fs::write(dir.path().join(".git"), "not a directory").unwrap();
         let result = allow_prod(dir.path(), 3600);
         assert!(
             result.is_err(),
@@ -458,7 +457,7 @@ mod tests {
     fn allow_prod_fails_when_token_dir_is_read_only() {
         use std::os::unix::fs::PermissionsExt;
         let dir = root();
-        let secrets = dir.path().join(".secrets");
+        let secrets = dir.path().join(".git/gitvault");
         std::fs::create_dir_all(&secrets).unwrap();
 
         // Mode 0o555: readable + executable (create_dir_all succeeds, no write for new_in).
@@ -475,7 +474,7 @@ mod tests {
 
         assert!(
             result.is_err(),
-            "allow_prod should fail with read-only .secrets dir"
+            "allow_prod should fail with read-only .git/gitvault dir"
         );
     }
 
@@ -485,7 +484,7 @@ mod tests {
     fn revoke_prod_fails_when_token_path_is_a_directory() {
         let dir = root();
         // Create a directory at the token path so `remove_file` returns an error.
-        let token_dir = dir.path().join(".secrets/.prod-token");
+        let token_dir = dir.path().join(".git/gitvault/.prod-token");
         std::fs::create_dir_all(&token_dir).unwrap();
 
         let result = revoke_prod(dir.path());

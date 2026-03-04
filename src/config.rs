@@ -91,10 +91,6 @@ pub struct EnvConfig {
     /// Environment name that triggers the production barrier check.
     /// `None` → [`defaults::DEFAULT_PROD_ENV`] (`"prod"`).
     pub prod_name: Option<String>,
-
-    /// Repository-relative path of the file storing the active environment name.
-    /// `None` → [`defaults::ENV_FILE`] (`".secrets/env"`).
-    pub env_file: Option<String>,
 }
 
 impl EnvConfig {
@@ -112,14 +108,6 @@ impl EnvConfig {
         self.prod_name
             .as_deref()
             .unwrap_or(crate::defaults::DEFAULT_PROD_ENV)
-    }
-
-    /// Resolve the effective env-file path (relative to repo root).
-    #[must_use]
-    pub fn env_file(&self) -> &str {
-        self.env_file
-            .as_deref()
-            .unwrap_or(crate::defaults::ENV_FILE)
     }
 }
 
@@ -150,6 +138,10 @@ pub struct PathsConfig {
     /// Filename written by `gitvault materialize`.
     /// `None` → [`defaults::MATERIALIZE_OUTPUT`] (`".env"`).
     pub materialize_output: Option<String>,
+
+    /// Repository-relative path of the encrypted secrets store directory.
+    /// `None` → [`defaults::SECRETS_DIR`] (`".gitvault/store"`).
+    pub store_dir: Option<String>,
 }
 
 impl PathsConfig {
@@ -167,6 +159,14 @@ impl PathsConfig {
         self.materialize_output
             .as_deref()
             .unwrap_or(crate::defaults::MATERIALIZE_OUTPUT)
+    }
+
+    /// Resolve the effective encrypted store directory path.
+    #[must_use]
+    pub fn store_dir(&self) -> &str {
+        self.store_dir
+            .as_deref()
+            .unwrap_or(crate::defaults::SECRETS_DIR)
     }
 }
 
@@ -234,7 +234,6 @@ struct RawHooksConfig {
 struct RawEnvConfig {
     default: Option<String>,
     prod_name: Option<String>,
-    env_file: Option<String>,
 }
 
 /// Intermediate TOML representation for `[barrier]`.
@@ -250,6 +249,7 @@ struct RawBarrierConfig {
 struct RawPathsConfig {
     recipients_dir: Option<String>,
     materialize_output: Option<String>,
+    store_dir: Option<String>,
 }
 
 /// Intermediate TOML representation for `[keyring]`.
@@ -303,7 +303,6 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
     let env = raw.env.map_or_else(EnvConfig::default, |r| EnvConfig {
         default_env: r.default.filter(|s| !s.is_empty()),
         prod_name: r.prod_name.filter(|s| !s.is_empty()),
-        env_file: r.env_file.filter(|s| !s.is_empty()),
     });
 
     let barrier = raw
@@ -317,6 +316,7 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
         .map_or_else(PathsConfig::default, |r| PathsConfig {
             recipients_dir: r.recipients_dir.filter(|s| !s.is_empty()),
             materialize_output: r.materialize_output.filter(|s| !s.is_empty()),
+            store_dir: r.store_dir.filter(|s| !s.trim().is_empty()),
         });
 
     let keyring = raw
@@ -382,7 +382,6 @@ fn effective_config_impl(
     let env = EnvConfig {
         default_env: repo.env.default_env.or(global.env.default_env),
         prod_name: repo.env.prod_name.or(global.env.prod_name),
-        env_file: repo.env.env_file.or(global.env.env_file),
     };
 
     let barrier = BarrierConfig {
@@ -395,6 +394,7 @@ fn effective_config_impl(
             .paths
             .materialize_output
             .or(global.paths.materialize_output),
+        store_dir: repo.paths.store_dir.or(global.paths.store_dir),
     };
 
     let keyring = KeyringConfig {
@@ -797,7 +797,6 @@ mod tests {
         let cfg = EnvConfig::default();
         assert_eq!(cfg.default_env(), crate::defaults::DEFAULT_ENV);
         assert_eq!(cfg.prod_name(), crate::defaults::DEFAULT_PROD_ENV);
-        assert_eq!(cfg.env_file(), crate::defaults::ENV_FILE);
     }
 
     #[test]
@@ -805,12 +804,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_config_file(
             &dir,
-            "[env]\ndefault = \"staging\"\nprod_name = \"production\"\nenv_file = \".config/env\"\n",
+            "[env]\ndefault = \"staging\"\nprod_name = \"production\"\n",
         );
         let config = load_config(dir.path()).expect("env section should parse");
         assert_eq!(config.env.default_env(), "staging");
         assert_eq!(config.env.prod_name(), "production");
-        assert_eq!(config.env.env_file(), ".config/env");
     }
 
     #[test]

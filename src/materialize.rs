@@ -8,7 +8,7 @@ use crate::error::GitvaultError;
 use crate::permissions;
 
 /// Entries that must be in .gitignore for safety
-pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[defaults::MATERIALIZE_OUTPUT, ".secrets/plain/"];
+pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[defaults::MATERIALIZE_OUTPUT];
 
 /// Materialize decrypted secrets to an output file (default: `.env`).
 ///
@@ -31,7 +31,7 @@ pub fn materialize_env_file(
     output_filename: &str,
 ) -> Result<(), GitvaultError> {
     // REQ-20: ensure output file is in .gitignore before writing
-    ensure_gitignored(repo_root, &[output_filename, ".secrets/plain/"])?;
+    ensure_gitignored(repo_root, &[output_filename])?;
 
     let env_path = repo_root.join(output_filename);
 

@@ -144,9 +144,9 @@ fn harden_installs_hook_that_blocks_push_on_drift() {
         .expect("harden should run");
     assert!(harden.status.success());
 
-    std::fs::create_dir_all(repo.path().join("secrets/dev")).unwrap();
+    std::fs::create_dir_all(repo.path().join(".gitvault/store/dev")).unwrap();
     std::fs::write(
-        repo.path().join("secrets/dev/app.env.age"),
+        repo.path().join(".gitvault/store/dev/app.env.age"),
         "ciphertext-v1\n",
     )
     .unwrap();
@@ -193,7 +193,7 @@ fn harden_installs_hook_that_blocks_push_on_drift() {
     assert!(first_push.success());
 
     std::fs::write(
-        repo.path().join("secrets/dev/app.env.age"),
+        repo.path().join(".gitvault/store/dev/app.env.age"),
         "ciphertext-v2\n",
     )
     .unwrap();
@@ -818,13 +818,13 @@ fn encrypt_decrypt_and_materialize_roundtrip() {
         .expect("encrypt should run");
     assert!(encrypt.status.success());
 
-    let enc_path = repo.path().join("secrets/dev/app.env.age");
+    let enc_path = repo.path().join(".gitvault/store/dev/app.env.age");
     assert!(enc_path.exists());
 
     let decrypt = bin()
         .args([
             "decrypt",
-            "secrets/dev/app.env.age",
+            ".gitvault/store/dev/app.env.age",
             "--identity",
             &identity_path,
             "--reveal",
@@ -885,7 +885,7 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
 
     let enc_path = repo
         .path()
-        .join("secrets/dev/apps/payments/api/config/service.env.age");
+        .join(".gitvault/store/dev/apps/payments/api/config/service.env.age");
     assert!(enc_path.exists(), "expected keep-path encrypted artifact");
 
     std::fs::remove_file(&plain).unwrap();
@@ -894,7 +894,7 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
     let decrypt = bin()
         .args([
             "decrypt",
-            "secrets/dev/apps/payments/api/config/service.env.age",
+            ".gitvault/store/dev/apps/payments/api/config/service.env.age",
             "--identity",
             &identity_path,
             "--output",
@@ -1325,7 +1325,7 @@ fn removed_recipient_cannot_decrypt_after_rekey() {
         String::from_utf8_lossy(&enc.stderr)
     );
 
-    let age_file = repo.path().join("secrets/dev/app.env.age");
+    let age_file = repo.path().join(".gitvault/store/dev/app.env.age");
     assert!(
         age_file.exists(),
         "encrypted file should exist after encrypt"
@@ -1378,7 +1378,7 @@ fn removed_recipient_cannot_decrypt_after_rekey() {
     let dec_old = bin()
         .args([
             "decrypt",
-            "secrets/dev/app.env.age",
+            ".gitvault/store/dev/app.env.age",
             "--identity",
             &old_identity_path,
             "--reveal",
@@ -1397,7 +1397,7 @@ fn removed_recipient_cannot_decrypt_after_rekey() {
     let dec_new = bin()
         .args([
             "decrypt",
-            "secrets/dev/app.env.age",
+            ".gitvault/store/dev/app.env.age",
             "--identity",
             &new_identity_path,
             "--reveal",
@@ -1424,7 +1424,7 @@ fn removed_recipient_cannot_decrypt_after_rekey() {
 ///  1. Create a `.env` file with several key=value pairs.
 ///  2. Run `gitvault encrypt .env --recipient <pubkey>` (whole-file mode).
 ///  3. Verify the `.age` artifact exists and does not expose plaintext.
-///  4. Run `gitvault decrypt secrets/dev/.env.age --reveal`.
+///  4. Run `gitvault decrypt .gitvault/store/dev/.env.age --reveal`.
 ///  5. Verify that every original key=value pair is present in the output.
 #[test]
 fn encrypt_decrypt_dotenv_whole_file() {
@@ -1452,11 +1452,11 @@ fn encrypt_decrypt_dotenv_whole_file() {
         String::from_utf8_lossy(&enc.stderr)
     );
 
-    // The encrypted artifact must exist at secrets/dev/.env.age.
-    let age_path = repo.path().join("secrets/dev/.env.age");
+    // The encrypted artifact must exist at .gitvault/store/dev/.env.age.
+    let age_path = repo.path().join(".gitvault/store/dev/.env.age");
     assert!(
         age_path.exists(),
-        "expected secrets/dev/.env.age to exist after whole-file encrypt"
+        "expected .gitvault/store/dev/.env.age to exist after whole-file encrypt"
     );
 
     // The encrypted file must NOT expose the original plaintext.
@@ -1472,7 +1472,7 @@ fn encrypt_decrypt_dotenv_whole_file() {
     let dec = bin()
         .args([
             "decrypt",
-            "secrets/dev/.env.age",
+            ".gitvault/store/dev/.env.age",
             "--identity",
             &identity_path,
             "--reveal",
@@ -1523,16 +1523,16 @@ fn decrypt_reveal_prints_plaintext() {
         String::from_utf8_lossy(&enc.stderr)
     );
 
-    // The encrypted file goes to secrets/dev/secrets.env.age.
-    let age_file = repo.path().join("secrets/dev/secrets.env.age");
+    // The encrypted file goes to .gitvault/store/dev/secrets.env.age.
+    let age_file = repo.path().join(".gitvault/store/dev/secrets.env.age");
     assert!(
         age_file.exists(),
-        "expected secrets/dev/secrets.env.age to exist after encrypt"
+        "expected .gitvault/store/dev/secrets.env.age to exist after encrypt"
     );
 
     // Decrypt with --reveal (prints to stdout, no output file).
     let dec = bin()
-        .args(["decrypt", "secrets/dev/secrets.env.age", "--reveal"])
+        .args(["decrypt", ".gitvault/store/dev/secrets.env.age", "--reveal"])
         .env("GITVAULT_IDENTITY", &identity_path)
         .current_dir(repo.path())
         .output()

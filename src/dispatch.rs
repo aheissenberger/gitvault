@@ -322,7 +322,7 @@ mod tests {
         let encrypt_outcome = run(encrypt_cli).expect("encrypt dispatch should succeed");
         assert_eq!(encrypt_outcome, CommandOutcome::Success);
 
-        let encrypted_path = dir.path().join("secrets/dev/dispatch.txt.age");
+        let encrypted_path = dir.path().join(".gitvault/store/dev/dispatch.txt.age");
         assert!(encrypted_path.exists());
 
         let decrypt_cli = Cli {
@@ -372,7 +372,7 @@ mod tests {
 
         let outcome = run(cli).expect("allow-prod dispatch should succeed");
         assert_eq!(outcome, CommandOutcome::Success);
-        assert!(dir.path().join(".secrets/.prod-token").exists());
+        assert!(dir.path().join(".git/gitvault/.prod-token").exists());
     }
 
     #[test]

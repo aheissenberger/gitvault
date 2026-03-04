@@ -137,7 +137,7 @@ pub fn cmd_recipient_add_self(
     // 7. Print success and reminder.
     crate::output::output_success(&format!("Added self as recipient: {name}.pub"), json);
     if !json {
-        println!("  Hint: git add .secrets/recipients/{name}.pub && git commit");
+        println!("  Hint: git add .gitvault/recipients/{name}.pub && git commit");
     }
 
     Ok(CommandOutcome::Success)
@@ -605,7 +605,7 @@ mod tests {
 
         // Write a recipient that passes the regex but fails actual crypto parsing.
         let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let recipients_dir = dir.path().join(".secrets/recipients");
+        let recipients_dir = dir.path().join(".gitvault/recipients");
         std::fs::create_dir_all(&recipients_dir).unwrap();
         std::fs::write(recipients_dir.join("bad.pub"), format!("{bad_key}\n")).unwrap();
 
@@ -635,7 +635,7 @@ mod tests {
         });
 
         // Verify at least one .pub file exists and contains the pubkey
-        let recipients_dir = dir.path().join(".secrets/recipients");
+        let recipients_dir = dir.path().join(".gitvault/recipients");
         let entries: Vec<_> = std::fs::read_dir(&recipients_dir)
             .expect("recipients dir should exist")
             .filter_map(|e| e.ok())
@@ -667,7 +667,7 @@ mod tests {
         });
 
         // Only one .pub file should exist (not two)
-        let recipients_dir = dir.path().join(".secrets/recipients");
+        let recipients_dir = dir.path().join(".gitvault/recipients");
         let pub_count = std::fs::read_dir(&recipients_dir)
             .expect("recipients dir should exist")
             .filter_map(|e| e.ok())

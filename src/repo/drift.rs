@@ -11,7 +11,13 @@ use std::process::Command;
 /// Returns [`GitvaultError::Other`] if `git diff` cannot be spawned.
 pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
     let output = Command::new("git")
-        .args(["diff", "--quiet", "HEAD", "--", "secrets/"])
+        .args([
+            "diff",
+            "--quiet",
+            "HEAD",
+            "--",
+            crate::defaults::SECRETS_DIR,
+        ])
         .current_dir(repo_root)
         .output();
 
@@ -45,7 +51,10 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
     let files: Vec<&str> = staged
         .lines()
         .filter(|l| {
-            !l.is_empty() && (l.contains(".secrets/plain/") || *l == ".env" || l.ends_with("/.env"))
+            !l.is_empty()
+                && (l.contains(crate::defaults::PLAIN_BASE_DIR)
+                    || *l == ".env"
+                    || l.ends_with("/.env"))
         })
         .collect();
     if !files.is_empty() {

@@ -456,7 +456,7 @@ mod tests {
 
         assert!(
             dir.path()
-                .join("secrets/dev/app/platform/service/config/service.env.age")
+                .join(".gitvault/store/dev/app/platform/service/config/service.env.age")
                 .exists()
         );
     }
@@ -486,11 +486,13 @@ mod tests {
         });
 
         assert!(
-            dir.path().join("secrets/staging/app.env.age").exists(),
-            "output should be under secrets/staging/"
+            dir.path()
+                .join(".gitvault/store/staging/app.env.age")
+                .exists(),
+            "output should be under .gitvault/store/staging/"
         );
         assert!(
-            !dir.path().join("secrets/dev/app.env.age").exists(),
+            !dir.path().join(".gitvault/store/dev/app.env.age").exists(),
             "output must NOT fall back to the default dev env"
         );
     }

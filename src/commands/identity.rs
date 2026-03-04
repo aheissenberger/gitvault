@@ -561,10 +561,10 @@ mod tests {
             );
 
             // Verify a .pub file was written containing the expected public key.
-            let recipients_dir = dir.path().join(".secrets").join("recipients");
+            let recipients_dir = dir.path().join(".gitvault").join("recipients");
             assert!(
                 recipients_dir.exists(),
-                ".secrets/recipients/ should be created"
+                ".gitvault/recipients/ should be created"
             );
             let pub_files: Vec<_> = std::fs::read_dir(&recipients_dir)
                 .expect("read recipients dir")

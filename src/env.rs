@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 ///
 /// Priority (REQ-11):
 /// 1. `GITVAULT_ENV` environment variable
-/// 2. `cfg.env_file()` (default: `.secrets/env`) file in the worktree root
+/// 2. `defaults::ENV_FILE` (`.git/gitvault/env`) file in the worktree root
 /// 3. Default: `cfg.default_env()` (default: `"dev"`)
 ///
 /// Each worktree resolves independently (REQ-12) because resolution
@@ -24,8 +24,8 @@ pub fn resolve_env(worktree_root: &Path, cfg: &EnvConfig) -> String {
         }
     }
 
-    // Priority 2: env file (path configurable via [env].env_file)
-    let env_file = worktree_root.join(cfg.env_file());
+    // Priority 2: env file (fixed path: defaults::ENV_FILE)
+    let env_file = worktree_root.join(crate::defaults::ENV_FILE);
     if let Ok(content) = fs::read_to_string(&env_file) {
         let env = content.trim().to_string();
         if !env.is_empty() {
@@ -94,8 +94,8 @@ mod tests {
             std::env::remove_var("GITVAULT_ENV");
         }
 
-        fs::create_dir_all(dir.path().join(".secrets")).unwrap();
-        fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
+        fs::create_dir_all(dir.path().join(".git/gitvault")).unwrap();
+        fs::write(dir.path().join(".git/gitvault").join("env"), "staging").unwrap();
 
         let env = resolve_env(dir.path(), &Default::default());
         assert_eq!(env, "staging");
@@ -106,8 +106,8 @@ mod tests {
         let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
 
-        fs::create_dir_all(dir.path().join(".secrets")).unwrap();
-        fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
+        fs::create_dir_all(dir.path().join(".git/gitvault")).unwrap();
+        fs::write(dir.path().join(".git/gitvault").join("env"), "staging").unwrap();
 
         unsafe {
             std::env::set_var("GITVAULT_ENV", "prod");
@@ -129,11 +129,11 @@ mod tests {
             std::env::remove_var("GITVAULT_ENV");
         }
 
-        fs::create_dir_all(dir1.path().join(".secrets")).unwrap();
-        fs::write(dir1.path().join(".secrets").join("env"), "staging").unwrap();
+        fs::create_dir_all(dir1.path().join(".git/gitvault")).unwrap();
+        fs::write(dir1.path().join(".git/gitvault").join("env"), "staging").unwrap();
 
-        fs::create_dir_all(dir2.path().join(".secrets")).unwrap();
-        fs::write(dir2.path().join(".secrets").join("env"), "dev").unwrap();
+        fs::create_dir_all(dir2.path().join(".git/gitvault")).unwrap();
+        fs::write(dir2.path().join(".git/gitvault").join("env"), "dev").unwrap();
 
         assert_eq!(resolve_env(dir1.path(), &Default::default()), "staging");
         assert_eq!(resolve_env(dir2.path(), &Default::default()), "dev");
@@ -143,8 +143,8 @@ mod tests {
     fn test_whitespace_env_var_falls_back_to_file() {
         let _guard = env_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".secrets")).unwrap();
-        fs::write(dir.path().join(".secrets").join("env"), "staging").unwrap();
+        fs::create_dir_all(dir.path().join(".git/gitvault")).unwrap();
+        fs::write(dir.path().join(".git/gitvault").join("env"), "staging").unwrap();
 
         unsafe {
             std::env::set_var("GITVAULT_ENV", "   ");
@@ -164,8 +164,8 @@ mod tests {
         unsafe {
             std::env::remove_var("GITVAULT_ENV");
         }
-        fs::create_dir_all(dir.path().join(".secrets")).unwrap();
-        fs::write(dir.path().join(".secrets").join("env"), "  \n").unwrap();
+        fs::create_dir_all(dir.path().join(".git/gitvault")).unwrap();
+        fs::write(dir.path().join(".git/gitvault").join("env"), "  \n").unwrap();
 
         let env = resolve_env(dir.path(), &Default::default());
         assert_eq!(env, "dev");

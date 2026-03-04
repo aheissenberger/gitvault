@@ -375,21 +375,30 @@ mod tests {
     fn test_get_encrypted_path() {
         let root = Path::new("/repo");
         let path = get_encrypted_path(root, "database.env.age");
-        assert_eq!(path, PathBuf::from("/repo/secrets/database.env.age"));
+        assert_eq!(
+            path,
+            PathBuf::from("/repo/.gitvault/store/database.env.age")
+        );
     }
 
     #[test]
     fn test_get_plain_path() {
         let root = Path::new("/repo");
         let path = get_plain_path(root, "dev", "database.env");
-        assert_eq!(path, PathBuf::from("/repo/.secrets/plain/dev/database.env"));
+        assert_eq!(
+            path,
+            PathBuf::from("/repo/.git/gitvault/plain/dev/database.env")
+        );
     }
 
     #[test]
     fn test_get_plain_path_staging() {
         let root = Path::new("/repo");
         let path = get_plain_path(root, "staging", "app.env");
-        assert_eq!(path, PathBuf::from("/repo/.secrets/plain/staging/app.env"));
+        assert_eq!(
+            path,
+            PathBuf::from("/repo/.git/gitvault/plain/staging/app.env")
+        );
     }
 
     #[test]
@@ -398,16 +407,16 @@ mod tests {
         ensure_dirs(dir.path(), "dev").unwrap();
 
         assert!(
-            dir.path().join("secrets").exists(),
-            "secrets/ should be created"
+            dir.path().join(".gitvault/store").exists(),
+            ".gitvault/store should be created"
         );
         assert!(
-            dir.path().join(".secrets/plain/dev").exists(),
-            ".secrets/plain/dev/ should be created"
+            dir.path().join(".git/gitvault/plain/dev").exists(),
+            ".git/gitvault/plain/dev/ should be created"
         );
         assert!(
-            dir.path().join("secrets/dev").exists(),
-            "secrets/dev/ should be created"
+            dir.path().join(".gitvault/store/dev").exists(),
+            ".gitvault/store/dev/ should be created"
         );
     }
 
@@ -416,7 +425,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         ensure_dirs(dir.path(), "staging").unwrap();
 
-        assert!(dir.path().join(".secrets/plain/staging").exists());
+        assert!(dir.path().join(".git/gitvault/plain/staging").exists());
     }
 
     #[test]
@@ -444,40 +453,43 @@ mod tests {
     fn test_get_env_encrypted_path() {
         let root = Path::new("/repo");
         let path = get_env_encrypted_path(root, "staging", "app.env.age");
-        assert_eq!(path, PathBuf::from("/repo/secrets/staging/app.env.age"));
+        assert_eq!(
+            path,
+            PathBuf::from("/repo/.gitvault/store/staging/app.env.age")
+        );
     }
 
     #[test]
     fn test_list_encrypted_files_for_env_prefers_env_dir() {
         let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("secrets/dev")).unwrap();
-        std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
-        std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
-        std::fs::write(dir.path().join("secrets/legacy.env.age"), b"x").unwrap();
+        std::fs::create_dir_all(dir.path().join(".gitvault/store/dev")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".gitvault/store")).unwrap();
+        std::fs::write(dir.path().join(".gitvault/store/dev/app.env.age"), b"x").unwrap();
+        std::fs::write(dir.path().join(".gitvault/store/legacy.env.age"), b"x").unwrap();
 
         let files = list_encrypted_files_for_env(dir.path(), "dev").unwrap();
         assert_eq!(files.len(), 1);
-        assert!(files[0].ends_with(Path::new("secrets/dev/app.env.age")));
+        assert!(files[0].ends_with(Path::new(".gitvault/store/dev/app.env.age")));
     }
 
     #[test]
     fn test_list_encrypted_files_for_env_falls_back_to_legacy() {
         let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("secrets")).unwrap();
-        std::fs::write(dir.path().join("secrets/app.env.age"), b"x").unwrap();
+        std::fs::create_dir_all(dir.path().join(".gitvault/store")).unwrap();
+        std::fs::write(dir.path().join(".gitvault/store/app.env.age"), b"x").unwrap();
 
         let files = list_encrypted_files_for_env(dir.path(), "dev").unwrap();
         assert_eq!(files.len(), 1);
-        assert!(files[0].ends_with(Path::new("secrets/app.env.age")));
+        assert!(files[0].ends_with(Path::new(".gitvault/store/app.env.age")));
     }
 
     #[test]
     fn test_list_all_encrypted_files_recurses() {
         let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("secrets/dev")).unwrap();
-        std::fs::create_dir_all(dir.path().join("secrets/prod")).unwrap();
-        std::fs::write(dir.path().join("secrets/dev/app.env.age"), b"x").unwrap();
-        std::fs::write(dir.path().join("secrets/prod/app.env.age"), b"x").unwrap();
+        std::fs::create_dir_all(dir.path().join(".gitvault/store/dev")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".gitvault/store/prod")).unwrap();
+        std::fs::write(dir.path().join(".gitvault/store/dev/app.env.age"), b"x").unwrap();
+        std::fs::write(dir.path().join(".gitvault/store/prod/app.env.age"), b"x").unwrap();
 
         let files = list_all_encrypted_files(dir.path()).unwrap();
         assert_eq!(files.len(), 2);
@@ -541,7 +553,7 @@ mod tests {
         let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
 
         // Create the env secrets directory and write an encrypted file.
-        let secrets_dir = dir.path().join("secrets/dev");
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
         std::fs::create_dir_all(&secrets_dir).unwrap();
         let plaintext = b"KEY=value\nFOO=bar\n";
         let ciphertext = crate::crypto::encrypt(vec![recipient], plaintext).unwrap();
@@ -560,7 +572,7 @@ mod tests {
         let wrong_identity = gen_identity();
         let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
 
-        let secrets_dir = dir.path().join("secrets/dev");
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
         std::fs::create_dir_all(&secrets_dir).unwrap();
         let ciphertext = crate::crypto::encrypt(vec![recipient], b"KEY=value\n").unwrap();
         std::fs::write(secrets_dir.join("app.env.age"), &ciphertext).unwrap();
@@ -590,7 +602,7 @@ mod tests {
     #[test]
     fn test_collect_age_files_with_non_age_files() {
         let dir = TempDir::new().unwrap();
-        let secrets_dir = dir.path().join("secrets");
+        let secrets_dir = dir.path().join(".gitvault/store");
         std::fs::create_dir_all(secrets_dir.join("dev")).unwrap();
         // Add a non-.age file — should be ignored
         std::fs::write(secrets_dir.join("README.md"), b"docs").unwrap();
@@ -606,7 +618,7 @@ mod tests {
     fn test_get_env_encrypted_dir() {
         let root = Path::new("/repo");
         let dir = get_env_encrypted_dir(root, "prod");
-        assert_eq!(dir, PathBuf::from("/repo/secrets/prod"));
+        assert_eq!(dir, PathBuf::from("/repo/.gitvault/store/prod"));
     }
 
     // ─── find_repo_root_from tests ───────────────────────────────────────────
