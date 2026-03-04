@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.10] - 2026-03-04
+
+### Fixed
+- Skip `/bin/sh` unit tests on Windows (`#[cfg(unix)]`); they tested Unix shell semantics and cannot run on Windows runners
+
 ## [v0.4.9] - 2026-03-01
 
 ### Fixed

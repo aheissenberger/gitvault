@@ -100,6 +100,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_cmd_run_clear_env_strips_parent_env() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
@@ -143,6 +144,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_cmd_run_clear_env_with_pass_raw_preserves_path() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
@@ -178,6 +180,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_cmd_run_secrets_injected_as_env_vars() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
