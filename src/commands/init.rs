@@ -310,4 +310,118 @@ mod tests {
             ".git/gitvault/env should contain 'staging'"
         );
     }
+
+    /// Covers all JSON output paths in `cmd_init`:
+    /// - identity "skipped" (lines 68-72) — identity already resolved via GITVAULT_IDENTITY
+    /// - recipients "added" (lines 96-100) — first run
+    /// - harden "done" (lines 123-127)
+    /// - config "created" (lines 153-158) — first run
+    /// - env "written" (lines 177-183) — env_name provided
+    #[test]
+    fn test_init_json_output_first_run() {
+        let _lock = global_test_lock().lock().unwrap();
+        let (dir, identity_file, _identity) = setup_test_repo();
+        let _cwd = CwdGuard::enter(dir.path());
+
+        with_identity_env(identity_file.path(), || {
+            // json=true, env_name="staging" — exercises all JSON branches on first run
+            let result = cmd_init(Some("staging".to_string()), None, true, true);
+            assert!(
+                result.is_ok(),
+                "cmd_init json first run should succeed: {result:?}"
+            );
+        });
+    }
+
+    /// Covers JSON output paths on the second (idempotent) run:
+    /// - recipients "skipped" (lines 107-115) — already a recipient
+    /// - config "skipped" (lines 137-142) — already exists
+    #[test]
+    fn test_init_json_output_idempotent_run() {
+        let _lock = global_test_lock().lock().unwrap();
+        let (dir, identity_file, _identity) = setup_test_repo();
+        let _cwd = CwdGuard::enter(dir.path());
+
+        with_identity_env(identity_file.path(), || {
+            // First run: sets up recipients and config
+            let first = cmd_init(None, None, true, true);
+            assert!(
+                first.is_ok(),
+                "first json cmd_init should succeed: {first:?}"
+            );
+
+            // Second run: exercises "already a recipient" and "config already exists" JSON paths
+            let second = cmd_init(None, None, true, true);
+            assert!(
+                second.is_ok(),
+                "second json cmd_init should succeed: {second:?}"
+            );
+        });
+    }
+
+    /// Covers the identity creation `else` branch (lines 77-90) where no identity is
+    /// pre-resolved. Sets `GITVAULT_IDENTITY` to a non-existent path so the probe step
+    /// sees `SourceNotAvailable`, then passes `out=Some(path)` so `cmd_identity_create`
+    /// writes the identity to that file. Subsequent steps can load the identity via
+    /// `GITVAULT_IDENTITY` (now pointing to the newly created file).
+    /// Covers `json=false` path (line 88-90).
+    #[test]
+    fn test_init_creates_identity_when_unresolved() {
+        let _lock = global_test_lock().lock().unwrap();
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let (dir, _identity_file, _identity) = setup_test_repo();
+        let _cwd = CwdGuard::enter(dir.path());
+
+        use crate::commands::test_helpers::with_env_var;
+
+        // Identity output path — does NOT exist yet so probe_identity_sources
+        // sees GITVAULT_IDENTITY as SourceNotAvailable, making identity_resolved=false.
+        // After cmd_identity_create writes to this path, load_identity (step 2+) succeeds.
+        let out_path = dir.path().join("created_identity.txt");
+        let out_str = out_path.to_string_lossy().to_string();
+
+        let result = with_env_var("GITVAULT_IDENTITY", Some(&out_str), || {
+            with_env_var("SSH_AUTH_SOCK", None, || {
+                with_env_var("GITVAULT_SSH_AGENT", None, || {
+                    // out=Some(out_str) → cmd_identity_create writes key to disk
+                    cmd_init(None, Some(out_str.clone()), false, true)
+                })
+            })
+        });
+        assert!(
+            result.is_ok(),
+            "cmd_init should succeed when creating identity: {result:?}"
+        );
+        assert!(
+            out_path.exists(),
+            "identity file should have been created by cmd_identity_create"
+        );
+    }
+
+    /// Exercises the json=true path of the identity-creation `else` branch (lines 83-87).
+    #[test]
+    fn test_init_creates_identity_when_unresolved_json() {
+        let _lock = global_test_lock().lock().unwrap();
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let (dir, _identity_file, _identity) = setup_test_repo();
+        let _cwd = CwdGuard::enter(dir.path());
+
+        use crate::commands::test_helpers::with_env_var;
+
+        let out_path = dir.path().join("created_identity_json.txt");
+        let out_str = out_path.to_string_lossy().to_string();
+
+        let result = with_env_var("GITVAULT_IDENTITY", Some(&out_str), || {
+            with_env_var("SSH_AUTH_SOCK", None, || {
+                with_env_var("GITVAULT_SSH_AGENT", None, || {
+                    // json=true: hits lines 83-87
+                    cmd_init(None, Some(out_str.clone()), true, true)
+                })
+            })
+        });
+        assert!(
+            result.is_ok(),
+            "cmd_init json should succeed when creating identity: {result:?}"
+        );
+    }
 }

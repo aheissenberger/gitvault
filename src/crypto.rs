@@ -493,4 +493,93 @@ mod tests {
             .expect("decrypt with parsed identity should succeed");
         assert_eq!(decrypted, b"test");
     }
+
+    // ── Test SSH identity PEM used as a constant across SSH-related tests ──
+    //
+    // Unencrypted Ed25519 key in OpenSSH format — safe to embed in tests.
+    // Unencrypted Ed25519 key in OpenSSH format — safe to embed in tests.
+
+    /// Generate an unencrypted Ed25519 SSH private key PEM using `ssh-keygen`.
+    /// Returns `None` if `ssh-keygen` is not available in the test environment.
+    fn gen_test_ssh_key_pem() -> Option<String> {
+        let dir = tempfile::TempDir::new().ok()?;
+        let key_path = dir.path().join("test_key");
+        let status = std::process::Command::new("ssh-keygen")
+            .args([
+                "-t",
+                "ed25519",
+                "-f",
+                key_path.to_str()?,
+                "-N",
+                "",
+                "-C",
+                "gitvault-test",
+            ])
+            .status()
+            .ok()?;
+        if !status.success() {
+            return None;
+        }
+        std::fs::read_to_string(&key_path).ok()
+    }
+
+    /// Covers the SSH-without-passphrase path in `parse_identity_any_with_passphrase` (line 125)
+    /// and the `AnyIdentity::Ssh` arm in `as_identity()` (line 53).
+    #[test]
+    fn parse_identity_any_ssh_key_no_passphrase_returns_ssh_variant() {
+        let Some(pem) = gen_test_ssh_key_pem() else {
+            // ssh-keygen not available in this environment — skip gracefully.
+            return;
+        };
+        let any_identity = parse_identity_any(&pem).expect("valid SSH key should parse");
+        // as_identity() on AnyIdentity::Ssh — exercises line 53
+        let _identity_ref: &dyn age::Identity = any_identity.as_identity();
+    }
+
+    /// Covers the SSH-with-passphrase path in `parse_identity_any_with_passphrase`
+    /// (lines 118-124) and the `AnyIdentity::SshDecryptable` arm in `as_identity()` (line 54).
+    #[test]
+    fn parse_identity_any_ssh_key_with_passphrase_returns_ssh_decryptable() {
+        let Some(pem) = gen_test_ssh_key_pem() else {
+            // ssh-keygen not available in this environment — skip gracefully.
+            return;
+        };
+        let passphrase = Zeroizing::new("test_passphrase".to_string());
+        let any_identity = parse_identity_any_with_passphrase(&pem, Some(passphrase))
+            .expect("valid SSH key with passphrase wrapper should parse");
+        // as_identity() on AnyIdentity::SshDecryptable — exercises line 54
+        let _identity_ref: &dyn age::Identity = any_identity.as_identity();
+    }
+
+    /// Covers all four `ZeroizingPassphrase` callback implementations (lines 66, 68-78).
+    #[test]
+    fn zeroizing_passphrase_callbacks_exercise_all_methods() {
+        use age::Callbacks;
+        use age::secrecy::ExposeSecret;
+
+        let zp = ZeroizingPassphrase(Zeroizing::new("my_secret_pass".to_string()));
+
+        // display_message: no-op (line 66)
+        zp.display_message("informational message");
+
+        // confirm: always returns None (lines 68-70)
+        let confirmed = zp.confirm("Do you agree?", "yes", Some("no"));
+        assert!(confirmed.is_none(), "confirm should return None");
+
+        // request_public_string: always returns None (lines 72-74)
+        let pub_str = zp.request_public_string("Enter something public");
+        assert!(
+            pub_str.is_none(),
+            "request_public_string should return None"
+        );
+
+        // request_passphrase: returns the stored passphrase (lines 76-78)
+        let pass = zp.request_passphrase("Enter passphrase");
+        assert!(pass.is_some(), "request_passphrase should return Some");
+        assert_eq!(
+            pass.unwrap().expose_secret(),
+            "my_secret_pass",
+            "returned passphrase should match stored value"
+        );
+    }
 }

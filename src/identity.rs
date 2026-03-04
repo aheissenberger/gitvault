@@ -1328,6 +1328,138 @@ mod tests {
         assert_eq!(result.unwrap(), key_file);
     }
 
+    // ─── find_ssh_key_file: priority 2 (comment as filename) ─────────────────
+
+    /// Covers lines 153-154: priority 2 — file named after key.comment found and
+    /// fingerprint matches → returns `Some(by_comment)`.
+    #[cfg(unix)]
+    #[test]
+    fn test_find_ssh_key_file_priority2_comment_match() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let home_dir = tempfile::TempDir::new().unwrap();
+        let ssh_dir = home_dir.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+
+        // Create a key file with a non-standard name (not id_ed25519/id_ecdsa/identity).
+        let key_name = "my_project_key";
+        let key_file = ssh_dir.join(key_name);
+        std::fs::write(&key_file, "fake-key-content").unwrap();
+
+        // Fake ssh-keygen returns matching fingerprint for this file.
+        let fingerprint = "SHA256:priority2test";
+        let bin_dir =
+            setup_fake_ssh_binaries("", &format!("256 {fingerprint} test@host (ED25519)"));
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        // comment = key_name → priority 2 path: ~/.ssh/{comment} exists + fingerprint matches.
+        let key = SshAgentKey {
+            fingerprint: fingerprint.to_string(),
+            comment: key_name.to_string(),
+        };
+
+        let result = with_env_var("HOME", Some(home_dir.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || find_ssh_key_file(&key))
+        });
+
+        assert!(
+            result.is_some(),
+            "find_ssh_key_file priority 2 should find the key file"
+        );
+        assert_eq!(result.unwrap(), key_file);
+    }
+
+    // ─── find_ssh_key_file: priority 3 (full scan of ~/.ssh/) ────────────────
+
+    /// Covers lines 157-188: priority 3 — scan all files in ~/.ssh/ by fingerprint.
+    /// Priority 1 misses (no standard names), priority 2 misses (comment doesn't match any
+    /// filename), so priority 3 scans and finds the key by fingerprint.
+    #[cfg(unix)]
+    #[test]
+    fn test_find_ssh_key_file_priority3_scan() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let home_dir = tempfile::TempDir::new().unwrap();
+        let ssh_dir = home_dir.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+
+        // Non-standard key file name (not a standard name, and comment won't match it).
+        let key_name = "work_key";
+        let key_file = ssh_dir.join(key_name);
+        std::fs::write(&key_file, "fake-key-content").unwrap();
+
+        // Also create a .pub file (should be skipped) and a config file (should be skipped).
+        std::fs::write(ssh_dir.join("work_key.pub"), "public-key").unwrap();
+        std::fs::write(ssh_dir.join("config"), "Host *").unwrap();
+        // Create a subdir (should be skipped).
+        std::fs::create_dir_all(ssh_dir.join("subdir")).unwrap();
+
+        let fingerprint = "SHA256:priority3test";
+        let bin_dir =
+            setup_fake_ssh_binaries("", &format!("256 {fingerprint} test@host (ED25519)"));
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        // comment = "nonexistent" → priority 2 fails; priority 3 scans and finds work_key.
+        let key = SshAgentKey {
+            fingerprint: fingerprint.to_string(),
+            comment: "nonexistent_comment_xyz".to_string(),
+        };
+
+        let result = with_env_var("HOME", Some(home_dir.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || find_ssh_key_file(&key))
+        });
+
+        assert!(
+            result.is_some(),
+            "find_ssh_key_file priority 3 should find the key file"
+        );
+        assert_eq!(result.unwrap(), key_file);
+    }
+
+    /// Covers the `None` return from `find_ssh_key_file` when no file matches the fingerprint.
+    #[cfg(unix)]
+    #[test]
+    fn test_find_ssh_key_file_no_match_returns_none() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let home_dir = tempfile::TempDir::new().unwrap();
+        let ssh_dir = home_dir.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+
+        // Create a file, but fake ssh-keygen returns a NON-matching fingerprint.
+        std::fs::write(ssh_dir.join("some_key"), "fake-key").unwrap();
+
+        // Fake ssh-keygen returns a different fingerprint — no match.
+        let bin_dir = setup_fake_ssh_binaries("", "256 SHA256:DIFFERENT other@host (ED25519)");
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        let key = SshAgentKey {
+            fingerprint: "SHA256:EXPECTED_BUT_NOT_FOUND".to_string(),
+            comment: "some_key".to_string(),
+        };
+
+        let result = with_env_var("HOME", Some(home_dir.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || find_ssh_key_file(&key))
+        });
+
+        assert!(
+            result.is_none(),
+            "find_ssh_key_file should return None when no file matches"
+        );
+    }
+
     // ─── load_ssh_agent_identity: full success path ───────────────────────────
 
     #[cfg(unix)]

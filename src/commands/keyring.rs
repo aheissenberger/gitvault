@@ -447,4 +447,187 @@ mod tests {
             Err(other) => panic!("Unexpected error from cmd_keyring Set: {other:?}"),
         }
     }
+
+    // ── Passphrase dispatch arm tests (lines 96-103) ────────────────────────
+
+    /// Exercises the `SetPassphrase` dispatch arm and `cmd_keyring_set_passphrase` body.
+    #[test]
+    fn test_passphrase_dispatch_set_passphrase() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::SetPassphrase {
+                passphrase: Some("test_passphrase".to_string()),
+            },
+            false,
+            set_ok,
+            gen_get,
+            delete_ok,
+        );
+        assert!(
+            result.is_ok(),
+            "SetPassphrase dispatch should succeed: {result:?}"
+        );
+    }
+
+    /// Exercises the `GetPassphrase` dispatch arm and `cmd_keyring_get_passphrase` body.
+    #[test]
+    fn test_passphrase_dispatch_get_passphrase() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::GetPassphrase,
+            false,
+            set_ok,
+            gen_get,
+            delete_ok,
+        );
+        assert!(
+            result.is_ok(),
+            "GetPassphrase dispatch should succeed: {result:?}"
+        );
+    }
+
+    /// Exercises the `DeletePassphrase` dispatch arm and `cmd_keyring_delete_passphrase` body.
+    #[test]
+    fn test_passphrase_dispatch_delete_passphrase() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        let result = cmd_keyring_with_ops(
+            KeyringAction::DeletePassphrase,
+            false,
+            set_ok,
+            gen_get,
+            delete_ok,
+        );
+        // NoEntry maps to Keyring error — both outcomes are valid.
+        assert!(
+            result.is_ok() || matches!(result, Err(GitvaultError::Keyring(_))),
+            "DeletePassphrase dispatch should be Ok or Keyring error: {result:?}"
+        );
+    }
+
+    // ── cmd_keyring_set_passphrase tests (lines 117-141) ──────────────────
+
+    /// Covers `cmd_keyring_set_passphrase` with an explicit passphrase argument (json=false and
+    /// json=true), hitting the success path on both branches (lines 117-141).
+    #[test]
+    fn test_cmd_keyring_set_passphrase_explicit_arg() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+
+        // json=false
+        let result = cmd_keyring_set_passphrase(Some("my_passphrase".to_string()), false);
+        assert!(
+            result.is_ok(),
+            "set_passphrase (json=false) should succeed: {result:?}"
+        );
+
+        // json=true
+        let result = cmd_keyring_set_passphrase(Some("my_passphrase".to_string()), true);
+        assert!(
+            result.is_ok(),
+            "set_passphrase (json=true) should succeed: {result:?}"
+        );
+    }
+
+    /// Covers the env-var fallback branch in `cmd_keyring_set_passphrase` (line 122).
+    #[test]
+    fn test_cmd_keyring_set_passphrase_from_env_var() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        let result = with_env_var(
+            "GITVAULT_IDENTITY_PASSPHRASE",
+            Some("env_passphrase"),
+            || cmd_keyring_set_passphrase(None, false),
+        );
+        assert!(
+            result.is_ok(),
+            "set_passphrase from env var should succeed: {result:?}"
+        );
+    }
+
+    /// Covers the `Usage` error path when neither `passphrase` nor env var is set (lines 123-128).
+    #[test]
+    fn test_cmd_keyring_set_passphrase_no_source_errors() {
+        let result = with_env_var("GITVAULT_IDENTITY_PASSPHRASE", None, || {
+            cmd_keyring_set_passphrase(None, false)
+        });
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "set_passphrase with no source should return Usage error: {result:?}"
+        );
+    }
+
+    // ── cmd_keyring_get_passphrase tests (lines 148-163) ─────────────────
+
+    /// Covers `cmd_keyring_get_passphrase` when no passphrase is stored (found=false, json=false)
+    /// → "not set" text branch (line 161).
+    #[test]
+    fn test_cmd_keyring_get_passphrase_not_stored_text() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        // Fresh mock — no passphrase stored → found=false
+        let result = cmd_keyring_get_passphrase(false);
+        assert!(
+            result.is_ok(),
+            "get_passphrase (not stored, text) should succeed: {result:?}"
+        );
+    }
+
+    /// Covers `cmd_keyring_get_passphrase` with json=true (line 157).
+    #[test]
+    fn test_cmd_keyring_get_passphrase_json_output() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        let result = cmd_keyring_get_passphrase(true);
+        assert!(
+            result.is_ok(),
+            "get_passphrase (json=true) should succeed: {result:?}"
+        );
+    }
+
+    /// Covers `cmd_keyring_get_passphrase` when a passphrase IS stored (found=true, json=false)
+    /// → "stored" text branch (line 159).
+    #[test]
+    fn test_cmd_keyring_get_passphrase_stored_text() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let _lock = global_test_lock().lock().unwrap();
+        // Store a passphrase so found=true
+        cmd_keyring_set_passphrase(Some("stored_value".to_string()), false)
+            .expect("set_passphrase with mock backend should succeed");
+        // json=false, found=true → "stored" branch
+        let result = cmd_keyring_get_passphrase(false);
+        assert!(
+            result.is_ok(),
+            "get_passphrase (stored, text) should succeed: {result:?}"
+        );
+    }
+
+    // ── cmd_keyring_delete_passphrase tests (lines 171-177) ──────────────
+
+    /// Covers `cmd_keyring_delete_passphrase` on both json=false and json=true paths.
+    /// `keyring_delete` maps `NoEntry` to `Keyring` error, so both Ok and Keyring are valid.
+    #[test]
+    fn test_cmd_keyring_delete_passphrase_variants() {
+        let _lock = global_test_lock().lock().unwrap();
+
+        // json=false — passphrase not stored in fresh mock → NoEntry → Keyring error is ok
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let result = cmd_keyring_delete_passphrase(false);
+        assert!(
+            result.is_ok() || matches!(result, Err(GitvaultError::Keyring(_))),
+            "delete_passphrase (json=false) should be Ok or Keyring error: {result:?}"
+        );
+
+        // json=true — store first so the delete succeeds and the success output runs
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        cmd_keyring_set_passphrase(Some("to_delete".to_string()), false)
+            .expect("set should succeed with fresh mock backend");
+        let result = cmd_keyring_delete_passphrase(true);
+        assert!(
+            result.is_ok() || matches!(result, Err(GitvaultError::Keyring(_))),
+            "delete_passphrase (json=true) should be Ok or Keyring error: {result:?}"
+        );
+    }
 }

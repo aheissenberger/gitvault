@@ -51,7 +51,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let expected = dir
             .path()
-            .join("secrets")
+            .join(crate::defaults::SECRETS_DIR)
             .join("prod")
             .join(".ssm-refs.json");
         assert_eq!(refs_file_path(dir.path(), "prod"), expected);
