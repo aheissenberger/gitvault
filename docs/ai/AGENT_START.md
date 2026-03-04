@@ -24,6 +24,12 @@ Minimize repeated source-code exploration by giving agents a shared map, fixed w
 4. Append findings/assumptions to task output so the next agent can reuse context.
 5. Validate with targeted checks first, then broader checks if needed.
 
+## Runtime Constraints (Mandatory)
+
+- Python is not installed in this environment.
+- Do not generate, run, or recommend Python tooling (`python`, `python3`, `pip`, `pipx`, `venv`, `poetry`, `conda`, `.py`).
+- For helper automation, ad hoc utilities, and quick scripts, always use `rust-script`.
+
 ## Module Ownership Map (High Level)
 
 - `src/commands/*`: CLI command handlers

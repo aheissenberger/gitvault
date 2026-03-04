@@ -3,6 +3,8 @@
 Rules:
 - Plan first, then patch.
 - Do not exceed requested scope.
+- Python is not installed in this environment; do not generate, run, or recommend Python tooling (`python`, `python3`, `pip`, `pipx`, `venv`, `poetry`, `conda`, `.py`).
+- For all helper automation, ad hoc utilities, and quick scripts, always use `rust-script`.
 - Before implementing any newly requested requirement, ask whether it is part of an existing requirement or a new requirement.
 - Do not implement new requirements without an approved spec entry.
 - After implementing a requirement, update the corresponding requirement spec status to reflect completion.
