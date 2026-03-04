@@ -151,6 +151,7 @@ pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError>
     let mac = compute_hmac(&key, expiry)?;
     let token_str = format!("{expiry}:{mac}");
 
+    // fs_util::atomic_write not used here: permission step required between write and persist.
     let token_parent = token_path.parent().unwrap_or(repo_root);
     let tmp = tempfile::NamedTempFile::new_in(token_parent)?;
     fs::write(tmp.path(), &token_str)?;
@@ -295,6 +296,7 @@ fn load_or_create_token_key(repo_root: &Path) -> Result<[u8; 32], GitvaultError>
             if let Some(parent) = key_path.parent() {
                 fs::create_dir_all(parent)?;
             }
+            // fs_util::atomic_write not used here: permission step required between write and persist.
             let tmp = tempfile::NamedTempFile::new_in(key_path.parent().unwrap_or(repo_root))?;
             fs::write(tmp.path(), hex_key.as_bytes())?;
             permissions::enforce_owner_rw(tmp.path(), "token key")?;

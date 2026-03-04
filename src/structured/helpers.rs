@@ -1,5 +1,4 @@
 use crate::error::GitvaultError;
-use std::io::Write;
 use std::path::Path;
 
 pub(super) const AGE_ARMOR_HEADER: &str = "-----BEGIN AGE ENCRYPTED FILE-----";
@@ -15,12 +14,9 @@ pub(super) fn is_env_encrypted(value: &str) -> bool {
 }
 
 /// Write bytes to file atomically using a temp file + rename.
+/// Delegates to [`crate::fs_util::atomic_write`] — the canonical implementation.
 pub(super) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), GitvaultError> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    tmp.write_all(data).map_err(GitvaultError::Io)?;
-    tmp.persist(path).map_err(|e| GitvaultError::Io(e.error))?;
-    Ok(())
+    crate::fs_util::atomic_write(path, data)
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ mode: ["cli"]
 platforms: ["Linux", "macOS", "Windows"]
 scope:
   repoAreas: ["src/**"]
-  touch: ["src/git.rs", "src/ssh.rs", "src/repo/plugin.rs", "src/identity.rs"]
+  touch: ["src/git.rs", "src/ssh.rs", "src/repo/plugin.rs", "src/identity.rs", "src/fs_util.rs", "src/repo/paths.rs"]
   avoid: ["target/**"]
 acceptance:
   - id: "AC1"
@@ -105,6 +105,46 @@ Adopt a crate when **all three** are satisfied:
 - Sets: `SSH_ASKPASS_REQUIRE=never` to suppress password prompts in non-interactive contexts
 - Functions: `ssh_add_list_keys`, `ssh_keygen_fingerprint`
 - Platform note: binary is `ssh-add` / `ssh-keygen` on all platforms; OpenSSH for Windows ships these since Windows 10 1809.
+
+### `src/repo/paths.rs::SystemGitRunner::show_toplevel` (migrated — git wrapper complete)
+- The last production `Command::new("git")` call outside `src/git.rs` was in `SystemGitRunner::show_toplevel`.
+- It has been migrated to use `crate::git::git_output_raw`, completing the git wrapper migration.
+- AC2 of this NFR (no bare `Command::new("git")` in non-test production code) is now fully satisfied.
+
+## Filesystem Utility Wrappers (REQ-107–109)
+
+NFR-002 scope has been extended to cover filesystem utility wrappers in addition to subprocess
+wrappers. The same centralization rationale applies: duplicated call sites accumulate divergent
+error handling and correctness gaps (e.g., non-atomic writes, missing path context in errors).
+
+### `src/fs_util.rs` (implemented)
+
+| REQ | Function | Status | Replaces |
+|-----|----------|--------|---------|
+| REQ-107 | `atomic_write(path, data)` | Implemented | Inline `NamedTempFile` + rename at each call site |
+| REQ-108 | `read_text(path)` | Partial (utility done; gradual adoption) | `std::fs::read_to_string` (~76 call sites) |
+| REQ-109 | `ensure_dir(path)` | Partial (utility done; selective adoption) | `std::fs::create_dir_all` (~78 call sites) |
+
+**REQ-107** (`atomic_write`): All non-excepted write sites must use this function. Exception
+sites (those requiring a permission step between write and rename, e.g. `barrier.rs`) must
+carry a `// fs_util::atomic_write not used here: <reason>` comment. See `req-107.md`.
+
+**REQ-108** (`read_text`): New code must use this wrapper; existing sites migrate incrementally.
+Includes the file path in every error message for diagnostics. See `req-108.md`.
+
+**REQ-109** (`ensure_dir`): New code must use this wrapper; existing sites migrate incrementally.
+`src/commands/init.rs` and `src/ssm/refs.rs` are already migrated. See `req-109.md`.
+
+## REQ Mapping
+
+| REQ | Title | Status |
+|-----|-------|--------|
+| REQ-98 | Centralized SSH Subprocess Wrapper (`src/ssh.rs`) | Implemented |
+| REQ-99 | Use `dirs` Crate for Home Directory Resolution | Implemented |
+| REQ-100 | Use `which` Crate for Binary PATH Resolution | Implemented |
+| REQ-107 | Atomic File Write Utility (`fs_util::atomic_write`) | Implemented |
+| REQ-108 | Contextual File Read Utility (`fs_util::read_text`) | Partial |
+| REQ-109 | Contextual Directory Creation Utility (`fs_util::ensure_dir`) | Partial |
 
 ## Future Guidance
 

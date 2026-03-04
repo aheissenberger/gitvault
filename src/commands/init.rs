@@ -144,9 +144,7 @@ pub fn cmd_init(
             println!("✓ Config already exists");
         }
     } else {
-        std::fs::create_dir_all(&config_dir).map_err(|e| {
-            GitvaultError::Other(format!("failed to create .gitvault/ directory: {e}"))
-        })?;
+        crate::fs_util::ensure_dir(&config_dir)?;
         std::fs::write(&config_path, CONFIG_TEMPLATE).map_err(|e| {
             GitvaultError::Other(format!("failed to write .gitvault/config.toml: {e}"))
         })?;
@@ -165,9 +163,7 @@ pub fn cmd_init(
     // ── --env handling ───────────────────────────────────────────────────────
     if let Some(ref env) = env_name {
         let env_path = repo_root.join(crate::defaults::ENV_FILE);
-        std::fs::create_dir_all(env_path.parent().unwrap()).map_err(|e| {
-            GitvaultError::Other(format!("failed to create .git/gitvault/ directory: {e}"))
-        })?;
+        crate::fs_util::ensure_dir(env_path.parent().unwrap())?;
         std::fs::write(&env_path, env).map_err(|e| {
             GitvaultError::Other(format!(
                 "failed to write {}: {e}",

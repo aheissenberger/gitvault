@@ -1,7 +1,6 @@
 //! SSM path helpers and local `.ssm-refs.json` persistence.
 
 use std::collections::HashMap;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::error::GitvaultError;
@@ -90,14 +89,10 @@ pub(super) async fn save_refs(
 ) -> Result<(), GitvaultError> {
     let path = refs_file_path(repo_root, env);
     if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        crate::fs_util::ensure_dir(parent)?;
     }
     let text =
         serde_json::to_string_pretty(refs).map_err(|e| GitvaultError::Other(e.to_string()))?;
-    let mut tmp = tempfile::Builder::new()
-        .prefix(".gitvault-tmp-")
-        .tempfile_in(path.parent().unwrap_or_else(|| Path::new(".")))?;
-    tmp.write_all(text.as_bytes())?;
-    tmp.persist(&path).map_err(|e| GitvaultError::Io(e.error))?;
+    crate::fs_util::atomic_write(&path, text.as_bytes())?;
     Ok(())
 }

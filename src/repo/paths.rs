@@ -3,7 +3,14 @@ use crate::error::GitvaultError;
 use crate::{crypto, merge};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
+
+// `Command` is used only by the test module via `use super::*;`.
+// The non-test compiler cannot observe that cross-scope usage, so we
+// suppress the false-positive lint rather than pollute the test module.
+#[cfg(test)]
+#[allow(unused_imports)]
+use std::process::Command;
 
 trait GitRunner {
     fn show_toplevel(&self, start: &Path) -> std::io::Result<Output>;
@@ -13,16 +20,10 @@ struct SystemGitRunner;
 
 impl GitRunner for SystemGitRunner {
     fn show_toplevel(&self, start: &Path) -> std::io::Result<Output> {
-        Command::new("git")
-            // REQ-90: strip env vars that could redirect git operations.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_CONFIG")
-            .env_remove("GIT_CONFIG_GLOBAL")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .args(["-C"])
-            .arg(start)
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
+        // REQ-90: security-relevant env stripping is applied centrally by the
+        // git wrapper (GIT_DIR, GIT_CONFIG, GIT_CONFIG_GLOBAL, GIT_TERMINAL_PROMPT).
+        crate::git::git_output_raw(&["rev-parse", "--show-toplevel"], start)
+            .map_err(|e| std::io::Error::other(e.to_string()))
     }
 }
 
@@ -360,6 +361,7 @@ mod tests {
     use super::*;
     use age::x25519;
     use std::io;
+    use std::process::Command;
     use tempfile::TempDir;
 
     struct FailingGitRunner;
