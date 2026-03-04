@@ -540,8 +540,8 @@ pub fn resolve_recipient_keys(
         return Ok(recipient_keys);
     }
 
-    // Try persistent recipients file (REQ-36)
-    let from_file = repo::read_recipients(repo_root, crate::defaults::RECIPIENTS_FILE)?;
+    // Try persistent recipients directory (REQ-36, REQ-72 AC15)
+    let from_file = repo::read_recipients(repo_root, crate::defaults::RECIPIENTS_DIR)?;
     if !from_file.is_empty() {
         return Ok(from_file);
     }
@@ -963,26 +963,26 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_recipient_keys_from_recipients_file() {
+    fn test_resolve_recipient_keys_from_recipients_dir() {
         let _lock = global_test_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = tempfile::TempDir::new().expect("temp dir");
 
-        // Write a valid recipients file
+        // Write a valid recipient into the directory model
         let (_, identity) = setup_identity_file();
         let pubkey = identity.to_public().to_string();
-        let secrets_dir = dir.path().join(".secrets");
-        std::fs::create_dir_all(&secrets_dir).expect("create .secrets dir");
-        std::fs::write(secrets_dir.join("recipients"), format!("{pubkey}\n"))
-            .expect("write recipients");
+        let recipients_dir = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(&recipients_dir).expect("create recipients dir");
+        std::fs::write(recipients_dir.join("default.pub"), format!("{pubkey}\n"))
+            .expect("write recipient pub file");
 
         let result = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("SSH_AUTH_SOCK", None, || {
                 resolve_recipient_keys(dir.path(), vec![])
             })
         })
-        .expect("resolve from recipients file should succeed");
+        .expect("resolve from recipients directory should succeed");
         assert_eq!(result, vec![pubkey]);
     }
 

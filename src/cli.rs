@@ -14,7 +14,7 @@ CONFIG FILES (override built-in defaults):
   Sections and keys:
     [env]     default, prod_name, env_file
     [barrier] ttl_secs
-    [paths]   recipients_file, materialize_output
+    [paths]   recipients_dir, materialize_output
     [keyring] service, account
     [hooks]   adapter
 

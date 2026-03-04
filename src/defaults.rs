@@ -38,8 +38,9 @@ pub const SECRETS_DIR: &str = "secrets";
 /// Base directory under the repo root for decrypted plaintext outputs (REQ-8).
 pub const PLAIN_BASE_DIR: &str = ".secrets/plain";
 
-/// Repository-relative path of the persistent recipients list.
-pub const RECIPIENTS_FILE: &str = ".secrets/recipients";
+/// Repository-relative path of the persistent recipients directory (REQ-72 AC15).
+/// Each recipient is stored as a `<name>.pub` file inside this directory.
+pub const RECIPIENTS_DIR: &str = ".secrets/recipients";
 
 /// Repository-relative path written by `gitvault materialize` (REQ-16).
 pub const MATERIALIZE_OUTPUT: &str = ".env";

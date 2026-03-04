@@ -22,6 +22,9 @@ pub use paths::{
     find_repo_root_from, get_encrypted_path, get_env_encrypted_dir, get_env_encrypted_path,
     get_plain_path, list_all_encrypted_files, list_encrypted_files_for_env, validate_write_path,
 };
-pub use recipients::{RECIPIENTS_FILE, read_recipients, write_recipients};
+pub use recipients::{
+    RECIPIENTS_DIR, list_recipients, read_recipients, remove_recipient_by_key,
+    remove_recipient_by_name, write_recipients,
+};
 
 pub use plugin::{AdapterLookup, find_adapter_binary, invoke_adapter_harden};

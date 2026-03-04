@@ -243,8 +243,8 @@ pub fn cmd_check(
     let identity_str = load_identity_with_selector(identity_path, selector.as_deref())?;
     crypto::parse_identity_any(&identity_str)?;
 
-    // Check 3: recipients file is readable and all keys are valid
-    let recipients = repo::read_recipients(&repo_root, cfg.paths.recipients_file())?;
+    // Check 3: recipients directory is readable and all keys are valid
+    let recipients = repo::read_recipients(&repo_root, cfg.paths.recipients_dir())?;
     for key in &recipients {
         crypto::parse_recipient(key).map_err(|e| {
             GitvaultError::Usage(format!(
@@ -469,9 +469,9 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, _identity) = setup_identity_file();
 
-        let recipients_path = dir.path().join(".secrets/recipients");
-        std::fs::create_dir_all(recipients_path.parent().unwrap()).unwrap();
-        std::fs::write(&recipients_path, "not-a-valid-recipient\n").unwrap();
+        let recipients_dir = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("bad.pub"), "not-a-valid-recipient\n").unwrap();
 
         with_identity_env(identity_file.path(), || {
             let err = cmd_check(None, None, None, true).unwrap_err();
@@ -487,9 +487,9 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        // Write a valid recipient so that the for loop on lines 995-1000 executes.
+        // Write a valid recipient so that the for loop executes.
         let pubkey = identity.to_public().to_string();
-        repo::write_recipients(dir.path(), &[pubkey], crate::defaults::RECIPIENTS_FILE)
+        repo::write_recipients(dir.path(), crate::defaults::RECIPIENTS_DIR, "default", &pubkey)
             .expect("write_recipients should succeed");
 
         with_identity_env(identity_file.path(), || {
@@ -662,9 +662,9 @@ mod tests {
 
         // This key matches age1[0-9a-z]+ but has an invalid bech32 checksum.
         let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let recipients_path = dir.path().join(".secrets/recipients");
-        std::fs::create_dir_all(recipients_path.parent().unwrap()).unwrap();
-        std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
+        let recipients_dir = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("bad.pub"), format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
             let err = cmd_check(None, None, None, false).unwrap_err();

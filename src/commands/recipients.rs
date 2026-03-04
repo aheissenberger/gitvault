@@ -6,51 +6,76 @@ use crate::error::GitvaultError;
 use crate::identity::{load_identity_with_selector, resolve_recipient_keys};
 use crate::{crypto, repo};
 
-/// Manage persistent recipients (REQ-37)
+/// Derive a recipient name from the git `user.name` config, falling back to
+/// a short prefix of the public key.
+fn derive_recipient_name(pubkey: &str) -> String {
+    let git_name = std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if let Some(name) = git_name {
+        // Sanitize: keep alphanumeric, hyphen, underscore; replace others with '_'
+        name.chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect()
+    } else {
+        // Fall back: use the first 12 chars of the pubkey (after "age1")
+        pubkey.get(4..16).unwrap_or("default").to_string()
+    }
+}
+
+/// Manage persistent recipients (REQ-37, REQ-72 AC15)
 ///
 /// # Errors
 ///
 /// Returns [`GitvaultError`] if the repository root cannot be found, the recipient
-/// key is invalid, or reading/writing the recipients file fails.
+/// key is invalid, or reading/writing the recipients directory fails.
 pub fn cmd_recipient(action: RecipientAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let cfg = crate::config::effective_config(&repo_root)?;
-    let recipients_file = cfg.paths.recipients_file();
+    let recipients_dir = cfg.paths.recipients_dir();
     match action {
         RecipientAction::Add { pubkey } => {
             // Validate it's a valid age public key
             crypto::parse_recipient(&pubkey)?;
-            let mut recipients = repo::read_recipients(&repo_root, recipients_file)?;
-            if recipients.contains(&pubkey) {
+            // Check for duplicates
+            let existing = repo::read_recipients(&repo_root, recipients_dir)?;
+            if existing.contains(&pubkey) {
                 return Err(GitvaultError::Usage(format!(
                     "Recipient already present: {pubkey}"
                 )));
             }
-            recipients.push(pubkey.clone());
-            repo::write_recipients(&repo_root, &recipients, recipients_file)?;
+            let name = derive_recipient_name(&pubkey);
+            repo::write_recipients(&repo_root, recipients_dir, &name, &pubkey)?;
             crate::output::output_success(&format!("Added recipient: {pubkey}"), json);
         }
         RecipientAction::Remove { pubkey } => {
-            let mut recipients = repo::read_recipients(&repo_root, recipients_file)?;
-            let before = recipients.len();
-            recipients.retain(|r| r != &pubkey);
-            if recipients.len() == before {
-                return Err(GitvaultError::Usage(format!(
-                    "Recipient not found: {pubkey}"
-                )));
-            }
-            repo::write_recipients(&repo_root, &recipients, recipients_file)?;
+            repo::remove_recipient_by_key(&repo_root, recipients_dir, &pubkey)?;
             crate::output::output_success(&format!("Removed recipient: {pubkey}"), json);
         }
         RecipientAction::List => {
-            let recipients = repo::read_recipients(&repo_root, recipients_file)?;
+            let recipients = repo::list_recipients(&repo_root, recipients_dir)?;
             if json {
-                println!("{}", serde_json::json!({"recipients": recipients}));
+                let entries: Vec<_> = recipients
+                    .iter()
+                    .map(|(name, key)| serde_json::json!({"name": name, "key": key}))
+                    .collect();
+                println!("{}", serde_json::json!({"recipients": entries}));
             } else if recipients.is_empty() {
                 println!("No persistent recipients. Use 'gitvault recipient add <pubkey>'.");
             } else {
-                for r in &recipients {
-                    println!("{r}");
+                for (name, key) in &recipients {
+                    println!("{name}: {key}");
                 }
             }
         }
@@ -214,11 +239,12 @@ mod tests {
     fn test_resolve_recipient_keys_returns_recipients_from_file() {
         let dir = TempDir::new().unwrap();
         let pubkey = x25519::Identity::generate().to_public().to_string();
-        // Write a non-empty recipients file so that line 330 (early return) executes.
+        // Write a non-empty recipient into the directory so that the early return executes.
         repo::write_recipients(
             dir.path(),
-            std::slice::from_ref(&pubkey),
-            crate::defaults::RECIPIENTS_FILE,
+            crate::defaults::RECIPIENTS_DIR,
+            "default",
+            &pubkey,
         )
         .expect("write_recipients should succeed");
 
@@ -248,7 +274,7 @@ mod tests {
         cmd_recipient(RecipientAction::Remove { pubkey }, false)
             .expect("remove recipient should succeed");
 
-        let recipients = repo::read_recipients(dir.path(), crate::defaults::RECIPIENTS_FILE)
+        let recipients = repo::read_recipients(dir.path(), crate::defaults::RECIPIENTS_DIR)
             .expect("recipients should be readable");
         assert!(recipients.is_empty());
     }
@@ -325,9 +351,9 @@ mod tests {
 
         // Write a recipient that passes the regex but fails actual crypto parsing.
         let bad_key = "age1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let recipients_path = dir.path().join(".secrets/recipients");
-        std::fs::create_dir_all(recipients_path.parent().unwrap()).unwrap();
-        std::fs::write(&recipients_path, format!("{bad_key}\n")).unwrap();
+        let recipients_dir = dir.path().join(".secrets/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("bad.pub"), format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
             let err =

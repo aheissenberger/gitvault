@@ -143,9 +143,9 @@ impl BarrierConfig {
 /// Configuration for the `[paths]` section.
 #[derive(Debug, Default)]
 pub struct PathsConfig {
-    /// Repository-relative path of the recipients list file.
-    /// `None` → [`defaults::RECIPIENTS_FILE`] (`".secrets/recipients"`).
-    pub recipients_file: Option<String>,
+    /// Repository-relative path of the recipients directory (REQ-72 AC15).
+    /// `None` → [`defaults::RECIPIENTS_DIR`] (`".secrets/recipients"`).
+    pub recipients_dir: Option<String>,
 
     /// Filename written by `gitvault materialize`.
     /// `None` → [`defaults::MATERIALIZE_OUTPUT`] (`".env"`).
@@ -153,12 +153,12 @@ pub struct PathsConfig {
 }
 
 impl PathsConfig {
-    /// Resolve the effective recipients file path.
+    /// Resolve the effective recipients directory path.
     #[must_use]
-    pub fn recipients_file(&self) -> &str {
-        self.recipients_file
+    pub fn recipients_dir(&self) -> &str {
+        self.recipients_dir
             .as_deref()
-            .unwrap_or(crate::defaults::RECIPIENTS_FILE)
+            .unwrap_or(crate::defaults::RECIPIENTS_DIR)
     }
 
     /// Resolve the effective materialize output filename.
@@ -248,7 +248,7 @@ struct RawBarrierConfig {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawPathsConfig {
-    recipients_file: Option<String>,
+    recipients_dir: Option<String>,
     materialize_output: Option<String>,
 }
 
@@ -315,7 +315,7 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
     let paths = raw
         .paths
         .map_or_else(PathsConfig::default, |r| PathsConfig {
-            recipients_file: r.recipients_file.filter(|s| !s.is_empty()),
+            recipients_dir: r.recipients_dir.filter(|s| !s.is_empty()),
             materialize_output: r.materialize_output.filter(|s| !s.is_empty()),
         });
 
@@ -390,7 +390,7 @@ fn effective_config_impl(
     };
 
     let paths = PathsConfig {
-        recipients_file: repo.paths.recipients_file.or(global.paths.recipients_file),
+        recipients_dir: repo.paths.recipients_dir.or(global.paths.recipients_dir),
         materialize_output: repo
             .paths
             .materialize_output
@@ -866,7 +866,7 @@ mod tests {
     #[test]
     fn test_paths_config_defaults() {
         let cfg = PathsConfig::default();
-        assert_eq!(cfg.recipients_file(), crate::defaults::RECIPIENTS_FILE);
+        assert_eq!(cfg.recipients_dir(), crate::defaults::RECIPIENTS_DIR);
         assert_eq!(
             cfg.materialize_output(),
             crate::defaults::MATERIALIZE_OUTPUT
@@ -878,10 +878,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_config_file(
             &dir,
-            "[paths]\nrecipients_file = \".keys/recipients\"\nmaterialize_output = \"env.out\"\n",
+            "[paths]\nrecipients_dir = \".keys/recipients\"\nmaterialize_output = \"env.out\"\n",
         );
         let config = load_config(dir.path()).expect("paths section should parse");
-        assert_eq!(config.paths.recipients_file(), ".keys/recipients");
+        assert_eq!(config.paths.recipients_dir(), ".keys/recipients");
         assert_eq!(config.paths.materialize_output(), "env.out");
     }
 
