@@ -1948,7 +1948,10 @@ mod tests {
             sanitize_comment_for_filename("id_ed25519"),
             Some("id_ed25519")
         );
-        assert_eq!(sanitize_comment_for_filename("user@host"), Some("user@host"));
+        assert_eq!(
+            sanitize_comment_for_filename("user@host"),
+            Some("user@host")
+        );
     }
 
     /// Comment containing `/` returns None (path traversal attempt).

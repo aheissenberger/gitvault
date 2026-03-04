@@ -219,7 +219,10 @@ mod tests {
         unsafe {
             std::env::remove_var("GITVAULT_ENV");
         }
-        assert_eq!(env, "dev", "oversized env var should fall through to default");
+        assert_eq!(
+            env, "dev",
+            "oversized env var should fall through to default"
+        );
     }
 
     #[test]
