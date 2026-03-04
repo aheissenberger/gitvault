@@ -272,6 +272,9 @@ pub enum IdentityAction {
         /// Export identity to file (optional; default: store in OS keyring)
         #[arg(long, value_name = "PATH")]
         out: Option<String>,
+        /// After creating identity, add own public key to .secrets/recipients/
+        #[arg(long)]
+        add_recipient: bool,
     },
     /// Print the age public key of the current identity
     Pubkey,

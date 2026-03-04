@@ -19,8 +19,29 @@ pub fn cmd_identity(
     no_prompt: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     match action {
-        IdentityAction::Create { profile, out } => {
-            cmd_identity_create(profile, out, json, no_prompt)
+        IdentityAction::Create {
+            profile,
+            out,
+            add_recipient,
+        } => {
+            cmd_identity_create(profile, out, json, no_prompt)?;
+            if add_recipient {
+                match crate::commands::recipients::cmd_recipient_add_self(
+                    identity_selector.clone(),
+                    json,
+                ) {
+                    Ok(_) => {}
+                    Err(GitvaultError::Usage(ref msg))
+                        if msg.contains("not inside a git repository") =>
+                    {
+                        eprintln!(
+                            "warning: --add-recipient skipped: not in a git repository"
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(CommandOutcome::Success)
         }
         IdentityAction::Pubkey => cmd_identity_pubkey(identity_selector, json),
     }
@@ -362,6 +383,7 @@ mod tests {
             crate::cli::IdentityAction::Create {
                 profile: IdentityProfile::Classic,
                 out: Some(path),
+                add_recipient: false,
             },
             None, // identity_selector
             true, // json
@@ -491,6 +513,106 @@ mod tests {
                 // Other errors (keyring, etc.) are also non-zero exits — acceptable.
                 Err(_) => {}
             }
+        });
+    }
+
+    // ── --add-recipient flag ─────────────────────────────────────────────────
+
+    /// With `--add-recipient`, after creating the identity a `.pub` file must
+    /// appear under `.secrets/recipients/` inside the git repository.
+    #[test]
+    fn test_identity_create_add_recipient_writes_pub_file() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file, with_identity_env,
+        };
+
+        let _lock = global_test_lock().lock().unwrap();
+        // Use mock keyring so identity storage and retrieval succeed.
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        init_git_repo(dir.path());
+
+        // Set up a pre-existing identity file so cmd_recipient_add_self can
+        // resolve an identity even if the freshly-created one lands in the
+        // mock keyring under a different service/account.
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        let _cwd = CwdGuard::enter(dir.path());
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_identity(
+                crate::cli::IdentityAction::Create {
+                    profile: IdentityProfile::Classic,
+                    out: None,
+                    add_recipient: true,
+                },
+                None, // identity_selector
+                false,
+                true, // no_prompt
+            );
+
+            assert!(
+                result.is_ok(),
+                "--add-recipient should succeed in a git repo: {result:?}"
+            );
+
+            // Verify a .pub file was written containing the expected public key.
+            let recipients_dir = dir.path().join(".secrets").join("recipients");
+            assert!(
+                recipients_dir.exists(),
+                ".secrets/recipients/ should be created"
+            );
+            let pub_files: Vec<_> = std::fs::read_dir(&recipients_dir)
+                .expect("read recipients dir")
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().map_or(false, |x| x == "pub"))
+                .collect();
+            assert!(
+                !pub_files.is_empty(),
+                "at least one .pub file should be written"
+            );
+            let written_key = std::fs::read_to_string(pub_files[0].path())
+                .expect("read pub file");
+            assert!(
+                written_key.trim() == pubkey,
+                "written public key should match identity"
+            );
+        });
+    }
+
+    /// `--add-recipient` must be non-fatal when run outside a git repository.
+    /// The command should print a warning and return `Ok(CommandOutcome::Success)`.
+    #[test]
+    fn test_identity_create_add_recipient_nonfatal_outside_repo() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, setup_identity_file, with_identity_env,
+        };
+
+        let _lock = global_test_lock().lock().unwrap();
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+
+        // Temp dir that is NOT a git repository.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let (identity_file, _identity) = setup_identity_file();
+
+        let _cwd = CwdGuard::enter(dir.path());
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_identity(
+                crate::cli::IdentityAction::Create {
+                    profile: IdentityProfile::Classic,
+                    out: None,
+                    add_recipient: true,
+                },
+                None,
+                false,
+                true,
+            );
+
+            assert!(
+                result.is_ok(),
+                "--add-recipient outside a repo should be non-fatal, got: {result:?}"
+            );
         });
     }
 }

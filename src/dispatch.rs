@@ -660,6 +660,7 @@ mod tests {
                 action: crate::cli::IdentityAction::Create {
                     profile: crate::cli::IdentityProfile::Classic,
                     out: Some(out_file.to_string_lossy().to_string()),
+                    add_recipient: false,
                 },
             },
         };
