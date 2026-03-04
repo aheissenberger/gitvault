@@ -13,6 +13,7 @@ exit codes make it CI/CD safe.
 |------|---------|-------------|
 | `--json` | — | Emit machine-readable JSON on stdout |
 | `--no-prompt` | `CI=true` | Fail instead of prompting; auto-enabled when `CI=true` |
+| `--identity-stdin` | — | Read identity key from stdin (pipe-friendly; requires non-TTY stdin) |
 | `--identity-selector <SEL>` | `GITVAULT_IDENTITY_SELECTOR` | SSH-agent key disambiguation hint |
 | `--aws-profile <PROFILE>` | `AWS_PROFILE` | AWS profile for SSM backend |
 | `--aws-role-arn <ARN>` | `AWS_ROLE_ARN` | AWS role ARN to assume for SSM backend |
@@ -26,9 +27,13 @@ exit codes make it CI/CD safe.
 | Variable | Default | Config file key | Description |
 |----------|---------|-----------------|-------------|
 | `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.git/gitvault/env` file |
-| `GITVAULT_IDENTITY` | — | — | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string |
-| `GITVAULT_IDENTITY_PASSPHRASE` | — | — | Passphrase for passphrase-encrypted SSH identity keys; checked before OS keyring; CI-safe |
+| `GITVAULT_IDENTITY` | — | — | Path to age identity key file **or** raw `AGE-SECRET-KEY-…` string (warn if inline key; see `GITVAULT_NO_INLINE_KEY_WARN`) |
+| `GITVAULT_IDENTITY_FD` | — | — | Unix file-descriptor number to read the identity key from (Linux/macOS only; FD is not the secret — only the FD contents are) |
+| `GITVAULT_IDENTITY_PASSPHRASE` | — | — | Passphrase for passphrase-encrypted SSH identity keys; checked before OS keyring; CI-safe (warn if set; see `GITVAULT_NO_PASSPHRASE_WARN`) |
+| `GITVAULT_IDENTITY_PASSPHRASE_FD` | — | — | Unix file-descriptor number to read the SSH key passphrase from (Linux/macOS only) |
 | `GITVAULT_IDENTITY_SELECTOR` | — | — | Key disambiguation hint for keyring / SSH agent |
+| `GITVAULT_NO_INLINE_KEY_WARN` | — | — | Set `1` to suppress the inline `AGE-SECRET-KEY-…` warning in `GITVAULT_IDENTITY` |
+| `GITVAULT_NO_PASSPHRASE_WARN` | — | — | Set `1` to suppress the inline passphrase warning in `GITVAULT_IDENTITY_PASSPHRASE` |
 | `GITVAULT_SSH_AGENT` | off | — | Set `1` to enable SSH-agent as an identity source |
 | `CI` | off | — | Set `true` to auto-enable `--no-prompt` |
 
@@ -36,14 +41,19 @@ exit codes make it CI/CD safe.
 
 ## Identity resolution order (highest → lowest priority)
 
+0. `--identity-stdin` global flag (when set; stdin must not be a TTY)
 1. `-i / --identity <file>` flag (per-command)
+1b. `GITVAULT_IDENTITY_FD` environment variable (Unix only)
 2. `GITVAULT_IDENTITY` environment variable
 3. OS keyring (always tried automatically)
 4. SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set
 
-**SSH passphrase unlock:** passphrase-encrypted SSH keys are unlocked automatically via
-`GITVAULT_IDENTITY_PASSPHRASE` (env var, CI-safe) or the OS keyring passphrase store.
-Manage with `gitvault keyring set-passphrase | get-passphrase | delete-passphrase`.
+**SSH passphrase unlock (highest → lowest):**
+1a. `GITVAULT_IDENTITY_PASSPHRASE_FD` (Unix only)
+1b. `GITVAULT_IDENTITY_PASSPHRASE` env var (CI-safe; warns if set — suppress with `GITVAULT_NO_PASSPHRASE_WARN=1`)
+2. OS keyring passphrase store
+
+Manage passphrase with `gitvault keyring set-passphrase | get-passphrase | delete-passphrase`.
 
 ---
 
@@ -91,10 +101,24 @@ Two optional TOML layers override built-in defaults. Missing files are silently 
 | `0` | Success |
 | `1` | General error (I/O, encryption failure) |
 | `2` | Usage / argument error |
-| `3` | Plaintext secret detected in tracked files |
+| `3` | Plaintext secret detected in tracked files or committed history |
 | `4` | Decryption error (wrong key or corrupt file) |
 | `5` | Production barrier not satisfied |
 | `6` | Secrets drift (uncommitted changes in `secrets/`) |
+
+---
+
+## Security features
+
+| Feature | Details |
+|---------|---------|
+| **HMAC-authenticated prod token** | `allow-prod` token format: `<expiry>:<hex-hmac-sha256>`; bare timestamps are rejected. HMAC key stored in `.git/gitvault/.token-key` (0600). |
+| **Recipient limit** | Maximum 256 recipients per encryption operation. |
+| **Zeroized plaintext** | Decrypted `Vec<u8>` is wrapped in `Zeroizing<Vec<u8>>` and wiped on drop. |
+| **History scan** | `gitvault check` scans up to 10 000 commits of git history for committed plaintext paths. Use `--skip-history-check` to bypass. |
+| **`.env` output escaping** | Backtick and NUL characters are escaped in materialized `.env` output. |
+| **FD-based secret passing** | `GITVAULT_IDENTITY_FD` and `GITVAULT_IDENTITY_PASSPHRASE_FD` avoid putting secrets in env var space (Unix only). |
+| **Inline key warning** | Using an inline `AGE-SECRET-KEY-…` in `GITVAULT_IDENTITY` emits a warning; suppress with `GITVAULT_NO_INLINE_KEY_WARN=1`. |
 
 ---
 
@@ -249,12 +273,13 @@ gitvault --json status --fail-if-dirty   # CI-friendly
 
 ### `gitvault check [OPTIONS]`
 
-Preflight validation of identity, recipients, and secrets dir — no side effects.
+Preflight validation of identity, recipients, and secrets dir — no side effects. Also scans committed git history for plaintext leaks.
 
 | Option | Description |
 |--------|-------------|
 | `-e, --env <ENV>` | Environment to validate |
 | `-i, --identity <FILE>` | Identity key file path |
+| `--skip-history-check` | Skip committed-history plaintext scan (fast mode) |
 
 ---
 

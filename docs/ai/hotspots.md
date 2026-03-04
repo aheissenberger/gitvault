@@ -45,6 +45,7 @@ gitvault <command> --help
 |------|---------|-------------|
 | `--json` | — | Emit machine-readable JSON on stdout |
 | `--no-prompt` | `CI=true` | Fail instead of prompting; auto-enabled when `CI=true` |
+| `--identity-stdin` | — | Read identity key from stdin (pipe-friendly; requires non-TTY stdin) |
 | `--identity-selector <SEL>` | `GITVAULT_IDENTITY_SELECTOR` | SSH-agent key disambiguation hint |
 | `--aws-profile <PROFILE>` | `AWS_PROFILE` | AWS profile for SSM backend |
 | `--aws-role-arn <ARN>` | `AWS_ROLE_ARN` | AWS role ARN to assume for SSM backend |
@@ -55,8 +56,13 @@ gitvault <command> --help
 
 | Variable | Default | Config file key | Description |
 |----------|---------|-----------------|-------------|
-| `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.secrets/env` |
-| `GITVAULT_IDENTITY` | — | — | Path to identity file or raw `AGE-SECRET-KEY-...` |
+| `GITVAULT_ENV` | `dev` | `[env] default` | Active environment name; overrides `.git/gitvault/env` |
+| `GITVAULT_IDENTITY` | — | — | Path to identity file or raw `AGE-SECRET-KEY-...` (warns if inline key) |
+| `GITVAULT_IDENTITY_FD` | — | — | Unix FD number to read the identity key from (Linux/macOS only) |
+| `GITVAULT_IDENTITY_PASSPHRASE` | — | — | SSH key passphrase (CI-safe; warns if set) |
+| `GITVAULT_IDENTITY_PASSPHRASE_FD` | — | — | Unix FD number to read the SSH passphrase from (Linux/macOS only) |
+| `GITVAULT_NO_INLINE_KEY_WARN` | — | — | Set `1` to suppress inline key warning |
+| `GITVAULT_NO_PASSPHRASE_WARN` | — | — | Set `1` to suppress inline passphrase warning |
 | `GITVAULT_IDENTITY_SELECTOR` | — | — | Key disambiguation hint for keyring / SSH agent |
 | `GITVAULT_SSH_AGENT` | off | — | Set `1` to enable SSH-agent as identity source |
 | `CI` | off | — | Set `true` to auto-enable `--no-prompt` |
@@ -64,14 +70,16 @@ gitvault <command> --help
 ## Resolution order
 
 ### Identity (highest → lowest)
+0. `--identity-stdin` global flag (stdin must not be a TTY)
 1. `-i / --identity <file>` on command
+1b. `GITVAULT_IDENTITY_FD` (Unix only)
 2. `GITVAULT_IDENTITY`
 3. OS keyring (always tried automatically)
 4. SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set
 
 ### Environment (highest → lowest)
 1. `GITVAULT_ENV`
-2. `.secrets/env` (path overridable via `[env] env_file`)
+2. `.git/gitvault/env` (path overridable via `[env] env_file`)
 3. `[env] default` in config
 4. built-in default `dev`
 
@@ -91,9 +99,9 @@ Missing files are ignored.
 |---------|---------|------------|----------------------|
 | Active environment | `dev` | `[env] default` | `GITVAULT_ENV` |
 | Production env name | `prod` | `[env] prod_name` | — |
-| Env name file | `.secrets/env` | `[env] env_file` | — |
+| Env name file | `.git/gitvault/env` | `[env] env_file` | — |
 | Prod token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
-| Recipients file | `.secrets/recipients` | `[paths] recipients_file` | — |
+| Recipients dir | `.gitvault/recipients/` | `[paths] recipients_dir` | — |
 | Materialize output | `.env` | `[paths] materialize_output` | — |
 | Keyring service | `gitvault` | `[keyring] service` | — |
 | Keyring account | `age-identity` | `[keyring] account` | — |
@@ -106,7 +114,7 @@ Missing files are ignored.
 | `0` | Success |
 | `1` | General error (I/O, encryption failure) |
 | `2` | Usage / argument error |
-| `3` | Plaintext secret detected in tracked files |
+| `3` | Plaintext secret detected in tracked files or committed history |
 | `4` | Decryption error (wrong key or corrupt file) |
 | `5` | Production barrier not satisfied |
 | `6` | Secrets drift (uncommitted changes in `secrets/`) |
@@ -115,15 +123,16 @@ Missing files are ignored.
 
 ```text
 <repo>/
-├── secrets/<env>/          # encrypted artifacts (commit these)
-│   └── app.env.age
-├── .secrets/
-│   ├── recipients          # recipient public keys (one per line)
-│   ├── env                 # active environment (optional)
-│   ├── .prod-token         # timed production allow-token (gitignored)
-│   └── plain/<env>/        # decrypted plaintext (gitignored)
-├── .env                    # materialized root env (gitignored)
-└── .gitignore              # managed by `gitvault harden`
+├── .gitvault/
+│   ├── store/<env>/         # encrypted artifacts (commit these)
+│   │   └── app.env.age
+│   ├── recipients/          # one .pub file per recipient (commit these)
+│   └── plain/<env>/         # decrypted plaintext (gitignored)
+├── .git/gitvault/
+│   ├── env                  # active environment name (optional, gitignored)
+│   └── .prod-token          # timed production allow-token (gitignored)
+├── .env                     # materialized root env (gitignored)
+└── .gitignore               # managed by `gitvault harden`
 ```
 
 ## Command catalog
@@ -178,12 +187,13 @@ Safety status check; never decrypts.
 | `--fail-if-dirty` | Exit `6` when `secrets/` has uncommitted changes |
 
 ### `gitvault check [OPTIONS]`
-Preflight validation (identity, recipients, secrets dir), no side effects.
+Preflight validation (identity, recipients, secrets dir), no side effects. Also scans committed git history for plaintext leaks.
 
 | Option | Description |
 |--------|-------------|
 | `-e, --env <ENV>` | Environment to validate |
 | `-i, --identity <FILE>` | Identity key path |
+| `--skip-history-check` | Skip committed-history plaintext scan |
 
 ### `gitvault harden`
 Updates `.gitignore`, installs git hooks, and registers `.env` merge driver. Delegates to configured adapter (`husky` / `lefthook` / `pre-commit`) when set.

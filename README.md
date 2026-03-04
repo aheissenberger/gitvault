@@ -8,18 +8,18 @@ services required.
 
 | Category | Highlights |
 |---|---|
-| **Encryption** | age standard format; whole-file or per-field (JSON/YAML/TOML); streaming crypto |
-| **Multi-recipient** | encrypt once for every team member; per-person `.pub` files |
+| **Encryption** | age standard format; whole-file or per-field (JSON/YAML/TOML); streaming crypto; zeroized plaintext |
+| **Multi-recipient** | encrypt once for every team member; per-person `.pub` files; max 256 recipients |
 | **Deterministic diffs** | unchanged field values keep existing ciphertext → minimal git noise |
 | **Environments** | `GITVAULT_ENV` → `.git/gitvault/env` → `dev`; per-worktree resolution |
 | **Onboarding** | `gitvault init` guides identity → recipient → hardening in one command |
 | **Recipient ceremony** | PR-based zero-shared-secret onboarding; `identity pubkey`, `recipient add-self` |
 | **Rekeying** | `rekey` re-encrypts all secrets to current recipient set; `--dry-run` supported |
 | **Runtime injection** | `run` injects secrets into child process env; no `.env` file written |
-| **Production barrier** | timed allow-token required for prod operations; `revoke-prod` clears it immediately |
-| **Identity sources** | `--identity` flag → `GITVAULT_IDENTITY` → OS keyring → SSH agent |
+| **Production barrier** | HMAC-SHA256 authenticated timed allow-token; `revoke-prod` clears it immediately |
+| **Identity sources** | `--identity-stdin` → `--identity` → `GITVAULT_IDENTITY_FD` → `GITVAULT_IDENTITY` → OS keyring → SSH agent |
 | **OS keyring** | macOS Keychain, Linux Secret Service, Windows Credential Manager |
-| **Git safety** | pre-commit/pre-push hooks; drift detection; leak detection; merge driver |
+| **Git safety** | pre-commit/pre-push hooks; drift detection; committed-history leak scan; merge driver |
 | **CI friendly** | `--json`, `--no-prompt`; `CI=1` auto-enables non-interactive mode; stable exit codes |
 | **AWS SSM** | `gitvault ssm pull/push/diff/set`; `--features ssm` |
 
@@ -80,13 +80,18 @@ git add .gitvault/ && git commit -m "rekey: update recipients"
 ### CI/CD
 
 ```bash
-# Use GITVAULT_IDENTITY to pass the age secret key; enable non-interactive mode:
+# Recommended: use GITVAULT_IDENTITY_FD to avoid the key appearing in /proc/<PID>/environ
+# (Linux/macOS only; FD is not the secret — only the FD contents are sensitive)
+GITVAULT_IDENTITY_FD=3 gitvault materialize --no-prompt --env prod 3<<<"$SECRET_KEY"
+
+# Fallback: GITVAULT_IDENTITY (key path or raw AGE-SECRET-KEY- string)
 GITVAULT_IDENTITY="$SECRET_KEY" gitvault materialize --no-prompt --env prod
 # Or inject directly without writing .env:
 GITVAULT_IDENTITY="$SECRET_KEY" gitvault run --no-prompt -- node server.js
 ```
 
 > Set `CI=1` (most CI systems do this automatically) to suppress interactive prompts globally.
+> Use `GITVAULT_NO_INLINE_KEY_WARN=1` to silence the inline key warning when using `GITVAULT_IDENTITY` with a raw key.
 
 ---
 
@@ -95,7 +100,7 @@ GITVAULT_IDENTITY="$SECRET_KEY" gitvault run --no-prompt -- node server.js
 ```
 gitvault [OPTIONS] <COMMAND>
 
-Global options:  --json  --no-prompt  --identity-selector  --aws-profile  --aws-role-arn
+Global options:  --json  --no-prompt  --identity-stdin  --identity-selector  --aws-profile  --aws-role-arn
 
 Commands:
   init          Onboard a new team member (identity, recipient, repo hardening)
@@ -161,7 +166,11 @@ environment variable. Precedence (highest → lowest): CLI flag → `GITVAULT_*`
 | Keyring account name | `age-identity` | `[keyring] account` | — |
 | Hook manager adapter | *(none)* | `[hooks] adapter` | — |
 | Identity key path/string | — | — | `GITVAULT_IDENTITY` |
+| Identity key via FD (Unix) | — | — | `GITVAULT_IDENTITY_FD=<n>` |
 | SSH identity passphrase | — | — | `GITVAULT_IDENTITY_PASSPHRASE` |
+| SSH passphrase via FD (Unix) | — | — | `GITVAULT_IDENTITY_PASSPHRASE_FD=<n>` |
+| Suppress inline key warning | — | — | `GITVAULT_NO_INLINE_KEY_WARN=1` |
+| Suppress passphrase warning | — | — | `GITVAULT_NO_PASSPHRASE_WARN=1` |
 | SSH-agent key selector | — | — | `GITVAULT_IDENTITY_SELECTOR` |
 | SSH-agent enabled | off | — | `GITVAULT_SSH_AGENT=1` |
 | Non-interactive mode | off | — | `CI=1` |
@@ -180,7 +189,7 @@ overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `ch
 | `0` | Success |
 | `1` | General error (I/O, encryption failure) |
 | `2` | Usage / argument error |
-| `3` | Plaintext secret detected in tracked files |
+| `3` | Plaintext secret detected in tracked files or committed history |
 | `4` | Decryption error (wrong key, corrupt file) |
 | `5` | Production barrier not satisfied |
 | `6` | Secrets drift detected (uncommitted changes in encrypted files) |
@@ -215,14 +224,27 @@ Priority order for loading the age identity:
 
 | Priority | Source |
 |----------|--------|
+| 0 | `--identity-stdin` global flag (pipe-friendly; stdin must not be a TTY) |
 | 1 | `--identity <file>` flag |
+| 1b | `GITVAULT_IDENTITY_FD` (Unix only: file descriptor number; key is read from the FD) |
 | 2 | `GITVAULT_IDENTITY` environment variable (key file path or raw `AGE-SECRET-KEY-` string) |
 | 3 | OS keyring (always tried automatically) |
 | 4 | SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set |
 
-**SSH passphrase unlock:** if an SSH private key is passphrase-encrypted, gitvault
-unlocks it automatically by checking `GITVAULT_IDENTITY_PASSPHRASE` first, then the OS
-keyring. In CI (`--no-prompt` / `CI=1`) only the env var is tried.
+> **Security note:** Using a raw `AGE-SECRET-KEY-…` inline in `GITVAULT_IDENTITY` exposes
+> the key in process listings and shell history. Prefer `GITVAULT_IDENTITY_FD` (Unix) or a
+> key file path. A warning is emitted when an inline key is detected; suppress with
+> `GITVAULT_NO_INLINE_KEY_WARN=1`.
+
+**SSH passphrase unlock (highest → lowest priority):**
+
+| Priority | Source |
+|----------|--------|
+| 1a | `GITVAULT_IDENTITY_PASSPHRASE_FD` (Unix only) |
+| 1b | `GITVAULT_IDENTITY_PASSPHRASE` env var (CI-safe; warns if set — suppress with `GITVAULT_NO_PASSPHRASE_WARN=1`) |
+| 2 | OS keyring passphrase store |
+
+In CI (`--no-prompt` / `CI=1`) only the env var / FD sources are tried.
 
 Manage the stored passphrase with:
 ```bash
