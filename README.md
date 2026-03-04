@@ -1,172 +1,87 @@
 # gitvault
 
-A Git-native secrets manager for multi-developer and multi-agent workflows. Secrets are encrypted
-with [age](https://age-encryption.org) and stored in your repository — never plaintext.
+Git-native secrets manager for multi-developer and AI-agent workflows. Secrets are encrypted with
+[age](https://age-encryption.org) and stored in your repository — never plaintext, no external
+services required.
 
-## Pitch
+## Features
 
-GitVault is the Git-native secrets manager built for real team workflows: keep secrets encrypted
-in-repo with age, enable multi-recipient access, preserve clean diffs with deterministic
-field-level re-encryption, and enforce safety controls that prevent leaks during day-to-day
-development and CI automation.
-
-## Features (implementation highlights)
-
-- **age encryption** — standard file format, native Rust, no external binaries required
-- **Multi-recipient** — encrypt once for every team member; any recipient can decrypt
-- **Field-level encryption** — encrypt individual fields in JSON, YAML, and TOML files; values
-  stored as age ASCII armor inline in the document
-- **Deterministic re-encryption** — unchanged field values retain existing ciphertext so git diffs
-  stay minimal
-- **Whole-file / value-only modes** — `.env` files default to whole-file encryption; opt in to
-  per-value encryption with `--value-only`
-- **Repository layout** — encrypted artifacts under `secrets/<env>/` (with legacy `secrets/*.age`
-  fallback), plaintext outputs under `.secrets/plain/<env>/`; one `.age` file per secret
-- **Plaintext leak detection** — refuses to operate if `.env` or plaintext secrets are tracked by
-  Git
-- **Environment model** — resolves active environment from `GITVAULT_ENV` → `.secrets/env` → `dev`;
-  each worktree is independent
-- **Production barrier** — timed allow-token required to materialize or run against `prod`;
-  interactive confirmation fallback
-- **Production token revoke** — `revoke-prod` removes the allow-token immediately
-- **Root `.env` materialization** — atomic write, restricted permissions (`0600` on POSIX,
-  restricted ACL on Windows), deterministic sorted output, auto-added to `.gitignore`
-- **Fileless run mode** — injects secrets directly into child process environment without writing
-  `.env`; supports `--clear-env` and `--pass`
-- **Git hooks + merge driver** — `harden` installs pre-commit / pre-push hooks (`pre-push`
-  enforces drift checks with `--fail-if-dirty`); optional `gitvault merge-driver` for key-level
-  `.env` merges
-- **Recipient management** — named per-person `.pub` files in `.secrets/recipients/`; `recipient add/remove/list/add-self`; `rekey` re-encrypts all secrets for the current recipient set
-- **Onboarding** — `gitvault init` guides new team members through identity setup, recipient registration, and repo hardening in one command
-- **Recipient ceremony** — zero-shared-secret team onboarding via PR workflow; `identity pubkey` prints public key for piping; `recipient add-self` auto-registers own key
-- **OS keyring** — `keyring set/get/delete`; the OS keyring is always tried automatically as an identity source (macOS Keychain, Linux Secret Service, Windows Credential Manager)
-- **Identity bootstrap** — `identity create` generates local identities (classic/hybrid profile)
-  and can store to keyring or export to file; `--add-recipient` immediately registers the new key as a recipient
-- **Security hardening** — fail-closed on decrypt error, `--reveal` required to print secrets,
-  path-traversal guard, atomic writes everywhere, `status` never decrypts
-- **JSON output & non-interactive mode** — all commands accept `--json` and `--no-prompt`;
-  `CI=true` auto-enables non-interactive mode
-- **Preflight check** — `gitvault check` validates identity, recipients, and secrets dir without
-  side effects
-- **Streaming crypto** — encryption and decryption are streaming-capable; no full-file buffering
-  for large files
-- **AWS SSM backend** — `gitvault ssm pull/push/diff/set` sync secrets with AWS SSM Parameter Store;
-  enable with `--features ssm`; uses `--aws-profile` / `--aws-role-arn`
-- **Signed releases** — CI produces cosign-signed binaries for Linux, macOS, and Windows
-- **Format versioning** — format version visible in `gitvault --version` output
-- **Build metadata in version output** — `gitvault --version --long` includes git SHA and commit date
-- **Tag/version release gate** — `cargo xtask release-check` enforces `Cargo.toml` version ↔ git tag parity (`vX.Y.Z`), clean tree, and annotated tags
-- **Stable exit codes** — documented, machine-readable
-- **Spec gate** — `cargo xtask spec-verify` enforces frontmatter on every requirement spec
-
-## Related open-source tools
-
-GitVault is compatible with Git-first workflows and sits alongside other strong open-source secret
-management options:
-
-- [SOPS](https://github.com/getsops/sops) — widely used structured file encryption for YAML/JSON/.env; great for KMS-backed workflows.
-- [git-crypt](https://github.com/AGWA/git-crypt) — transparent file encryption with Git filters; strong fit for whole-file repo encryption patterns.
-- [git-secret](https://github.com/sobolevn/git-secret) — simple GPG-based secret sharing inside Git repositories.
-- [BlackBox](https://github.com/StackExchange/blackbox) — team-oriented secret encryption/decryption workflows around GPG.
-- [transcrypt](https://github.com/elasticdog/transcrypt) — lightweight transparent encryption for selected paths via Git filters.
-
-If you are deciding between tools: GitVault emphasizes age-native UX, deterministic structured
-re-encryption for cleaner diffs, leak prevention guardrails, and secure runtime injection tailored
-to multi-developer and AI-agent repository workflows.
-
----
+| Category | Highlights |
+|---|---|
+| **Encryption** | age standard format; whole-file or per-field (JSON/YAML/TOML); streaming crypto |
+| **Multi-recipient** | encrypt once for every team member; per-person `.pub` files |
+| **Deterministic diffs** | unchanged field values keep existing ciphertext → minimal git noise |
+| **Environments** | `GITVAULT_ENV` → `.secrets/env` → `dev`; per-worktree resolution |
+| **Onboarding** | `gitvault init` guides identity → recipient → hardening in one command |
+| **Recipient ceremony** | PR-based zero-shared-secret onboarding; `identity pubkey`, `recipient add-self` |
+| **Rekeying** | `rekey` re-encrypts all secrets to current recipient set; `--dry-run` supported |
+| **Runtime injection** | `run` injects secrets into child process env; no `.env` file written |
+| **Production barrier** | timed allow-token required for prod operations; `revoke-prod` clears it immediately |
+| **Identity sources** | `--identity` flag → `GITVAULT_IDENTITY` → OS keyring → SSH agent |
+| **OS keyring** | macOS Keychain, Linux Secret Service, Windows Credential Manager |
+| **Git safety** | pre-commit/pre-push hooks; drift detection; leak detection; merge driver |
+| **CI friendly** | `--json`, `--no-prompt`; `CI=1` auto-enables non-interactive mode; stable exit codes |
+| **AWS SSM** | `gitvault ssm pull/push/diff/set`; `--features ssm` |
 
 ## Installation
 
-### macOS (Homebrew)
-
 ```bash
-# 1) Add the tap that publishes gitvault formula updates
-brew tap aheissenberger/tools
-
-# 2) Install
-brew install gitvault
-
-# 3) Verify
-gitvault --version
-```
-
-One-line install (without pre-tapping):
-
-```bash
+# macOS
 brew install aheissenberger/tools/gitvault
-```
 
-### Build from source (all platforms)
-
-```bash
+# Build from source
 cargo build --release
-# binary is at target/release/gitvault (or /workspaces/.cargo-target/release/gitvault in devcontainer)
+
+# Prebuilt binaries — see GitHub Releases
+# gitvault-linux-x86_64.tar.gz | gitvault-macos-aarch64.tar.gz | gitvault-windows-x86_64.zip
+# Each release ships SHA256SUMS + cosign .sig/.pem files
 ```
-
-### Download prebuilt binaries (GitHub Releases)
-
-Prefer compressed assets for smaller downloads:
-
-- Linux: `gitvault-linux-x86_64.tar.gz`
-- macOS Apple Silicon: `gitvault-macos-aarch64.tar.gz`
-- macOS Intel: `gitvault-macos-x86_64.tar.gz`
-- Windows: `gitvault-windows-x86_64.zip`
-
-All assets are published with `SHA256SUMS` plus Sigstore cosign `.sig` / `.pem` files.
-
----
 
 ## Quick Start
 
-### New team member onboarding (recommended)
+### New team member
 
 ```bash
-# 1) Install gitvault, then run the interactive setup:
-gitvault init
+gitvault init              # identity → add-self → harden → config.toml
 
-# This will:
-# - Create an age identity and store it in the OS keyring
-# - Add your public key to .secrets/recipients/<your-name>.pub
-# - Harden the repo (.gitignore, git hooks, .gitattributes)
-# - Create .gitvault/config.toml if missing
-
-# 2) Commit your public key and open a PR:
-git add .secrets/recipients/ && git commit -m "onboard: add <your-name> as recipient"
+# Commit your public key and open a PR:
+git add .secrets/recipients/ && git commit -m "onboard: add <your-name>"
 git push && gh pr create
-
-# 3) After a maintainer merges and rekeyes:
-git pull && gitvault materialize
 ```
 
-### Manual setup
+After a maintainer merges and rekeyes: `git pull && gitvault materialize`
+
+### First repo setup
 
 ```bash
-# Create identity
-gitvault identity create
-
-# Add yourself as recipient
+gitvault identity create   # generate age identity (stored in OS keyring by default)
 gitvault recipient add-self
-git add .secrets/recipients/ && git commit -m "onboard: add me as recipient"
+gitvault harden            # .gitignore + git hooks
 
-# Harden the repo
-gitvault harden
+# Encrypt a file and register it with the repo:
+gitvault harden .env --env dev   # encrypts, git rm --cached, gitignores .env
 
-# Encrypt secrets
+# Or encrypt explicitly:
 gitvault encrypt .env --env dev
-
-# Or import an existing file directly:
-gitvault harden .env --env dev   # encrypts, git-rm --cached, gitignores .env
 ```
 
-### Rekeying after team changes
+### Rekey after membership change
 
 ```bash
-# After a new member's PR is merged, or after removing a member:
-gitvault rekey                        # re-encrypts all secrets to current recipients
+gitvault rekey             # re-encrypt all secrets to current recipients
 git add .secrets/ && git commit -m "rekey: update recipients"
-git push
 ```
+
+### CI/CD
+
+```bash
+# Use GITVAULT_IDENTITY to pass the age secret key; enable non-interactive mode:
+GITVAULT_IDENTITY="$SECRET_KEY" gitvault materialize --no-prompt --env prod
+# Or inject directly without writing .env:
+GITVAULT_IDENTITY="$SECRET_KEY" gitvault run --no-prompt -- node server.js
+```
+
+> Set `CI=1` (most CI systems do this automatically) to suppress interactive prompts globally.
 
 ---
 
@@ -175,69 +90,49 @@ git push
 ```
 gitvault [OPTIONS] <COMMAND>
 
-Core options (available on all commands):
-  --json
-  --no-prompt
-  --identity-selector <IDENTITY_SELECTOR>
-  --aws-profile <AWS_PROFILE>
-  --aws-role-arn <AWS_ROLE_ARN>
+Global options:  --json  --no-prompt  --identity-selector  --aws-profile  --aws-role-arn
 
 Commands:
   init          Onboard a new team member (identity, recipient, repo hardening)
-  encrypt       Encrypt a secret file
-  decrypt       Decrypt a .age encrypted file
+  encrypt       Encrypt a secret file (--env, --keep-path, --fields, --value-only)
+  decrypt       Decrypt a .age file (--output, --fields, --value-only, --reveal)
   materialize   Materialize secrets to root .env
   status        Check repository safety status
-  harden        Harden repository (update .gitignore, install hooks); also imports a file
-  run           Run a command with secrets injected as environment variables
+  harden        Harden repo (hooks, .gitignore); or import+encrypt a file with harden <file>
+  run           Inject secrets into child process env (--clear-env, --pass)
   allow-prod    Write a timed production allow token
   revoke-prod   Revoke the production allow token immediately
-  merge-driver  Run as git merge driver for .env files
-  recipient     Manage persistent recipients
-  rekey         Re-encrypt all secrets with the current recipients list
-  keyring       Manage identity key in OS keyring
-  identity      Manage local identity keys (`identity create`, `identity pubkey`)
-  check         Run preflight validation without side effects
-  ai            AI tooling helpers (skill and context print)
-  help          Print help
+  merge-driver  Git merge driver for .env files (register via `gitvault harden`)
+  recipient     Manage recipients: add | remove | list | add-self
+  rekey         Re-encrypt all secrets for current recipients (--dry-run, --env, --json)
+  keyring       Manage identity key in OS keyring: set | get | delete
+  identity      Manage identities: create [--add-recipient] | pubkey
+  check         Preflight validation without side effects
+  ai            Print embedded skill/context for AI agents (--json for MCP envelope)
+  ssm           AWS SSM Parameter Store sync (--features ssm)
 ```
-
-> This section is synchronized with live CLI help output (`gitvault --help`, `gitvault <command> --help`).
-> If built with `--features ssm`, an additional `ssm` command group is available.
 
 ### Operator quick map
 
 | Task | Command |
 |------|---------|
-| Encrypt whole file | `gitvault encrypt <file> -r <age_pubkey>` |
-| Encrypt selected fields (JSON/YAML/TOML) | `gitvault encrypt <file> --fields a.b,c` |
-| Encrypt `.env` per value | `gitvault encrypt .env --value-only` |
-| Decrypt to file | `gitvault decrypt <file.age> -i <identity>` |
-| Decrypt and print to stdout | `gitvault decrypt <file.age> --reveal` |
-| Materialize root `.env` | `gitvault materialize -i <identity>` |
-| Run command with injected secrets | `gitvault run -- <cmd> [args...]` |
-| Strict safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |
-| Validate setup without changes | `gitvault check [--env <env>]` |
-| Enable prod operation window | `gitvault allow-prod [--ttl <secs>]` |
-| Revoke prod operation window | `gitvault revoke-prod` |
 | Onboard new team member | `gitvault init` |
-| Manage recipients | `gitvault recipient add\|remove\|list\|add-self ...` |
-| Re-encrypt after recipient changes | `gitvault rekey [--dry-run] [--env <env>] [--json]` |
-| Store/use OS keyring identity | `gitvault keyring set\|get\|delete` |
-| Create new identity | `gitvault identity create [--profile classic\|hybrid] [--add-recipient]` |
+| Encrypt whole file | `gitvault encrypt <file> --env <env>` |
+| Encrypt selected fields | `gitvault encrypt <file> --fields a.b,c` |
+| Encrypt `.env` per-value | `gitvault encrypt .env --value-only` |
+| Import + encrypt existing file | `gitvault harden <file> --env <env>` |
+| Decrypt to stdout | `gitvault decrypt <file.age> --reveal` |
+| Materialize root `.env` | `gitvault materialize` |
+| Run command with injected secrets | `gitvault run -- <cmd> [args...]` |
+| Safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |
+| Validate setup (no side effects) | `gitvault check [--env <env>]` |
+| Enable prod operation window | `gitvault allow-prod [--ttl <secs>]` |
+| Revoke prod window | `gitvault revoke-prod` |
+| Manage recipients | `gitvault recipient add\|remove\|list\|add-self` |
+| Re-encrypt after membership change | `gitvault rekey [--dry-run] [--env <env>]` |
+| Create identity | `gitvault identity create [--profile classic\|hybrid] [--add-recipient]` |
 | Print own public key | `gitvault identity pubkey` |
-| Import and encrypt an existing file | `gitvault harden <file> --env <env>` |
-| Print embedded skill reference      | `gitvault ai skill print` |
-| Print embedded agent context        | `gitvault ai context print` |
-
-### High-signal command details
-
-- `encrypt`: supports `--env`, `--keep-path`, `--fields`, and `--value-only`.
-- `decrypt`: supports optional `--output [path]`, `--fields`, `--value-only`, and `--reveal`.
-- `run`: supports `--clear-env` plus `--pass <VARS>` for controlled pass-through.
-- `harden`: installs/updates hooks; with adapter config it delegates to external hook manager.
-- `merge-driver`: repository registration shortcut is `gitvault harden`.
-- `ai`: `skill print` and `context print` emit content embedded at compile time; use `--json` for MCP-style envelope output.
+| OS keyring | `gitvault keyring set\|get\|delete` |
 
 ---
 
@@ -253,7 +148,7 @@ environment variable. Precedence (highest → lowest): CLI flag → `GITVAULT_*`
 | Production env name | `prod` | `[env] prod_name` | — |
 | Environment name file | `.secrets/env` | `[env] env_file` | — |
 | Prod allow-token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
-| Recipients directory | `.secrets/recipients/` | `[paths] recipients_file` | — |
+| Recipients directory | `.secrets/recipients/` | `[paths] recipients_dir` | — |
 | Materialize output file | `.env` | `[paths] materialize_output` | — |
 | Keyring service name | `gitvault` | `[keyring] service` | — |
 | Keyring account name | `age-identity` | `[keyring] account` | — |
@@ -324,51 +219,31 @@ Priority order for loading the age identity:
 
 ## Configuration
 
-gitvault supports two optional TOML configuration file layers. Both files are optional — a missing
-file (or missing section) silently uses built-in defaults. See the
-[Defaults & configuration reference](#defaults--configuration-reference) table above for all keys.
+Two optional TOML config layers (both optional — missing file/section silently uses defaults):
 
 | File | Scope |
 |------|-------|
-| `.gitvault/config.toml` | Repository-level; committed with the project |
+| `.gitvault/config.toml` | Repository-level; commit with the project |
 | `~/.config/gitvault/config.toml` | User-global; personal defaults for all repos |
 
----
-
-### `[env]` — environment resolution
-
 ```toml
 # .gitvault/config.toml
+
 [env]
-default = "staging"         # treat staging as the default environment
-prod_name = "production"    # barrier triggers on "production" instead of "prod"
-env_file = ".config/env"    # custom path for the env-name file
-```
+default = "staging"         # default environment (built-in: "dev")
+prod_name = "production"    # name that triggers the production barrier (built-in: "prod")
+env_file = ".config/env"    # path to env-name file (built-in: ".secrets/env")
 
----
-
-### `[barrier]` — production allow-token
-
-```toml
-# .gitvault/config.toml
 [barrier]
-ttl_secs = 1800   # 30-minute production windows instead of 60
-```
+ttl_secs = 1800             # production allow-token lifetime in seconds (built-in: 3600)
 
----
-
-### `[paths]` — file locations
-
-```toml
-# .gitvault/config.toml
 [paths]
-materialize_output = ".env.local"
-recipients_file = ".gitvault/recipients"
+materialize_output = ".env.local"            # built-in: ".env"
+recipients_dir = ".gitvault/recipients"      # built-in: ".secrets/recipients"
+
+[hooks]
+adapter = "husky"           # hook manager: husky | pre-commit | lefthook
 ```
-
----
-
-### `[keyring]` — OS keyring slot
 
 ```toml
 # ~/.config/gitvault/config.toml
@@ -377,36 +252,34 @@ service = "my-company-gitvault"   # avoid collisions with other gitvault instanc
 account = "default-identity"
 ```
 
----
+Hook manager adapters require the corresponding binary on `PATH` (`gitvault-husky`,
+`gitvault-pre-commit`, `gitvault-lefthook`).
 
-### `[hooks]` — Git hook manager adapter
-
-| Adapter value | Binary on `PATH` |
-|---------------|-----------------|
-| `husky` | `gitvault-husky` |
-| `pre-commit` | `gitvault-pre-commit` |
-| `lefthook` | `gitvault-lefthook` |
-
-```toml
-# .gitvault/config.toml
-[hooks]
-adapter = "husky"
-```
-
-> **Validation:** unknown keys inside any known section produce a `Usage` error (exit `2`). Unknown top-level sections are silently ignored for forward compatibility.
+> **Validation:** unknown keys inside a known section produce a `Usage` error (exit `2`).
+> Unknown top-level sections are silently ignored for forward compatibility.
 
 ---
 
 ## Contributor and maintainer docs
 
-- Development workflows (sandbox, verification commands, xtask, worktrees, local environment):
-  [docs/development.md](docs/development.md)
-- AI agent onboarding and architecture hotspots:
-  [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md), [docs/ai/hotspots.md](docs/ai/hotspots.md)
-- Regenerate AI code index map:
-  `cargo xtask ai-index` → `docs/ai/code-index.json`
-- Maintainer release and CI/CD runbook (versioning/tags, release checklist, workflows, secrets):
-  [docs/releasing.md](docs/releasing.md)
+- Development workflows: [docs/development.md](docs/development.md)
+- AI agent onboarding and architecture hotspots: [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md), [docs/ai/hotspots.md](docs/ai/hotspots.md)
+- Regenerate AI code index: `cargo xtask ai-index` → `docs/ai/code-index.json`
+- Release runbook: [docs/releasing.md](docs/releasing.md)
+
+---
+
+## Alternatives
+
+| Tool | Approach |
+|------|----------|
+| [SOPS](https://github.com/getsops/sops) | Structured file encryption (YAML/JSON/.env); great for KMS-backed workflows |
+| [git-crypt](https://github.com/AGWA/git-crypt) | Transparent whole-file encryption via Git filters |
+| [git-secret](https://github.com/sobolevn/git-secret) | Simple GPG-based secret sharing inside Git |
+| [BlackBox](https://github.com/StackExchange/blackbox) | Team-oriented GPG encryption/decryption |
+| [transcrypt](https://github.com/elasticdog/transcrypt) | Lightweight transparent encryption for selected paths |
+
+GitVault differentiators: age-native, deterministic per-field re-encryption for minimal diffs, structured leak prevention, and runtime injection for AI-agent workflows.
 
 ---
 
