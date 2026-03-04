@@ -269,6 +269,19 @@ pub enum KeyringAction {
     Get,
     /// Remove stored identity from OS keyring
     Delete,
+    /// Store the SSH identity file passphrase in the OS keyring (REQ-39 AC3).
+    ///
+    /// Once stored, gitvault automatically retrieves this passphrase when loading
+    /// a passphrase-encrypted SSH identity file, enabling non-interactive operation.
+    SetPassphrase {
+        /// Passphrase value; if omitted, reads from `GITVAULT_IDENTITY_PASSPHRASE`
+        #[arg(value_name = "PASSPHRASE")]
+        passphrase: Option<String>,
+    },
+    /// Show whether an SSH identity passphrase is stored in the OS keyring
+    GetPassphrase,
+    /// Remove the stored SSH identity passphrase from the OS keyring
+    DeletePassphrase,
 }
 
 #[derive(Subcommand)]

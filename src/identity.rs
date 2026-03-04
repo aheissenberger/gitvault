@@ -115,36 +115,77 @@ pub fn list_ssh_agent_keys() -> Result<Vec<SshAgentKey>, SshAgentError> {
 
 /// Find the SSH private key file on disk that corresponds to `key`.
 ///
-/// Checks common locations (`~/.ssh/id_ed25519`, `~/.ssh/id_ecdsa`) and verifies
-/// the fingerprint by running `ssh-keygen -l -E sha256 -f <path>`.
+/// Search order:
+/// 1. Standard names (`id_ed25519`, `id_ecdsa`, `identity`) in `~/.ssh/`.
+/// 2. Agent key comment used as a filename within `~/.ssh/`.
+/// 3. All private-key-like files in `~/.ssh/` (no `.pub`, not config/known_hosts/
+///    authorized_keys, not a directory), verified by fingerprint.
+///
+/// Fingerprint verification uses `ssh-keygen -l -E sha256 -f <path>`.
 fn find_ssh_key_file(key: &SshAgentKey) -> Option<std::path::PathBuf> {
     let home = std::env::var("HOME").ok()?;
     let ssh_dir = std::path::Path::new(&home).join(".ssh");
 
-    let candidates = ["id_ed25519", "id_ecdsa", "identity"];
-
-    for name in &candidates {
-        let path = ssh_dir.join(name);
-        if !path.exists() {
-            continue;
-        }
-        // Verify fingerprint by querying the public key
-        if let Ok(fp_output) = std::process::Command::new("ssh-keygen")
+    // Returns true if the file's fingerprint matches the agent key.
+    let matches_fingerprint = |path: &std::path::Path| -> bool {
+        std::process::Command::new("ssh-keygen")
             .args(["-l", "-E", "sha256", "-f"])
-            .arg(&path)
+            .arg(path)
             .output()
-        {
-            let fp_str = String::from_utf8_lossy(&fp_output.stdout);
-            if fp_str.contains(&key.fingerprint) {
-                return Some(path);
-            }
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&key.fingerprint))
+            .unwrap_or(false)
+    };
+
+    // Priority 1: standard names.
+    let standard = ["id_ed25519", "id_ecdsa", "identity"];
+    for name in &standard {
+        let path = ssh_dir.join(name);
+        if path.exists() && matches_fingerprint(&path) {
+            return Some(path);
         }
     }
 
-    // Fallback: try comment as a filename within ~/.ssh/
-    let by_comment = ssh_dir.join(&key.comment);
-    if by_comment.exists() {
-        return Some(by_comment);
+    // Priority 2: comment as filename.
+    if !key.comment.is_empty() {
+        let by_comment = ssh_dir.join(&key.comment);
+        if by_comment.exists() && matches_fingerprint(&by_comment) {
+            return Some(by_comment);
+        }
+    }
+
+    // Priority 3: scan all private-key-like files in ~/.ssh/ (covers non-standard names
+    // such as ~/.ssh/work_key or ~/.ssh/github_ed25519).
+    let skip: std::collections::HashSet<&str> = standard
+        .iter()
+        .copied()
+        .chain([
+            "known_hosts",
+            "known_hosts.old",
+            "config",
+            "authorized_keys",
+        ])
+        .collect();
+
+    if let Ok(entries) = std::fs::read_dir(&ssh_dir) {
+        let mut entries: Vec<_> = entries.flatten().collect();
+        // Sort for determinism.
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Skip public keys, known config files, and already-checked standard names.
+            if name_str.ends_with(".pub") || skip.contains(name_str.as_ref()) {
+                continue;
+            }
+            if matches_fingerprint(&path) {
+                return Some(path);
+            }
+        }
     }
 
     None
@@ -284,9 +325,23 @@ pub fn probe_identity_sources(
                             source: "ssh-agent".to_string(),
                             reason: "no agent key matches selector".to_string(),
                         }),
-                        1 => states.push(IdentitySourceState::Resolved {
-                            source: "ssh-agent".to_string(),
-                        }),
+                        1 => {
+                            // Verify that the private key file is also accessible (REQ-39 AC6).
+                            if find_ssh_key_file(&keys[0]).is_some() {
+                                states.push(IdentitySourceState::Resolved {
+                                    source: "ssh-agent".to_string(),
+                                });
+                            } else {
+                                states.push(IdentitySourceState::SourceNotAvailable {
+                                    source: "ssh-agent".to_string(),
+                                    reason: format!(
+                                        "agent key {} found but no matching private key file in ~/.ssh/; \
+                                         ensure the key file is accessible",
+                                        keys[0].fingerprint
+                                    ),
+                                });
+                            }
+                        }
                         count => states.push(IdentitySourceState::Ambiguous {
                             source: "ssh-agent".to_string(),
                             count,
@@ -1418,16 +1473,32 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_probe_identity_sources_ssh_one_key_resolved() {
-        // When SSH agent has exactly one ED25519 key, probe should report
-        // IdentitySourceState::Resolved for the ssh-agent source.
-        // Covers lines 241, 255-276 (Ok path → key count = 1 → Resolved).
+        // When SSH agent has exactly one ED25519 key AND a matching private key file
+        // is on disk, probe should report IdentitySourceState::Resolved for ssh-agent.
+        // Covers lines 241, 255-276 (Ok path → key count = 1 → file found → Resolved).
         let _lock = global_test_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let fingerprint = "SHA256:fp_probe_test";
-        let bin_dir =
-            setup_fake_ssh_binaries(&format!("256 {fingerprint} probe_key (ED25519)"), "");
+
+        // Create a fake HOME with a .ssh/id_ed25519 private key file so that
+        // find_ssh_key_file succeeds.  The fake ssh-keygen returns the matching
+        // fingerprint for any path it is given.
+        let fake_home = tempfile::TempDir::new().unwrap();
+        let ssh_dir = fake_home.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::write(
+            ssh_dir.join("id_ed25519"),
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n",
+        )
+        .unwrap();
+
+        let keygen_output = format!("256 {fingerprint} comment (ED25519)");
+        let bin_dir = setup_fake_ssh_binaries(
+            &format!("256 {fingerprint} probe_key (ED25519)"),
+            &keygen_output,
+        );
 
         let original_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
@@ -1435,21 +1506,72 @@ mod tests {
         let states = with_env_var("GITVAULT_IDENTITY", None, || {
             with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
                 with_env_var("SSH_AUTH_SOCK", None, || {
-                    with_env_var("PATH", Some(&new_path), || {
-                        probe_identity_sources(None, None)
+                    with_env_var("HOME", Some(fake_home.path().to_str().unwrap()), || {
+                        with_env_var("PATH", Some(&new_path), || {
+                            probe_identity_sources(None, None)
+                        })
                     })
                 })
             })
         });
 
         assert_eq!(states.len(), 3);
-        // SSH source should be Resolved (1 key, no selector)
+        // SSH source should be Resolved (1 key, file found)
         assert!(
             matches!(
                 &states[2],
                 IdentitySourceState::Resolved { source } if source == "ssh-agent"
             ),
             "expected ssh-agent Resolved, got: {:?}",
+            states[2]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_probe_identity_sources_ssh_one_key_no_file_not_available() {
+        // When SSH agent has one ED25519 key but no matching private key file on disk,
+        // probe should report SourceNotAvailable (REQ-39 AC6: file must be accessible).
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let fingerprint = "SHA256:fp_nofile_test";
+        // Fake ssh-keygen returns a NON-matching fingerprint so no file matches.
+        let keygen_output = "256 SHA256:DIFFERENT other_comment (ED25519)";
+        let bin_dir = setup_fake_ssh_binaries(
+            &format!("256 {fingerprint} probe_key (ED25519)"),
+            keygen_output,
+        );
+
+        let fake_home = tempfile::TempDir::new().unwrap();
+        let ssh_dir = fake_home.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        // Create a key file but with a non-matching fingerprint per fake ssh-keygen.
+        std::fs::write(ssh_dir.join("id_ed25519"), "fake").unwrap();
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        let states = with_env_var("GITVAULT_IDENTITY", None, || {
+            with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    with_env_var("HOME", Some(fake_home.path().to_str().unwrap()), || {
+                        with_env_var("PATH", Some(&new_path), || {
+                            probe_identity_sources(None, None)
+                        })
+                    })
+                })
+            })
+        });
+
+        assert_eq!(states.len(), 3);
+        assert!(
+            matches!(
+                &states[2],
+                IdentitySourceState::SourceNotAvailable { source, .. } if source == "ssh-agent"
+            ),
+            "expected ssh-agent SourceNotAvailable (no file), got: {:?}",
             states[2]
         );
     }

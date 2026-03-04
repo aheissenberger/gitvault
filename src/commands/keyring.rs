@@ -93,7 +93,87 @@ where
             delete_fn()?;
             crate::output::output_success("Identity removed from OS keyring.", json);
         }
+        KeyringAction::SetPassphrase { passphrase } => {
+            cmd_keyring_set_passphrase(passphrase, json)?;
+        }
+        KeyringAction::GetPassphrase => {
+            cmd_keyring_get_passphrase(json)?;
+        }
+        KeyringAction::DeletePassphrase => {
+            cmd_keyring_delete_passphrase(json)?;
+        }
     }
+    Ok(CommandOutcome::Success)
+}
+
+/// Store the SSH identity file passphrase in the OS keyring (REQ-39 AC3).
+///
+/// If `passphrase` is `None`, falls back to `GITVAULT_IDENTITY_PASSPHRASE` env var.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if no passphrase is provided and the env var
+/// is not set, or [`GitvaultError::Keyring`] if the keyring write fails.
+pub fn cmd_keyring_set_passphrase(
+    passphrase: Option<String>,
+    json: bool,
+) -> Result<CommandOutcome, GitvaultError> {
+    let pass = passphrase
+        .or_else(|| std::env::var("GITVAULT_IDENTITY_PASSPHRASE").ok())
+        .ok_or_else(|| {
+            GitvaultError::Usage(
+                "No passphrase provided. Pass it as an argument or set GITVAULT_IDENTITY_PASSPHRASE."
+                    .to_string(),
+            )
+        })?;
+
+    let repo_root = crate::repo::find_repo_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cfg = crate::config::effective_config(&repo_root).unwrap_or_default();
+    keyring_store::keyring_set_identity_passphrase(
+        &pass,
+        cfg.keyring.service(),
+        cfg.keyring.account(),
+    )
+    .map_err(|e| GitvaultError::Keyring(e.to_string()))?;
+
+    crate::output::output_success("SSH identity passphrase stored in OS keyring.", json);
+    Ok(CommandOutcome::Success)
+}
+
+/// Report whether an SSH identity passphrase is stored in the OS keyring (REQ-39 AC3).
+///
+/// # Errors
+///
+/// Never returns an error; a missing passphrase is reported as a status message.
+pub fn cmd_keyring_get_passphrase(json: bool) -> Result<CommandOutcome, GitvaultError> {
+    let repo_root = crate::repo::find_repo_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cfg = crate::config::effective_config(&repo_root).unwrap_or_default();
+    let found = keyring_store::keyring_get_identity_passphrase(
+        cfg.keyring.service(),
+        cfg.keyring.account(),
+    )
+    .is_some();
+    if json {
+        println!("{}", serde_json::json!({"passphrase_stored": found}));
+    } else if found {
+        println!("SSH identity passphrase: stored");
+    } else {
+        println!("SSH identity passphrase: not set");
+    }
+    Ok(CommandOutcome::Success)
+}
+
+/// Remove the stored SSH identity passphrase from the OS keyring (REQ-39 AC3).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] if the keyring delete operation fails.
+pub fn cmd_keyring_delete_passphrase(json: bool) -> Result<CommandOutcome, GitvaultError> {
+    let repo_root = crate::repo::find_repo_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cfg = crate::config::effective_config(&repo_root).unwrap_or_default();
+    let passphrase_account = format!("{}-passphrase", cfg.keyring.account());
+    keyring_store::keyring_delete(cfg.keyring.service(), &passphrase_account)?;
+    crate::output::output_success("SSH identity passphrase removed from OS keyring.", json);
     Ok(CommandOutcome::Success)
 }
 
