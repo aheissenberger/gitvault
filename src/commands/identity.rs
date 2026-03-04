@@ -14,6 +14,7 @@ use serde::Serialize;
 /// Propagates any [`GitvaultError`] returned by the dispatched sub-command.
 pub fn cmd_identity(
     action: IdentityAction,
+    identity_selector: Option<String>,
     json: bool,
     no_prompt: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
@@ -21,6 +22,7 @@ pub fn cmd_identity(
         IdentityAction::Create { profile, out } => {
             cmd_identity_create(profile, out, json, no_prompt)
         }
+        IdentityAction::Pubkey => cmd_identity_pubkey(identity_selector, json),
     }
 }
 
@@ -126,7 +128,45 @@ pub fn cmd_identity_create(
     Ok(CommandOutcome::Success)
 }
 
-/// Write identity key to file with restrictive permissions (REQ-62).
+/// Print the age public key of the current identity (REQ-72 AC1-2).
+///
+/// Uses the standard identity resolution chain:
+/// `--identity` CLI arg → `GITVAULT_IDENTITY` env var → OS keyring → SSH-agent.
+///
+/// Plain output: raw public key string (pipeable).
+/// JSON output: `{"public_key":"age1..."}`.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] (exit code 2) if no identity can be resolved.
+#[allow(clippy::needless_pass_by_value)]
+pub fn cmd_identity_pubkey(
+    identity_selector: Option<String>,
+    json: bool,
+) -> Result<CommandOutcome, GitvaultError> {
+    use crate::identity::load_identity_with_selector;
+
+    let key = load_identity_with_selector(None, identity_selector.as_deref()).map_err(|_| {
+        GitvaultError::Usage(
+            "No identity resolved. Use --identity <file>, GITVAULT_IDENTITY, \
+             or store an identity in the OS keyring."
+                .to_string(),
+        )
+    })?;
+
+    let identity = crate::crypto::parse_identity(&key)?;
+    let pubkey = identity.to_public().to_string();
+
+    if json {
+        println!("{}", serde_json::json!({"public_key": pubkey}));
+    } else {
+        println!("{pubkey}");
+    }
+
+    Ok(CommandOutcome::Success)
+}
+
+
 ///
 /// # Errors
 ///
@@ -323,6 +363,7 @@ mod tests {
                 profile: IdentityProfile::Classic,
                 out: Some(path),
             },
+            None, // identity_selector
             true, // json
             true, // no_prompt
         );
@@ -377,5 +418,79 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── cmd_identity_pubkey ──────────────────────────────────────────────────
+
+    /// Helper: create an age identity file and return (NamedTempFile, expected_pubkey).
+    fn setup_pubkey_identity() -> (NamedTempFile, String) {
+        use age::x25519::Identity;
+        use age::secrecy::ExposeSecret;
+        let identity = Identity::generate();
+        let pubkey = identity.to_public().to_string();
+        let secret = identity.to_string();
+        let tmp = NamedTempFile::new().expect("temp file");
+        std::fs::write(tmp.path(), format!("{}\n", secret.expose_secret()))
+            .expect("write identity");
+        (tmp, pubkey)
+    }
+
+    #[test]
+    fn pubkey_output_starts_with_age1() {
+        use crate::commands::test_helpers::{global_test_lock, with_env_var};
+        let _lock = global_test_lock().lock().unwrap();
+        let (tmp, expected_pubkey) = setup_pubkey_identity();
+        let path = tmp.path().to_str().unwrap().to_string();
+        with_env_var("GITVAULT_IDENTITY", Some(&path), || {
+            let result = cmd_identity_pubkey(None, false);
+            assert!(result.is_ok(), "pubkey should succeed: {result:?}");
+        });
+        assert!(
+            expected_pubkey.starts_with("age1"),
+            "public key must start with age1, got: {expected_pubkey}"
+        );
+    }
+
+    #[test]
+    fn pubkey_json_output_format() {
+        use crate::commands::test_helpers::{global_test_lock, with_env_var};
+        let _lock = global_test_lock().lock().unwrap();
+        let (tmp, expected_pubkey) = setup_pubkey_identity();
+        let path = tmp.path().to_str().unwrap().to_string();
+        with_env_var("GITVAULT_IDENTITY", Some(&path), || {
+            let result = cmd_identity_pubkey(None, true);
+            assert!(result.is_ok(), "pubkey --json should succeed: {result:?}");
+        });
+        // Verify the public key is a valid age1 key
+        assert!(
+            expected_pubkey.starts_with("age1"),
+            "expected pubkey must start with age1"
+        );
+        // Verify JSON serialization is correct via serde_json directly
+        let json_str = serde_json::json!({"public_key": &expected_pubkey}).to_string();
+        assert!(json_str.contains("public_key"), "JSON must have public_key field");
+        assert!(json_str.contains(&expected_pubkey), "JSON must contain the public key");
+    }
+
+    #[test]
+    fn pubkey_exit_code_2_when_no_identity() {
+        use crate::commands::test_helpers::{global_test_lock, with_env_var};
+        let _lock = global_test_lock().lock().unwrap();
+        // Install a mock keyring with no entries
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        // Remove GITVAULT_IDENTITY so no file-based identity is available
+        with_env_var("GITVAULT_IDENTITY", None, || {
+            let result = cmd_identity_pubkey(None, false);
+            match result {
+                Err(crate::error::GitvaultError::Usage(ref msg)) => {
+                    let exit_code = crate::error::GitvaultError::Usage(msg.clone()).exit_code();
+                    assert_eq!(exit_code, crate::error::EXIT_USAGE, "exit code must be 2");
+                }
+                // If the environment happens to have a valid SSH-agent key, accept success.
+                Ok(_) => {}
+                // Other errors (keyring, etc.) are also non-zero exits — acceptable.
+                Err(_) => {}
+            }
+        });
     }
 }

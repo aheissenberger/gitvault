@@ -249,6 +249,8 @@ pub enum IdentityAction {
         #[arg(long, value_name = "PATH")]
         out: Option<String>,
     },
+    /// Print the age public key of the current identity
+    Pubkey,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, serde::Serialize)]
