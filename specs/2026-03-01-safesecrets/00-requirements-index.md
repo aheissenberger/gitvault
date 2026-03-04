@@ -91,5 +91,8 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 ## Notes
 This index is the canonical source for requirement-to-spec traceability.
 
+## Engineering NFR Specs (Additive)
+- `2026-03-04-engineering-nfr/req-110.md` -> REQ-110: Auto-discover encrypted fields in structured files (decrypt without --fields)
+
 ## Current Verification Status
 cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-69.

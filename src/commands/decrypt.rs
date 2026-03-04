@@ -136,6 +136,51 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         return Ok(CommandOutcome::Success);
     }
 
+    // REQ-110: auto-discover encrypted fields when --fields is omitted for structured formats
+    let ext = input_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if matches!(ext.as_str(), "json" | "yaml" | "yml" | "toml") {
+        let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
+        let encrypted_paths =
+            structured::collect_encrypted_field_paths(&content, &ext)
+                .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
+        if encrypted_paths.is_empty() {
+            crate::output::output_success(
+                &format!("No encrypted fields found in {}", input_path.display()),
+                opts.json,
+            );
+            return Ok(CommandOutcome::Success);
+        }
+        let field_refs: Vec<&str> = encrypted_paths.iter().map(String::as_str).collect();
+        let decrypted_content =
+            structured::decrypt_fields_content(&content, &ext, &field_refs, identity, true)
+                .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
+        if opts.reveal {
+            print!("{decrypted_content}");
+            return Ok(CommandOutcome::Success);
+        }
+        let out_path = resolve_output_path(&repo_root, &input_path, opts.output.as_deref())?;
+        repo::validate_write_path(&repo_root, &out_path)?;
+        if let Some(parent) = out_path.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::fs_util::atomic_write(&out_path, decrypted_content.as_bytes())?;
+        crate::output::output_success(
+            &format!(
+                "Decrypted {} field(s) in {}",
+                encrypted_paths.len(),
+                out_path.display()
+            ),
+            opts.json,
+        );
+        return Ok(CommandOutcome::Success);
+    }
+
     // REQ-41: if --reveal, print to stdout and never write to file
     if opts.reveal {
         let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);

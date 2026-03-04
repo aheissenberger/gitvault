@@ -173,6 +173,179 @@ fn encrypt_fields_toml(
         .map_err(|e| GitvaultError::Encryption(format!("TOML serialize error: {e}")))
 }
 
+// ── REQ-110: Recursive collectors for auto-discover ──────────────────────────
+
+/// Recursively collect dot-path keys for every string value in a JSON document
+/// that is age ASCII-armor encrypted.
+fn collect_encrypted_json(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let path = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                collect_encrypted_json(v, &path, out);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                let path = if prefix.is_empty() {
+                    i.to_string()
+                } else {
+                    format!("{prefix}.{i}")
+                };
+                collect_encrypted_json(v, &path, out);
+            }
+        }
+        serde_json::Value::String(s) if is_age_armor(s) => {
+            out.push(prefix.to_string());
+        }
+        _ => {}
+    }
+}
+
+/// Recursively collect dot-path keys for every string value in a YAML document
+/// that is age ASCII-armor encrypted.
+fn collect_encrypted_yaml(value: &serde_yaml::Value, prefix: &str, out: &mut Vec<String>) {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            for (k, v) in map {
+                if let Some(key_str) = k.as_str() {
+                    let path = if prefix.is_empty() {
+                        key_str.to_string()
+                    } else {
+                        format!("{prefix}.{key_str}")
+                    };
+                    collect_encrypted_yaml(v, &path, out);
+                }
+            }
+        }
+        serde_yaml::Value::Sequence(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                let path = if prefix.is_empty() {
+                    i.to_string()
+                } else {
+                    format!("{prefix}.{i}")
+                };
+                collect_encrypted_yaml(v, &path, out);
+            }
+        }
+        serde_yaml::Value::String(s) if is_age_armor(s) => {
+            out.push(prefix.to_string());
+        }
+        _ => {}
+    }
+}
+
+/// Recursively collect dot-path keys for every string value in a TOML document
+/// that is age ASCII-armor encrypted.
+fn collect_encrypted_toml(value: &toml::Value, prefix: &str, out: &mut Vec<String>) {
+    match value {
+        toml::Value::Table(map) => {
+            for (k, v) in map {
+                let path = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                collect_encrypted_toml(v, &path, out);
+            }
+        }
+        toml::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                let path = if prefix.is_empty() {
+                    i.to_string()
+                } else {
+                    format!("{prefix}.{i}")
+                };
+                collect_encrypted_toml(v, &path, out);
+            }
+        }
+        toml::Value::String(s) if is_age_armor(s) => {
+            out.push(prefix.to_string());
+        }
+        _ => {}
+    }
+}
+
+/// REQ-110: Recursively collect dot-path keys of every string value in a JSON, YAML, or TOML
+/// document whose value satisfies [`is_age_armor`].
+///
+/// Returns an empty `Vec` (not an error) when no encrypted values are found.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if `content` cannot be parsed for the given `ext`.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let paths = collect_encrypted_field_paths(json_content, "json")?;
+/// // paths might be ["db.password", "api.secret_key"]
+/// ```
+pub fn collect_encrypted_field_paths(
+    content: &str,
+    ext: &str,
+) -> Result<Vec<String>, GitvaultError> {
+    let mut out = Vec::new();
+    match ext {
+        "json" => {
+            let value: serde_json::Value = serde_json::from_str(content)
+                .map_err(|e| GitvaultError::Decryption(format!("JSON parse error: {e}")))?;
+            collect_encrypted_json(&value, "", &mut out);
+        }
+        "yaml" | "yml" => {
+            let value: serde_yaml::Value = serde_yaml::from_str(content)
+                .map_err(|e| GitvaultError::Decryption(format!("YAML parse error: {e}")))?;
+            collect_encrypted_yaml(&value, "", &mut out);
+        }
+        "toml" => {
+            let value: toml::Value = content
+                .parse::<toml::Value>()
+                .map_err(|e| GitvaultError::Decryption(format!("TOML parse error: {e}")))?;
+            collect_encrypted_toml(&value, "", &mut out);
+        }
+        _ => {
+            return Err(GitvaultError::Other(format!(
+                "Unsupported file format: .{ext}"
+            )));
+        }
+    }
+    Ok(out)
+}
+
+// ── REQ-4 / REQ-110: in-memory decrypt helpers ───────────────────────────────
+
+/// REQ-110: Decrypt the listed fields in the document in-memory and return the result as a
+/// `String` without touching any file on disk.
+///
+/// When `skip_undecryptable` is `true`, fields that fail decryption emit a `gitvault: warning:`
+/// line to stderr and are left as-is (original ciphertext preserved). The call still succeeds
+/// for all other fields.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] on parse/serialize errors or (when `skip_undecryptable` is `false`)
+/// on any field decryption failure.
+pub fn decrypt_fields_content(
+    content: &str,
+    ext: &str,
+    fields: &[&str],
+    identity: &dyn age::Identity,
+    skip_undecryptable: bool,
+) -> Result<String, GitvaultError> {
+    match ext {
+        "json" => decrypt_fields_json(content, fields, identity, skip_undecryptable),
+        "yaml" | "yml" => decrypt_fields_yaml(content, fields, identity, skip_undecryptable),
+        "toml" => decrypt_fields_toml(content, fields, identity, skip_undecryptable),
+        _ => Err(GitvaultError::Other(format!(
+            "Unsupported file format: .{ext}"
+        ))),
+    }
+}
+
 /// REQ-4: Decrypt specified fields in a JSON, YAML, or TOML file.
 ///
 /// # Errors
@@ -193,17 +366,7 @@ pub fn decrypt_fields(
     let content = std::fs::read_to_string(file_path)
         .map_err(|e| GitvaultError::Decryption(format!("Reading {}: {e}", file_path.display())))?;
 
-    let new_content = match ext.as_str() {
-        "json" => decrypt_fields_json(&content, fields, identity)?,
-        "yaml" | "yml" => decrypt_fields_yaml(&content, fields, identity)?,
-        "toml" => decrypt_fields_toml(&content, fields, identity)?,
-        _ => {
-            return Err(GitvaultError::Other(format!(
-                "Unsupported file format: .{ext}"
-            )));
-        }
-    };
-
+    let new_content = decrypt_fields_content(&content, &ext, fields, identity, false)?;
     atomic_write(file_path, new_content.as_bytes())
 }
 
@@ -211,6 +374,7 @@ fn decrypt_fields_json(
     content: &str,
     fields: &[&str],
     identity: &dyn age::Identity,
+    skip_undecryptable: bool,
 ) -> Result<String, GitvaultError> {
     let mut value: serde_json::Value = serde_json::from_str(content)
         .map_err(|e| GitvaultError::Decryption(format!("JSON parse error: {e}")))?;
@@ -220,11 +384,18 @@ fn decrypt_fields_json(
             && let Some(s) = v.as_str()
             && is_age_armor(s)
         {
-            let plain = decrypt_armor(s, identity)?;
-            *v = serde_json::Value::String(
-                String::from_utf8(plain.to_vec())
-                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
-            );
+            match decrypt_armor(s, identity) {
+                Ok(plain) => {
+                    *v = serde_json::Value::String(
+                        String::from_utf8(plain.to_vec())
+                            .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
+                    );
+                }
+                Err(e) if skip_undecryptable => {
+                    eprintln!("gitvault: warning: could not decrypt field '{field}': {e}");
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
     Ok(serde_json::to_string_pretty(&value)
@@ -236,6 +407,7 @@ fn decrypt_fields_yaml(
     content: &str,
     fields: &[&str],
     identity: &dyn age::Identity,
+    skip_undecryptable: bool,
 ) -> Result<String, GitvaultError> {
     let mut value: serde_yaml::Value = serde_yaml::from_str(content)
         .map_err(|e| GitvaultError::Decryption(format!("YAML parse error: {e}")))?;
@@ -245,11 +417,18 @@ fn decrypt_fields_yaml(
             && let Some(s) = v.as_str()
             && is_age_armor(s)
         {
-            let plain = decrypt_armor(s, identity)?;
-            *v = serde_yaml::Value::String(
-                String::from_utf8(plain.to_vec())
-                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
-            );
+            match decrypt_armor(s, identity) {
+                Ok(plain) => {
+                    *v = serde_yaml::Value::String(
+                        String::from_utf8(plain.to_vec())
+                            .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
+                    );
+                }
+                Err(e) if skip_undecryptable => {
+                    eprintln!("gitvault: warning: could not decrypt field '{field}': {e}");
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
     serde_yaml::to_string(&value)
@@ -260,6 +439,7 @@ fn decrypt_fields_toml(
     content: &str,
     fields: &[&str],
     identity: &dyn age::Identity,
+    skip_undecryptable: bool,
 ) -> Result<String, GitvaultError> {
     let mut value: toml::Value = content
         .parse::<toml::Value>()
@@ -270,11 +450,18 @@ fn decrypt_fields_toml(
             && let Some(s) = v.as_str()
             && is_age_armor(s)
         {
-            let plain = decrypt_armor(s, identity)?;
-            *v = toml::Value::String(
-                String::from_utf8(plain.to_vec())
-                    .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
-            );
+            match decrypt_armor(s, identity) {
+                Ok(plain) => {
+                    *v = toml::Value::String(
+                        String::from_utf8(plain.to_vec())
+                            .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
+                    );
+                }
+                Err(e) if skip_undecryptable => {
+                    eprintln!("gitvault: warning: could not decrypt field '{field}': {e}");
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
     toml::to_string_pretty(&value)
@@ -508,15 +695,15 @@ mod tests {
         let identity = gen_identity();
 
         let json = r#"{"secret":"plain"}"#;
-        let out_json = decrypt_fields_json(json, &["secret"], &identity).unwrap();
+        let out_json = decrypt_fields_json(json, &["secret"], &identity, false).unwrap();
         assert!(out_json.contains("\"secret\": \"plain\""));
 
         let yaml = "secret: plain\n";
-        let out_yaml = decrypt_fields_yaml(yaml, &["secret"], &identity).unwrap();
+        let out_yaml = decrypt_fields_yaml(yaml, &["secret"], &identity, false).unwrap();
         assert!(out_yaml.contains("secret: plain"));
 
         let toml = "secret = \"plain\"\n";
-        let out_toml = decrypt_fields_toml(toml, &["secret"], &identity).unwrap();
+        let out_toml = decrypt_fields_toml(toml, &["secret"], &identity, false).unwrap();
         assert!(out_toml.contains("secret = \"plain\""));
     }
 
@@ -633,5 +820,109 @@ mod tests {
         let v2: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v2["token"].as_str().unwrap(), "secret_token");
+    }
+
+    // ── REQ-110: collect_encrypted_field_paths ───────────────────────────────
+
+    #[test]
+    fn test_collect_encrypted_field_paths_json_flat() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let json = format!(r#"{{"name":"app","api_key":{}}}"#, serde_json::to_string(&enc).unwrap());
+        let paths = collect_encrypted_field_paths(&json, "json").unwrap();
+        assert_eq!(paths, vec!["api_key"]);
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_json_nested() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"s3cr3t", &keys).unwrap();
+        let json = format!(
+            r#"{{"db":{{"host":"localhost","password":{}}}}}"#,
+            serde_json::to_string(&enc).unwrap()
+        );
+        let paths = collect_encrypted_field_paths(&json, "json").unwrap();
+        assert_eq!(paths, vec!["db.password"]);
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_json_empty_when_plain() {
+        let json = r#"{"name":"app","version":"1.0"}"#;
+        let paths = collect_encrypted_field_paths(json, "json").unwrap();
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_yaml() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"tok", &keys).unwrap();
+        let yaml = format!("token: |\n  {}\nenv: prod\n", enc.trim().replace('\n', "\n  "));
+        let paths = collect_encrypted_field_paths(&yaml, "yaml").unwrap();
+        assert!(paths.contains(&"token".to_string()), "got: {paths:?}");
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_toml() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"pw", &keys).unwrap();
+        let mut map = toml::value::Table::new();
+        map.insert("name".to_string(), toml::Value::String("app".to_string()));
+        map.insert("password".to_string(), toml::Value::String(enc));
+        let toml_str = toml::to_string_pretty(&toml::Value::Table(map)).unwrap();
+        let paths = collect_encrypted_field_paths(&toml_str, "toml").unwrap();
+        assert!(paths.contains(&"password".to_string()), "got: {paths:?}");
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_unsupported_ext() {
+        let err = collect_encrypted_field_paths("whatever", "txt").unwrap_err();
+        assert!(err.to_string().contains("Unsupported file format"));
+    }
+
+    // ── REQ-110: decrypt_fields_content ─────────────────────────────────────
+
+    #[test]
+    fn test_decrypt_fields_content_json_roundtrip() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"topsecret", &keys).unwrap();
+        let json = format!(r#"{{"key":{}}}"#, serde_json::to_string(&enc).unwrap());
+        let out = decrypt_fields_content(&json, "json", &["key"], &identity, false).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["key"].as_str().unwrap(), "topsecret");
+    }
+
+    #[test]
+    fn test_decrypt_fields_content_skip_undecryptable() {
+        // Encrypt with one identity, try to decrypt with a different one.
+        let enc_identity = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let json = format!(r#"{{"key":{}}}"#, serde_json::to_string(&enc).unwrap());
+
+        let wrong_identity = gen_identity();
+        // skip_undecryptable=true → should succeed (field left as ciphertext), no error
+        let out = decrypt_fields_content(&json, "json", &["key"], &wrong_identity, true).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // Field value must still be the original ciphertext (not decrypted)
+        assert!(is_age_armor(v["key"].as_str().unwrap()));
+    }
+
+    #[test]
+    fn test_decrypt_fields_content_fail_on_undecryptable_when_strict() {
+        let enc_identity = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let json = format!(r#"{{"key":{}}}"#, serde_json::to_string(&enc).unwrap());
+
+        let wrong_identity = gen_identity();
+        // skip_undecryptable=false → must return an error
+        let err = decrypt_fields_content(&json, "json", &["key"], &wrong_identity, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("Decrypt"), "got: {err}");
     }
 }
