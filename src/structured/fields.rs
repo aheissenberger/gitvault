@@ -35,15 +35,15 @@ fn json_field_mut<'a>(
 
 /// Navigate to a nested field in a YAML value using dot-separated path, returning mutable ref.
 fn yaml_field_mut<'a>(
-    value: &'a mut serde_yml::Value,
+    value: &'a mut serde_yaml::Value,
     path: &[&str],
-) -> Option<&'a mut serde_yml::Value> {
+) -> Option<&'a mut serde_yaml::Value> {
     if path.is_empty() {
         return Some(value);
     }
     match value {
-        serde_yml::Value::Mapping(map) => {
-            let key = serde_yml::Value::String(path[0].to_string());
+        serde_yaml::Value::Mapping(map) => {
+            let key = serde_yaml::Value::String(path[0].to_string());
             map.get_mut(&key)
                 .and_then(|v| yaml_field_mut(v, &path[1..]))
         }
@@ -133,7 +133,7 @@ fn encrypt_fields_yaml(
     fields: &[&str],
     recipient_keys: &[String],
 ) -> Result<String, GitvaultError> {
-    let mut value: serde_yml::Value = serde_yml::from_str(content)
+    let mut value: serde_yaml::Value = serde_yaml::from_str(content)
         .map_err(|e| GitvaultError::Encryption(format!("YAML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
@@ -143,10 +143,10 @@ fn encrypt_fields_yaml(
                 .ok_or_else(|| GitvaultError::Usage(format!("field '{field}' is not a string")))?
                 .to_string();
             let encrypted = determine_encrypted_value(&current, recipient_keys)?;
-            *v = serde_yml::Value::String(encrypted);
+            *v = serde_yaml::Value::String(encrypted);
         }
     }
-    serde_yml::to_string(&value)
+    serde_yaml::to_string(&value)
         .map_err(|e| GitvaultError::Encryption(format!("YAML serialize error: {e}")))
 }
 
@@ -237,7 +237,7 @@ fn decrypt_fields_yaml(
     fields: &[&str],
     identity: &dyn age::Identity,
 ) -> Result<String, GitvaultError> {
-    let mut value: serde_yml::Value = serde_yml::from_str(content)
+    let mut value: serde_yaml::Value = serde_yaml::from_str(content)
         .map_err(|e| GitvaultError::Decryption(format!("YAML parse error: {e}")))?;
     for field in fields {
         let path: Vec<&str> = field.split('.').collect();
@@ -246,13 +246,13 @@ fn decrypt_fields_yaml(
             && is_age_armor(s)
         {
             let plain = decrypt_armor(s, identity)?;
-            *v = serde_yml::Value::String(
+            *v = serde_yaml::Value::String(
                 String::from_utf8(plain.to_vec())
                     .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
             );
         }
     }
-    serde_yml::to_string(&value)
+    serde_yaml::to_string(&value)
         .map_err(|e| GitvaultError::Decryption(format!("YAML serialize error: {e}")))
 }
 
@@ -361,7 +361,7 @@ mod tests {
         encrypt_fields(&path, &["database_password"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
-        let v: serde_yml::Value = serde_yml::from_str(&after_enc).unwrap();
+        let v: serde_yaml::Value = serde_yaml::from_str(&after_enc).unwrap();
         let enc_val = v["database_password"].as_str().unwrap();
         assert!(
             is_age_armor(enc_val),
@@ -372,7 +372,7 @@ mod tests {
         decrypt_fields(path.as_ref(), &["database_password"], &identity).unwrap();
 
         let after_dec = std::fs::read_to_string(&path).unwrap();
-        let v2: serde_yml::Value = serde_yml::from_str(&after_dec).unwrap();
+        let v2: serde_yaml::Value = serde_yaml::from_str(&after_dec).unwrap();
         assert_eq!(v2["database_password"].as_str().unwrap(), "secret123");
     }
 
@@ -478,7 +478,7 @@ mod tests {
         let mut json_value = serde_json::Value::String("x".to_string());
         assert!(json_field_mut(&mut json_value, &["a"]).is_none());
 
-        let mut yaml_value = serde_yml::Value::String("x".to_string());
+        let mut yaml_value = serde_yaml::Value::String("x".to_string());
         assert!(yaml_field_mut(&mut yaml_value, &["a"]).is_none());
 
         let mut toml_value = toml::Value::String("x".to_string());
@@ -625,13 +625,13 @@ mod tests {
         std::fs::write(&path, "token: secret_token\nenv: prod\n").unwrap();
 
         encrypt_fields(&path, &["token"], &identity, &keys).unwrap();
-        let v: serde_yml::Value =
-            serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let v: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(is_age_armor(v["token"].as_str().unwrap()));
 
         decrypt_fields(path.as_ref(), &["token"], &identity).unwrap();
-        let v2: serde_yml::Value =
-            serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let v2: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v2["token"].as_str().unwrap(), "secret_token");
     }
 }

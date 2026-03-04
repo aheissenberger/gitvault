@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.4.6] - 2025-01-01
+## [v0.4.8] - 2026-03-01
+
+### Security
+- Replace `serde_yml 0.0.12` (unsound/unmaintained, RUSTSEC-2025-0068) with `serde_yaml 0.9` for YAML field-level encryption
+- Add `audit.toml` to document accepted risk for `rsa` RUSTSEC-2023-0071 (Marvin Attack, no upstream fix available; transitive via `age`, not network-exposed)
+
+### CI
+- Switch `cargo-audit` installation to `taiki-e/install-action` (pre-built binary, avoids 3-min compile time)
+
+## [v0.4.7] - 2026-03-01
 
 - Regenerated AI docs, fixed stale CLI help paths
 - Expanded and restructured documentation (recipient guide, Quick Start, CLI reference, macOS app-signing guide)
