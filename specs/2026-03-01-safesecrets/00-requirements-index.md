@@ -92,8 +92,13 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 This index is the canonical source for requirement-to-spec traceability.
 
 ## Engineering NFR Specs (Additive)
-- `2026-03-04-engineering-nfr/req-110.md` -> REQ-110: Auto-discover encrypted fields in structured files (decrypt without --fields)
-- `2026-03-04-engineering-nfr/req-111.md` -> REQ-111: Encrypt all string fields without explicit listing (--all-fields flag)
+- `2026-03-04-engineering-nfr/req-110.md` -> REQ-110: Auto-discover encrypted fields in structured files (decrypt without --fields) [status: implemented]
+- `2026-03-04-engineering-nfr/req-111.md` -> REQ-111: Encrypt all string fields without explicit listing (--all-fields flag) [status: **superseded by REQ-112**]
+
+## Breaking Change Specs
+- `2026-03-04-engineering-nfr/req-112.md` -> REQ-112: `seal` and `unseal` — In-place field-level encryption commands (supersedes REQ-111; replaces encrypt --fields, --value-only; replaces decrypt --fields, --value-only) [status: proposed]
+- `2026-03-04-engineering-nfr/req-113.md` -> REQ-113: Breaking changes to `encrypt` — path mirroring default, remove --fields / --value-only / --keep-path [status: proposed]
+- `2026-03-04-engineering-nfr/req-114.md` -> REQ-114: Breaking changes to `decrypt` — source-path resolution, remove --fields / --value-only; supersedes REQ-110 auto-discover [status: proposed]
 
 ## Current Verification Status
 cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-69.
