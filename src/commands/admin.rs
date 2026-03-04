@@ -293,6 +293,311 @@ pub fn cmd_check(
     Ok(CommandOutcome::Success)
 }
 
+/// Per-file result produced by [`cmd_harden_with_files`].
+struct FileImportResult {
+    file: String,
+    encrypted_path: String,
+    /// One of `"encrypted"`, `"skipped"`, `"would-encrypt"`, `"error"`.
+    status: String,
+    error: Option<String>,
+}
+
+/// Harden the repository and optionally import plain files as encrypted secrets (REQ-70).
+///
+/// When `files` is empty this delegates to [`cmd_harden`], preserving the existing
+/// repo-level hardening behaviour (gitignore, hooks, gitattributes).
+///
+/// When `files` is non-empty the function:
+/// 1. Runs [`cmd_harden`] to ensure the repo is hardened.
+/// 2. Expands each entry in `files` as a glob pattern.
+/// 3. For every resolved path: encrypts it, writes the `.age` artifact to
+///    `.secrets/<env>/<filename>.age`, runs `git rm --cached`, appends the
+///    filename to `.gitignore`, and optionally removes the source file.
+///
+/// Idempotent: if `.secrets/<env>/<filename>.age` already exists the file is skipped.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if repo-root detection, repo hardening, recipient key
+/// resolution, or any non-file-level I/O fails.
+#[allow(clippy::needless_pass_by_value)]
+pub fn cmd_harden_with_files(
+    files: Vec<String>,
+    env_name: Option<String>,
+    dry_run: bool,
+    remove_source: bool,
+    extra_recipients: Vec<String>,
+    json: bool,
+    no_prompt: bool,
+    _identity_selector: Option<String>,
+) -> Result<CommandOutcome, GitvaultError> {
+    if files.is_empty() {
+        return cmd_harden(json, no_prompt);
+    }
+
+    // Step 1: always run repo hardening first.
+    cmd_harden(json, no_prompt)?;
+
+    let repo_root = crate::repo::find_repo_root()?;
+    let cfg = crate::config::effective_config(&repo_root)?;
+    let active_env = env_name.unwrap_or_else(|| crate::env::resolve_env(&repo_root, &cfg.env));
+
+    // Step 2: expand globs; fall back to treating each pattern as a literal path.
+    let mut src_paths: Vec<PathBuf> = Vec::new();
+    for pattern in &files {
+        let matched: Vec<PathBuf> = glob::glob(pattern)
+            .map_err(|e| {
+                GitvaultError::Usage(format!("Invalid glob pattern '{pattern}': {e}"))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if matched.is_empty() {
+            // No glob matches — treat as literal path so the caller gets a
+            // meaningful "file not found" error rather than silent skipping.
+            src_paths.push(PathBuf::from(pattern));
+        } else {
+            src_paths.extend(matched);
+        }
+    }
+
+    // Step 3: resolve recipient keys once for all files.
+    let recipient_keys =
+        crate::identity::resolve_recipient_keys(&repo_root, extra_recipients)?;
+
+    let mut results: Vec<FileImportResult> = Vec::new();
+
+    for src_path in src_paths {
+        // Extract filename; skip paths with no file-name component.
+        let filename = match src_path.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => {
+                results.push(FileImportResult {
+                    file: src_path.display().to_string(),
+                    encrypted_path: String::new(),
+                    status: "error".to_string(),
+                    error: Some("path has no file name component".to_string()),
+                });
+                continue;
+            }
+        };
+
+        let age_name = format!("{filename}.age");
+        let target_path =
+            crate::repo::get_env_encrypted_path(&repo_root, &active_env, &age_name);
+
+        // Path-traversal guard on the output path.
+        if let Err(e) = crate::repo::validate_write_path(&repo_root, &target_path) {
+            results.push(FileImportResult {
+                file: src_path.display().to_string(),
+                encrypted_path: target_path.display().to_string(),
+                status: "error".to_string(),
+                error: Some(e.to_string()),
+            });
+            continue;
+        }
+
+        // AC5: idempotent — skip if the .age counterpart already exists.
+        if target_path.exists() {
+            results.push(FileImportResult {
+                file: src_path.display().to_string(),
+                encrypted_path: target_path.display().to_string(),
+                status: "skipped".to_string(),
+                error: None,
+            });
+            continue;
+        }
+
+        // Dry-run: record intent without writing anything.
+        if dry_run {
+            results.push(FileImportResult {
+                file: src_path.display().to_string(),
+                encrypted_path: target_path.display().to_string(),
+                status: "would-encrypt".to_string(),
+                error: None,
+            });
+            continue;
+        }
+
+        // Read plaintext.
+        let plaintext = match std::fs::read(&src_path) {
+            Ok(b) => b,
+            Err(e) => {
+                results.push(FileImportResult {
+                    file: src_path.display().to_string(),
+                    encrypted_path: target_path.display().to_string(),
+                    status: "error".to_string(),
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+
+        // Parse recipient keys.
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = match recipient_keys
+            .iter()
+            .map(|k| {
+                crypto::parse_recipient(k)
+                    .map(|r| Box::new(r) as Box<dyn age::Recipient + Send>)
+            })
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                results.push(FileImportResult {
+                    file: src_path.display().to_string(),
+                    encrypted_path: target_path.display().to_string(),
+                    status: "error".to_string(),
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+
+        // Encrypt.
+        let ciphertext = match crypto::encrypt(recipients, &plaintext) {
+            Ok(c) => c,
+            Err(e) => {
+                results.push(FileImportResult {
+                    file: src_path.display().to_string(),
+                    encrypted_path: target_path.display().to_string(),
+                    status: "error".to_string(),
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+
+        // Create parent directories.
+        if let Some(parent) = target_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                results.push(FileImportResult {
+                    file: src_path.display().to_string(),
+                    encrypted_path: target_path.display().to_string(),
+                    status: "error".to_string(),
+                    error: Some(e.to_string()),
+                });
+                continue;
+            }
+        }
+
+        // Atomic write.
+        let write_result: Result<(), std::io::Error> = (|| {
+            let parent = target_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let tmp = tempfile::NamedTempFile::new_in(parent)?;
+            std::fs::write(tmp.path(), &ciphertext)?;
+            tmp.persist(&target_path).map_err(|e| e.error)?;
+            Ok(())
+        })();
+
+        if let Err(e) = write_result {
+            results.push(FileImportResult {
+                file: src_path.display().to_string(),
+                encrypted_path: target_path.display().to_string(),
+                status: "error".to_string(),
+                error: Some(e.to_string()),
+            });
+            continue;
+        }
+
+        // git rm --cached (ignore errors; file may not be tracked).
+        let _ = Command::new("git")
+            .args(["rm", "--cached", "--quiet", "--"])
+            .arg(&src_path)
+            .current_dir(&repo_root)
+            .output();
+
+        // Append source filename to .gitignore if not already present.
+        let gitignore_entry = format!("/{filename}");
+        if let Err(e) =
+            crate::materialize::ensure_gitignored(&repo_root, &[gitignore_entry.as_str()])
+        {
+            results.push(FileImportResult {
+                file: src_path.display().to_string(),
+                encrypted_path: target_path.display().to_string(),
+                status: "error".to_string(),
+                error: Some(e.to_string()),
+            });
+            continue;
+        }
+
+        // Optionally remove the source file.
+        if remove_source {
+            let _ = std::fs::remove_file(&src_path);
+        }
+
+        results.push(FileImportResult {
+            file: src_path.display().to_string(),
+            encrypted_path: target_path.display().to_string(),
+            status: "encrypted".to_string(),
+            error: None,
+        });
+    }
+
+    // Tally results.
+    let encrypted = results.iter().filter(|r| r.status == "encrypted").count();
+    let skipped = results.iter().filter(|r| r.status == "skipped").count();
+    let errors = results.iter().filter(|r| r.status == "error").count();
+    let would_encrypt = results
+        .iter()
+        .filter(|r| r.status == "would-encrypt")
+        .count();
+
+    if json {
+        let items: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "file": r.file,
+                    "encrypted_path": r.encrypted_path,
+                    "status": r.status,
+                    "error": r.error,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "results": items,
+                "summary": {
+                    "encrypted": encrypted,
+                    "skipped": skipped,
+                    "errors": errors,
+                }
+            })
+        );
+    } else {
+        for r in &results {
+            match r.status.as_str() {
+                "encrypted" => println!("✓ {} → {}", r.file, r.encrypted_path),
+                "skipped" => println!("- {} (already imported, skipped)", r.file),
+                "would-encrypt" => println!("[dry-run] {} → {}", r.file, r.encrypted_path),
+                "error" => eprintln!(
+                    "✗ {}: {}",
+                    r.file,
+                    r.error.as_deref().unwrap_or("unknown error")
+                ),
+                _ => {}
+            }
+        }
+        if dry_run {
+            println!(
+                "Dry-run: would encrypt {} file(s), {} already imported",
+                would_encrypt, skipped
+            );
+        } else {
+            println!(
+                "Encrypted {} file(s), {} skipped, {} error(s)",
+                encrypted, skipped, errors
+            );
+        }
+    }
+
+    Ok(CommandOutcome::Success)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,5 +1137,165 @@ mod tests {
                 });
             });
         });
+    }
+
+    // -----------------------------------------------------------------------
+    // REQ-70: cmd_harden_with_files tests
+    // -----------------------------------------------------------------------
+
+    /// Basic file-import test: file is encrypted, .age artifact created, gitignore updated.
+    #[test]
+    fn test_harden_with_files_encrypts_and_gitignores() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Create a plaintext file to import.
+        let env_file = dir.path().join(".env");
+        std::fs::write(&env_file, "SECRET=hunter2\n").unwrap();
+
+        // Generate an identity and use its public key as explicit recipient.
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_harden_with_files(
+                vec![env_file.to_string_lossy().to_string()],
+                Some("dev".to_string()),
+                false,         // dry_run
+                false,         // remove_source
+                vec![pubkey],  // extra_recipients
+                false,         // json
+                false,         // no_prompt
+                None,          // identity_selector
+            )
+            .expect("harden-with-files should succeed");
+        });
+
+        // The .age artifact should exist.
+        let age_path = dir.path().join("secrets/dev/.env.age");
+        assert!(age_path.exists(), ".env.age should have been created");
+
+        // .gitignore should contain the source filename.
+        let gitignore = std::fs::read_to_string(dir.path().join(".gitignore"))
+            .expect(".gitignore should exist");
+        assert!(
+            gitignore.contains("/.env"),
+            ".gitignore should contain /.env, got: {gitignore}"
+        );
+    }
+
+    /// Idempotent: running a second time with the same file skips it because
+    /// the .age counterpart already exists (AC5).
+    #[test]
+    fn test_harden_with_files_idempotent() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let env_file = dir.path().join(".env");
+        std::fs::write(&env_file, "SECRET=hunter2\n").unwrap();
+
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            // First import.
+            cmd_harden_with_files(
+                vec![env_file.to_string_lossy().to_string()],
+                Some("dev".to_string()),
+                false,
+                false,
+                vec![pubkey.clone()],
+                true,  // json — cover JSON branch on second run too
+                false,
+                None,
+            )
+            .expect("first import should succeed");
+
+            // Second import — should succeed (file reported as skipped).
+            cmd_harden_with_files(
+                vec![env_file.to_string_lossy().to_string()],
+                Some("dev".to_string()),
+                false,
+                false,
+                vec![pubkey],
+                true,
+                false,
+                None,
+            )
+            .expect("second import should succeed (idempotent)");
+        });
+
+        // The .age artifact should still exist.
+        assert!(dir.path().join("secrets/dev/.env.age").exists());
+    }
+
+    /// Empty files vec → delegates to existing repo-harden behaviour, no file logic runs.
+    #[test]
+    fn test_harden_no_files_delegates_to_repo_harden() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        cmd_harden_with_files(
+            vec![],  // no files → delegate
+            None,
+            false,
+            false,
+            vec![],
+            false,
+            false,
+            None,
+        )
+        .expect("harden-with-files with no files should succeed");
+
+        // Standard repo-harden artefacts must exist.
+        assert!(
+            dir.path().join(".git/hooks/pre-commit").exists(),
+            "pre-commit hook should be installed"
+        );
+        assert!(
+            dir.path().join(".gitignore").exists(),
+            ".gitignore should be created by repo harden"
+        );
+    }
+
+    /// --dry-run flag: nothing is written, but the call succeeds.
+    #[test]
+    fn test_harden_with_files_dry_run_does_not_write() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let env_file = dir.path().join(".env");
+        std::fs::write(&env_file, "SECRET=hunter2\n").unwrap();
+
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_harden_with_files(
+                vec![env_file.to_string_lossy().to_string()],
+                Some("dev".to_string()),
+                true,          // dry_run = true
+                false,
+                vec![pubkey],
+                false,
+                false,
+                None,
+            )
+            .expect("dry-run should succeed");
+        });
+
+        // The .age artifact must NOT have been created.
+        assert!(
+            !dir.path().join("secrets/dev/.env.age").exists(),
+            "dry-run must not write any .age artifact"
+        );
     }
 }
