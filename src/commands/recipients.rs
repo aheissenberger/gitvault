@@ -52,9 +52,17 @@ fn sanitise_name(name: &str) -> String {
 
 /// Derive a recipient name from the git `user.name` config, falling back to
 /// a short prefix of the public key.
-fn derive_recipient_name(pubkey: &str) -> String {
-    let git_name = std::process::Command::new("git")
+///
+/// REQ-90: sanitizes `GIT_DIR`, `GIT_CONFIG`, and `GIT_CONFIG_GLOBAL` from the
+///         child environment to prevent environment-based config injection.
+/// REQ-96: single authoritative helper — call this once per command, share result.
+fn read_git_user_name() -> Option<String> {
+    std::process::Command::new("git")
         .args(["config", "user.name"])
+        // REQ-90: remove git env vars that could redirect config reads.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_GLOBAL")
         .output()
         .ok()
         .and_then(|o| {
@@ -65,9 +73,13 @@ fn derive_recipient_name(pubkey: &str) -> String {
             }
         })
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+}
 
-    if let Some(name) = git_name {
+/// Derive a sanitised recipient filename from the git `user.name` config,
+/// falling back to a short prefix of the public key.
+fn derive_recipient_name(pubkey: &str) -> String {
+    if let Some(name) = read_git_user_name() {
         sanitise_name(&name)
     } else {
         // Fall back: use the first 12 chars of the pubkey (after "age1")
@@ -113,20 +125,8 @@ pub fn cmd_recipient_add_self(
         return Ok(CommandOutcome::Success);
     }
 
-    // 5. Derive filename from git user.name.
-    let git_name = std::process::Command::new("git")
-        .args(["config", "user.name"])
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout).ok()
-            } else {
-                None
-            }
-        })
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    // 5. Derive filename from git user.name (REQ-96: call once, share result).
+    let git_name = read_git_user_name();
     let name = git_name
         .as_deref()
         .map_or_else(|| "self".to_string(), sanitise_name);
@@ -252,9 +252,10 @@ pub fn cmd_rekey(
     //   a) Rekeyed   – decryption succeeded; we hold the plaintext
     //   b) Skipped   – no-access (not a recipient); skip gracefully
     //   c) Error     – hard error; abort immediately with exit code 1
+    // REQ-87: plaintext is Zeroizing<Vec<u8>> so it is overwritten on drop.
     #[allow(dead_code)]
     enum FileOutcome {
-        Rekeyed(std::path::PathBuf, Vec<u8>),
+        Rekeyed(std::path::PathBuf, zeroize::Zeroizing<Vec<u8>>),
         Skipped(std::path::PathBuf, String),
         Error(std::path::PathBuf, String),
     }

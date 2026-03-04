@@ -21,18 +21,14 @@ static STDIN_IDENTITY: OnceLock<Zeroizing<String>> = OnceLock::new();
 ///
 /// Returns [`GitvaultError::Usage`] if stdin is a terminal or the read fails.
 pub fn init_identity_from_stdin() -> Result<(), GitvaultError> {
+    use std::io::IsTerminal;
     use std::io::Read;
-    // Guard: refuse to read if stdin is a TTY — likely a user mistake.
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
-        // SAFETY: checking stdin's FD via isatty is safe.
-        if libc_isatty(std::io::stdin().as_raw_fd()) {
-            return Err(GitvaultError::Usage(
-                "--identity-stdin requires stdin to be a pipe, not an interactive terminal"
-                    .to_string(),
-            ));
-        }
+    // REQ-93: use std::io::IsTerminal (stable since Rust 1.70; MSRV is 1.93).
+    // Refuse to read if stdin is a TTY — likely a user mistake.
+    if std::io::stdin().is_terminal() {
+        return Err(GitvaultError::Usage(
+            "--identity-stdin requires stdin to be a pipe, not an interactive terminal".to_string(),
+        ));
     }
     let mut content = String::new();
     std::io::stdin().read_to_string(&mut content).map_err(|e| {
@@ -46,14 +42,6 @@ pub fn init_identity_from_stdin() -> Result<(), GitvaultError> {
     // Ignore if already set (e.g. in tests calling run() multiple times).
     let _ = STDIN_IDENTITY.set(Zeroizing::new(content));
     Ok(())
-}
-
-#[cfg(unix)]
-fn libc_isatty(fd: i32) -> bool {
-    unsafe extern "C" {
-        fn isatty(fd: std::ffi::c_int) -> std::ffi::c_int;
-    }
-    unsafe { isatty(fd) != 0 }
 }
 
 // ─── IdentitySourceState ──────────────────────────────────────────────────────

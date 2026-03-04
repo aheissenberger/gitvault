@@ -148,11 +148,17 @@ pub fn encrypt(
 
 /// Decrypt age-encrypted bytes using an identity.
 ///
+/// REQ-87: Returns decrypted bytes in a [`Zeroizing`] wrapper so plaintext is
+/// overwritten with zeros when the value is dropped.
+///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Decryption`] if the ciphertext is malformed, the identity
 /// does not match any recipient, or the data cannot be fully read.
-pub fn decrypt(identity: &dyn age::Identity, ciphertext: &[u8]) -> Result<Vec<u8>, GitvaultError> {
+pub fn decrypt(
+    identity: &dyn age::Identity,
+    ciphertext: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, GitvaultError> {
     let decryptor = Decryptor::new(ciphertext)
         .map_err(|e| GitvaultError::Decryption(format!("Failed to create decryptor: {e}")))?;
 
@@ -167,7 +173,7 @@ pub fn decrypt(identity: &dyn age::Identity, ciphertext: &[u8]) -> Result<Vec<u8
         }
     };
 
-    let mut plaintext = Vec::new();
+    let mut plaintext = Zeroizing::new(Vec::new());
     reader
         .read_to_end(&mut plaintext)
         .map_err(|e| GitvaultError::Decryption(format!("Failed to read decrypted data: {e}")))?;
@@ -251,7 +257,7 @@ mod tests {
         );
 
         let decrypted = decrypt(&identity, &ciphertext).expect("decrypt failed");
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext as &[u8]);
     }
 
     #[test]
@@ -270,8 +276,8 @@ mod tests {
         let decrypted1 = decrypt(&identity1, &ciphertext).expect("identity1 decrypt failed");
         let decrypted2 = decrypt(&identity2, &ciphertext).expect("identity2 decrypt failed");
 
-        assert_eq!(decrypted1, plaintext);
-        assert_eq!(decrypted2, plaintext);
+        assert_eq!(*decrypted1, plaintext as &[u8]);
+        assert_eq!(*decrypted2, plaintext as &[u8]);
     }
 
     #[test]
@@ -307,7 +313,7 @@ mod tests {
         let plaintext = b"test";
         let ciphertext = encrypt(recipients, plaintext).expect("encrypt failed");
         let decrypted = decrypt(&identity, &ciphertext).expect("decrypt failed");
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(*decrypted, plaintext as &[u8]);
     }
 
     #[test]
@@ -417,7 +423,7 @@ mod tests {
         let recipient: Box<dyn age::Recipient + Send> = Box::new(identity.to_public());
         let ciphertext = encrypt(vec![recipient], b"").expect("encrypt empty failed");
         let decrypted = decrypt(&identity, &ciphertext).expect("decrypt empty failed");
-        assert_eq!(decrypted, b"");
+        assert_eq!(*decrypted, b"" as &[u8]);
     }
 
     #[test]
@@ -491,7 +497,7 @@ mod tests {
         let ciphertext = encrypt(vec![recipient], b"test").expect("encrypt should succeed");
         let decrypted = decrypt(any_identity.as_identity(), &ciphertext)
             .expect("decrypt with parsed identity should succeed");
-        assert_eq!(decrypted, b"test");
+        assert_eq!(*decrypted, b"test" as &[u8]);
     }
 
     // ── Test SSH identity PEM used as a constant across SSH-related tests ──

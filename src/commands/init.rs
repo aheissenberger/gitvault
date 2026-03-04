@@ -195,6 +195,9 @@ pub fn cmd_init(
         // Derive a display name for the commit message hint.
         let git_name = std::process::Command::new("git")
             .args(["config", "user.name"])
+            // REQ-90: remove env vars that could redirect git config reads.
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_GLOBAL")
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())

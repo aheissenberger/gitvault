@@ -5,12 +5,14 @@
 //! REQ-15: fail closed — any unmet condition returns `BarrierNotSatisfied`.
 
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use crate::defaults;
 use crate::error::GitvaultError;
@@ -20,6 +22,9 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Key file for the HMAC signing key (REQ-79).
 const TOKEN_KEY_FILE: &str = ".git/gitvault/.token-key";
+
+/// Hard upper bound on production token TTL (REQ-97). 24 hours.
+pub const MAX_TOKEN_TTL_SECS: u64 = 86_400;
 
 /// Default token TTL in seconds (1 hour); re-exported from [`defaults`] for
 /// call-sites that import directly from this module.
@@ -117,14 +122,21 @@ fn read_confirmation_from(reader: &mut impl std::io::BufRead) -> Result<bool, Gi
 
 /// Write a timed allow token to `.secrets/.prod-token`. REQ-14, REQ-79.
 ///
-/// Token format: `<expiry>:<hex(hmac-sha256(key, expiry_bytes))>`
+/// Token format: `<expiry>:<hex(hmac-sha256(key, expiry_be_bytes))>`
 /// The HMAC key is stored in `.git/gitvault/.token-key` (0600); created on first use.
 ///
 /// # Errors
 ///
+/// Returns [`GitvaultError::Usage`] if `ttl_secs` exceeds [`MAX_TOKEN_TTL_SECS`].
 /// Returns [`GitvaultError::Other`] if the expiry timestamp overflows.
 /// Returns [`GitvaultError::Io`] if creating or writing the token file fails.
 pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError> {
+    // REQ-97: enforce hard TTL cap independent of config.
+    if ttl_secs > MAX_TOKEN_TTL_SECS {
+        return Err(GitvaultError::Usage(format!(
+            "TTL {ttl_secs}s exceeds maximum {MAX_TOKEN_TTL_SECS}s (24 h)"
+        )));
+    }
     let now = now_secs()?;
     let expiry = now
         .checked_add(ttl_secs)
@@ -211,37 +223,70 @@ fn now_secs() -> Result<u64, GitvaultError> {
 }
 
 /// Compute HMAC-SHA256 of the expiry timestamp and return the lowercase hex string.
+///
+/// REQ-88: `expiry` is encoded as 8 big-endian bytes (`to_be_bytes()`) for
+/// canonical, unambiguous MAC input rather than a decimal ASCII string.
+///
+/// # Panics
+///
+/// Does not panic: `new_from_slice` for HMAC-SHA256 accepts any non-empty key;
+/// a `[u8; 32]` is always valid.
 fn compute_hmac(key: &[u8; 32], expiry: u64) -> String {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC key is always 32 bytes");
-    mac.update(expiry.to_string().as_bytes());
+    let mut mac =
+        HmacSha256::new_from_slice(key).expect("HMAC key is always 32 bytes — infallible");
+    // REQ-88: canonical big-endian encoding, not decimal string.
+    mac.update(&expiry.to_be_bytes());
     let result = mac.finalize().into_bytes();
     hex::encode(result)
 }
 
 /// Load the HMAC signing key from disk, creating it (with restricted permissions) if absent.
+///
+/// REQ-89: key material is held in [`Zeroizing`] wrappers so memory is overwritten on drop.
+/// REQ-91: uses `match` on the `read_to_string` result instead of `exists()` to
+///          eliminate a TOCTOU race between the existence check and the read.
+/// REQ-92: rejects an all-zero key (possible file tampering) with a hard error.
 fn load_or_create_token_key(repo_root: &Path) -> Result<[u8; 32], GitvaultError> {
     let key_path = repo_root.join(TOKEN_KEY_FILE);
 
-    if key_path.exists() {
-        let content = fs::read_to_string(&key_path)?;
-        let bytes = hex::decode(content.trim())
-            .map_err(|e| GitvaultError::Other(format!("invalid token key format: {e}")))?;
-        bytes
-            .try_into()
-            .map_err(|_| GitvaultError::Other("token key has wrong length".to_string()))
-    } else {
-        let mut key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key);
-        let hex_key = hex::encode(key);
-        if let Some(parent) = key_path.parent() {
-            fs::create_dir_all(parent)?;
+    // REQ-91: match directly on read result — no exists() pre-check.
+    match fs::read_to_string(&key_path) {
+        Ok(raw) => {
+            // REQ-89: zeroize the raw content string on drop.
+            let content = Zeroizing::new(raw);
+            // REQ-89: zeroize the decoded bytes on drop.
+            let bytes = Zeroizing::new(
+                hex::decode(content.trim())
+                    .map_err(|e| GitvaultError::Other(format!("invalid token key format: {e}")))?,
+            );
+            // REQ-92: reject all-zero key (possible file tampering or zeroed-out disk sector).
+            if bytes.iter().all(|&b| b == 0) {
+                return Err(GitvaultError::Other(
+                    "token key is all-zeros — possible file tampering".to_string(),
+                ));
+            }
+            bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| GitvaultError::Other("token key has wrong length".to_string()))
         }
-        let tmp = tempfile::NamedTempFile::new_in(key_path.parent().unwrap_or(repo_root))?;
-        fs::write(tmp.path(), &hex_key)?;
-        permissions::enforce_owner_rw(tmp.path(), "token key")?;
-        tmp.persist(&key_path)
-            .map_err(|e| GitvaultError::Io(e.error))?;
-        Ok(key)
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // REQ-89: zeroize the key array on drop.
+            let mut key = Zeroizing::new([0u8; 32]);
+            rand::thread_rng().fill_bytes(key.as_mut());
+            // REQ-89: zeroize the hex string on drop.
+            let hex_key = Zeroizing::new(hex::encode(*key));
+            if let Some(parent) = key_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let tmp = tempfile::NamedTempFile::new_in(key_path.parent().unwrap_or(repo_root))?;
+            fs::write(tmp.path(), hex_key.as_bytes())?;
+            permissions::enforce_owner_rw(tmp.path(), "token key")?;
+            tmp.persist(&key_path)
+                .map_err(|e| GitvaultError::Io(e.error))?;
+            Ok(*key)
+        }
+        Err(e) => Err(GitvaultError::Io(e)),
     }
 }
 
@@ -463,11 +508,56 @@ mod tests {
     #[test]
     fn allow_prod_with_overflow_ttl_returns_error() {
         let dir = root();
+        // u64::MAX exceeds MAX_TOKEN_TTL_SECS — should return Usage error (REQ-97).
         let result = allow_prod(dir.path(), u64::MAX);
         assert!(
-            matches!(result, Err(GitvaultError::Other(_))),
-            "expected Other error for overflow TTL, got: {result:?}"
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "expected Usage error for TTL exceeding cap, got: {result:?}"
         );
+    }
+
+    /// REQ-97: TTL at exactly the cap is accepted.
+    #[test]
+    fn allow_prod_with_max_ttl_is_accepted() {
+        let dir = root();
+        assert!(allow_prod(dir.path(), MAX_TOKEN_TTL_SECS).is_ok());
+    }
+
+    /// REQ-97: TTL one second over the cap is rejected.
+    #[test]
+    fn allow_prod_with_ttl_over_cap_returns_usage_error() {
+        let dir = root();
+        let result = allow_prod(dir.path(), MAX_TOKEN_TTL_SECS + 1);
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "expected Usage error for TTL {}, got: {result:?}",
+            MAX_TOKEN_TTL_SECS + 1
+        );
+    }
+
+    /// REQ-92: all-zero key loaded from disk is rejected.
+    #[test]
+    fn load_or_create_token_key_rejects_all_zero_key() {
+        let dir = root();
+        let key_path = dir.path().join(TOKEN_KEY_FILE);
+        std::fs::create_dir_all(key_path.parent().unwrap()).unwrap();
+        // Write a 32-byte all-zero key as hex.
+        std::fs::write(&key_path, hex::encode([0u8; 32])).unwrap();
+        let result = load_or_create_token_key(dir.path());
+        assert!(
+            matches!(result, Err(GitvaultError::Other(ref m)) if m.contains("all-zeros")),
+            "expected all-zeros error, got: {result:?}"
+        );
+    }
+
+    /// REQ-91: key file that doesn't exist causes a fresh key to be created (not a TOCTOU check).
+    #[test]
+    fn load_or_create_token_key_creates_key_when_absent() {
+        let dir = root();
+        let key = load_or_create_token_key(dir.path()).unwrap();
+        assert_ne!(key, [0u8; 32], "freshly created key must not be all-zeros");
+        let key_path = dir.path().join(TOKEN_KEY_FILE);
+        assert!(key_path.exists(), "key file must be written to disk");
     }
 
     #[test]

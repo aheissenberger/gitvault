@@ -19,6 +19,9 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
             "--",
             crate::defaults::SECRETS_DIR,
         ])
+        // REQ-90: remove env vars that could redirect git operations.
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_GLOBAL")
         .current_dir(repo_root)
         .output();
 
@@ -44,6 +47,9 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
 pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError> {
     let output = Command::new("git")
         .args(["diff", "--cached", "--name-only"])
+        // REQ-90: remove env vars that could redirect git operations.
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_GLOBAL")
         .current_dir(repo_root)
         .output()
         .map_err(|e| GitvaultError::Other(format!("Failed to run git: {e}")))?;
@@ -70,6 +76,9 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
 /// match the plain output directory or `.env` paths. Returns a list of paths
 /// found in committed history, or an empty vec if none are found.
 ///
+/// REQ-95: uses `--diff-filter=AR` (Added and Renamed) so that secrets renamed
+/// into sensitive paths are also detected, not only newly added files.
+///
 /// Callers should treat a non-empty result as a [`GitvaultError::PlaintextLeak`].
 ///
 /// # Errors
@@ -80,11 +89,14 @@ pub fn find_history_plaintext_leaks(repo_root: &Path) -> Result<Vec<String>, Git
         .args([
             "log",
             "--all",
-            "--diff-filter=A",
+            "--diff-filter=AR", // REQ-95: include renames in addition to adds.
             "--name-only",
             "--format=",
             &format!("--max-count={HISTORY_SCAN_LIMIT}"),
         ])
+        // REQ-90: remove env vars that could redirect git operations.
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_GLOBAL")
         .current_dir(repo_root)
         .output()
         .map_err(|e| GitvaultError::Other(format!("Failed to run git log: {e}")))?;

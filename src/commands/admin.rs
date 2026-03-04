@@ -16,6 +16,9 @@ const MERGE_DRIVER_CONFIG_VALUE: &str = "gitvault merge-driver %O %A %B";
 fn ensure_merge_driver_git_config(repo_root: &Path) -> Result<(), GitvaultError> {
     let get_output = Command::new("git")
         .args(["config", "--local", "--get", MERGE_DRIVER_CONFIG_KEY])
+        // REQ-90: remove env vars that could redirect git config reads.
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_GLOBAL")
         .current_dir(repo_root)
         .output()
         .map_err(|e| GitvaultError::Other(format!("failed to run git config --get: {e}")))?;
@@ -38,6 +41,9 @@ fn ensure_merge_driver_git_config(repo_root: &Path) -> Result<(), GitvaultError>
             MERGE_DRIVER_CONFIG_KEY,
             MERGE_DRIVER_CONFIG_VALUE,
         ])
+        // REQ-90: remove env vars that could redirect git config reads.
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_GLOBAL")
         .current_dir(repo_root)
         .status()
         .map_err(|e| GitvaultError::Other(format!("failed to run git config --set: {e}")))?;
