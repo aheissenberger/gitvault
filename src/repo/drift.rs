@@ -1,7 +1,7 @@
 use crate::defaults::{HISTORY_SCAN_LIMIT, PLAIN_BASE_DIR};
 use crate::error::GitvaultError;
+use crate::git::{git_output, git_output_raw};
 use std::path::Path;
-use std::process::Command;
 
 /// Check whether `secrets/` has uncommitted changes (drift). REQ-32.
 ///
@@ -11,24 +11,18 @@ use std::process::Command;
 ///
 /// Returns [`GitvaultError::Other`] if `git diff` cannot be spawned.
 pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
-    let output = Command::new("git")
-        .args([
+    // `git diff --quiet` exits 1 when there are differences — not an error.
+    let out = git_output_raw(
+        &[
             "diff",
             "--quiet",
             "HEAD",
             "--",
             crate::defaults::SECRETS_DIR,
-        ])
-        // REQ-90: remove env vars that could redirect git operations.
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .current_dir(repo_root)
-        .output();
-
-    match output {
-        Ok(out) => Ok(!out.status.success()),
-        Err(e) => Err(GitvaultError::Other(format!("failed to run git: {e}"))),
-    }
+        ],
+        repo_root,
+    )?;
+    Ok(!out.status.success())
 }
 
 /// Check that no plaintext secrets are staged for commit. REQ-10
@@ -45,16 +39,8 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
 /// Returns [`GitvaultError::Other`] if `git diff --cached` cannot be spawned.
 /// Returns [`GitvaultError::PlaintextLeak`] if plaintext secrets are staged.
 pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError> {
-    let output = Command::new("git")
-        .args(["diff", "--cached", "--name-only"])
-        // REQ-90: remove env vars that could redirect git operations.
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .current_dir(repo_root)
-        .output()
-        .map_err(|e| GitvaultError::Other(format!("Failed to run git: {e}")))?;
-
-    let staged = String::from_utf8_lossy(&output.stdout);
+    let raw = git_output(&["diff", "--cached", "--name-only"], repo_root)?;
+    let staged = String::from_utf8_lossy(&raw);
     let files: Vec<&str> = staged
         .lines()
         .filter(|l| {
@@ -85,23 +71,19 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
 ///
 /// Returns [`GitvaultError::Other`] if `git log` cannot be spawned.
 pub fn find_history_plaintext_leaks(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
-    let output = Command::new("git")
-        .args([
+    let max = format!("--max-count={HISTORY_SCAN_LIMIT}");
+    let raw = git_output(
+        &[
             "log",
             "--all",
             "--diff-filter=AR", // REQ-95: include renames in addition to adds.
             "--name-only",
             "--format=",
-            &format!("--max-count={HISTORY_SCAN_LIMIT}"),
-        ])
-        // REQ-90: remove env vars that could redirect git operations.
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .current_dir(repo_root)
-        .output()
-        .map_err(|e| GitvaultError::Other(format!("Failed to run git log: {e}")))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+            &max,
+        ],
+        repo_root,
+    )?;
+    let stdout = String::from_utf8_lossy(&raw);
     let leaks: Vec<String> = stdout
         .lines()
         .filter(|l| {

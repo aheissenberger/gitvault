@@ -193,14 +193,9 @@ pub fn cmd_init(
         );
     } else {
         // Derive a display name for the commit message hint.
-        let git_name = std::process::Command::new("git")
-            .args(["config", "user.name"])
-            // REQ-90: remove env vars that could redirect git config reads.
-            .env_remove("GIT_CONFIG")
-            .env_remove("GIT_CONFIG_GLOBAL")
-            .output()
+        let git_name = crate::git::git_output(&["config", "user.name"], &repo_root)
             .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|b| String::from_utf8(b).ok())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "you".to_string());

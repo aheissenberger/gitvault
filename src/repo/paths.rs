@@ -14,6 +14,11 @@ struct SystemGitRunner;
 impl GitRunner for SystemGitRunner {
     fn show_toplevel(&self, start: &Path) -> std::io::Result<Output> {
         Command::new("git")
+            // REQ-90: strip env vars that could redirect git operations.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_GLOBAL")
+            .env("GIT_TERMINAL_PROMPT", "0")
             .args(["-C"])
             .arg(start)
             .args(["rev-parse", "--show-toplevel"])

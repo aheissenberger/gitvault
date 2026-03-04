@@ -56,30 +56,18 @@ fn sanitise_name(name: &str) -> String {
 /// REQ-90: sanitizes `GIT_DIR`, `GIT_CONFIG`, and `GIT_CONFIG_GLOBAL` from the
 ///         child environment to prevent environment-based config injection.
 /// REQ-96: single authoritative helper — call this once per command, share result.
-fn read_git_user_name() -> Option<String> {
-    std::process::Command::new("git")
-        .args(["config", "user.name"])
-        // REQ-90: remove git env vars that could redirect config reads.
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .output()
+fn read_git_user_name(dir: &std::path::Path) -> Option<String> {
+    crate::git::git_output(&["config", "user.name"], dir)
         .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout).ok()
-            } else {
-                None
-            }
-        })
+        .and_then(|b| String::from_utf8(b).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
 
 /// Derive a sanitised recipient filename from the git `user.name` config,
 /// falling back to a short prefix of the public key.
-fn derive_recipient_name(pubkey: &str) -> String {
-    if let Some(name) = read_git_user_name() {
+fn derive_recipient_name(pubkey: &str, dir: &std::path::Path) -> String {
+    if let Some(name) = read_git_user_name(dir) {
         sanitise_name(&name)
     } else {
         // Fall back: use the first 12 chars of the pubkey (after "age1")
@@ -126,7 +114,7 @@ pub fn cmd_recipient_add_self(
     }
 
     // 5. Derive filename from git user.name (REQ-96: call once, share result).
-    let git_name = read_git_user_name();
+    let git_name = read_git_user_name(&repo_root);
     let name = git_name
         .as_deref()
         .map_or_else(|| "self".to_string(), sanitise_name);
@@ -167,7 +155,7 @@ pub fn cmd_recipient(
                     "Recipient already present: {pubkey}"
                 )));
             }
-            let name = derive_recipient_name(&pubkey);
+            let name = derive_recipient_name(&pubkey, &repo_root);
             repo::write_recipients(&repo_root, recipients_dir, &name, &pubkey)?;
             crate::output::output_success(&format!("Added recipient: {pubkey}"), json);
         }

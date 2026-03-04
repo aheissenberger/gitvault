@@ -15,6 +15,7 @@ pub mod dispatch;
 pub mod env;
 pub mod error;
 pub mod fhsm;
+pub mod git;
 pub mod identity;
 pub mod keyring_store;
 pub mod materialize;

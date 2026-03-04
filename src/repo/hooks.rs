@@ -1,8 +1,8 @@
 use crate::error::GitvaultError;
+use crate::git::git_output_raw;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const MANAGED_BLOCK_BEGIN: &str = "# --- gitvault managed begin ---";
 const MANAGED_BLOCK_END: &str = "# --- gitvault managed end ---";
@@ -90,12 +90,7 @@ pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> PathBuf {
         path.canonicalize().unwrap_or(path)
     }
 
-    let output = Command::new("git")
-        .args(["rev-parse", "--git-path", "hooks"])
-        .current_dir(repo_root)
-        .output();
-
-    if let Ok(out) = output
+    if let Ok(out) = git_output_raw(&["rev-parse", "--git-path", "hooks"], repo_root)
         && out.status.success()
     {
         let resolved = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -106,7 +101,6 @@ pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> PathBuf {
             } else {
                 repo_root.join(path)
             };
-
             return to_real_or_absolute(absolute);
         }
     }

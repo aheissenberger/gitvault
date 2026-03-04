@@ -2,10 +2,10 @@
 
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
+use crate::git::{git_output_raw, git_run};
 use crate::identity::{load_identity_with_selector, probe_identity_sources};
 use crate::merge::merge_env_content;
 use crate::{barrier, crypto, env, repo};
@@ -14,14 +14,11 @@ const MERGE_DRIVER_CONFIG_KEY: &str = "merge.gitvault-env.driver";
 const MERGE_DRIVER_CONFIG_VALUE: &str = "gitvault merge-driver %O %A %B";
 
 fn ensure_merge_driver_git_config(repo_root: &Path) -> Result<(), GitvaultError> {
-    let get_output = Command::new("git")
-        .args(["config", "--local", "--get", MERGE_DRIVER_CONFIG_KEY])
-        // REQ-90: remove env vars that could redirect git config reads.
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .current_dir(repo_root)
-        .output()
-        .map_err(|e| GitvaultError::Other(format!("failed to run git config --get: {e}")))?;
+    // `git config --get` exits 1 when the key is absent — not an error.
+    let get_output = git_output_raw(
+        &["config", "--local", "--get", MERGE_DRIVER_CONFIG_KEY],
+        repo_root,
+    )?;
 
     if get_output.status.success() {
         return Ok(());
@@ -34,25 +31,15 @@ fn ensure_merge_driver_git_config(repo_root: &Path) -> Result<(), GitvaultError>
         )));
     }
 
-    let set_status = Command::new("git")
-        .args([
+    git_run(
+        &[
             "config",
             "--local",
             MERGE_DRIVER_CONFIG_KEY,
             MERGE_DRIVER_CONFIG_VALUE,
-        ])
-        // REQ-90: remove env vars that could redirect git config reads.
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .current_dir(repo_root)
-        .status()
-        .map_err(|e| GitvaultError::Other(format!("failed to run git config --set: {e}")))?;
-
-    if !set_status.success() {
-        return Err(GitvaultError::Other(format!(
-            "git config --local {MERGE_DRIVER_CONFIG_KEY} failed with status {set_status}"
-        )));
-    }
+        ],
+        repo_root,
+    )?;
 
     Ok(())
 }
@@ -513,11 +500,8 @@ pub fn cmd_harden_with_files(
         }
 
         // git rm --cached (ignore errors; file may not be tracked).
-        let _ = Command::new("git")
-            .args(["rm", "--cached", "--quiet", "--"])
-            .arg(&src_path)
-            .current_dir(&repo_root)
-            .output();
+        let path_str = src_path.to_string_lossy();
+        let _ = git_output_raw(&["rm", "--cached", "--quiet", "--", &path_str], &repo_root);
 
         // Append source filename to .gitignore if not already present.
         let gitignore_entry = format!("/{filename}");

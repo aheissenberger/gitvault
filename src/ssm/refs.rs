@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
 
 use crate::error::GitvaultError;
 
@@ -41,16 +40,9 @@ pub(super) fn validate_app_name(app_name: &str) -> Result<(), GitvaultError> {
 /// repository directory name.  Returns an error if the derived name contains
 /// characters that are unsafe in an SSM parameter path.
 pub(super) async fn get_app_name(repo_root: &Path) -> Result<String, GitvaultError> {
-    let output = Command::new("git")
-        .args(["remote", "get-url", "origin"])
-        .current_dir(repo_root)
-        .output()
-        .await;
-
-    if let Ok(out) = output
-        && out.status.success()
+    if let Ok(raw) = crate::git::git_output_async(&["remote", "get-url", "origin"], repo_root).await
     {
-        let url = String::from_utf8_lossy(&out.stdout);
+        let url = String::from_utf8_lossy(&raw);
         let url = url.trim();
         // Last path component, stripped of ".git"
         if let Some(name) = url.split('/').next_back() {
