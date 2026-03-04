@@ -144,3 +144,7 @@ These NFRs are enforced via:
 | E — FD range | REQ-104 | FD range validated before `from_raw_fd` |
 | I — PATH guard | REQ-105 | `run_command` warns on `PATH`/`LD_*` secret keys |
 | I — Key names | REQ-106 | `.env` key names validated at encrypt time |
+| C — Git env (extended) | REQ-110 | Extended git env sanitization — 10 vars via `GIT_SANITIZE_VARS` const (SEC-001) |
+| I — Input validation | REQ-111 | Env name size cap (255 bytes) and secret key name validation (SEC-003/SEC-007) |
+| J — Path traversal | REQ-112 | SSH key comment sanitized before use as filename component (SEC-002) |
+| K — Atomic writes | REQ-113 | Atomic write consolidation: hooks, materialize, recipients (SEC-004/005/006) |

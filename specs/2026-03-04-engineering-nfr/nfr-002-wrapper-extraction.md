@@ -145,6 +145,7 @@ Includes the file path in every error message for diagnostics. See `req-108.md`.
 | REQ-107 | Atomic File Write Utility (`fs_util::atomic_write`) | Implemented |
 | REQ-108 | Contextual File Read Utility (`fs_util::read_text`) | Partial |
 | REQ-109 | Contextual Directory Creation Utility (`fs_util::ensure_dir`) | Partial |
+| REQ-113 | Atomic Write Consolidation — hooks, materialize, recipients (extends REQ-107) | Implemented |
 
 ## Future Guidance
 
