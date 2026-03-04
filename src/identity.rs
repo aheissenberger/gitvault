@@ -418,6 +418,59 @@ pub fn load_identity_with_selector(
 
 /// Dependency-injected variant of [`load_identity`].
 ///
+/// Tries the `GITVAULT_IDENTITY_PASSPHRASE` environment variable first, then
+/// checks the OS keyring for a stored SSH key passphrase (`{account}-passphrase`).
+/// Returns `None` (source-not-available) when neither source provides a passphrase.
+/// In `--no-prompt` / CI mode this never blocks.
+///
+/// This passphrase is intended for passphrase-encrypted SSH identity files.
+/// X25519 age keys do not use a passphrase.
+pub(crate) fn try_fetch_ssh_passphrase(
+    service: &str,
+    account: &str,
+    no_prompt: bool,
+) -> Option<Zeroizing<String>> {
+    // 1. Env var override (useful in CI environments)
+    if let Ok(p) = std::env::var("GITVAULT_IDENTITY_PASSPHRASE")
+        && !p.is_empty()
+    {
+        return Some(Zeroizing::new(p));
+    }
+    if no_prompt {
+        // In CI/no-prompt mode, only accept env var; don't block on keyring I/O.
+        return None;
+    }
+    // 2. OS keyring (optional; source-not-available on any error)
+    keyring_store::keyring_get_identity_passphrase(service, account)
+}
+
+/// Load an identity and parse it as [`AnyIdentity`] with optional SSH passphrase support.
+///
+/// This combines identity string resolution (via the standard priority chain) with
+/// optional SSH passphrase fetching from `GITVAULT_IDENTITY_PASSPHRASE` or the OS
+/// keyring (`{account}-passphrase` entry).  For passphrase-encrypted SSH keys the
+/// resolved passphrase is applied via callbacks so decryption succeeds without a
+/// prompt (REQ-39 AC3, Spec-20 AC1).
+///
+/// # Errors
+///
+/// Returns [`GitvaultError`] if no identity source resolves.
+pub fn load_any_identity_with_passphrase(
+    path: Option<String>,
+    no_prompt: bool,
+    selector: Option<&str>,
+) -> Result<crate::crypto::AnyIdentity, GitvaultError> {
+    let identity_str = load_identity_with_selector(path, selector)?;
+    let passphrase = try_fetch_ssh_passphrase(
+        crate::defaults::KEYRING_SERVICE,
+        crate::defaults::KEYRING_ACCOUNT,
+        no_prompt,
+    );
+    crate::crypto::parse_identity_any_with_passphrase(&identity_str, passphrase)
+}
+
+/// Dependency-injected variant of [`load_identity`].
+///
 /// Resolves identity using the priority chain below, calling `keyring_get_fn`
 /// instead of the real OS keyring.
 ///

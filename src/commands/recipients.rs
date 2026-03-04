@@ -214,7 +214,14 @@ pub fn cmd_rekey(
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let identity_str = load_identity_with_selector(identity_path, selector.as_deref())?;
-    let any_identity = crypto::parse_identity_any(&identity_str)?;
+    let any_identity = crypto::parse_identity_any_with_passphrase(
+        &identity_str,
+        crate::identity::try_fetch_ssh_passphrase(
+            crate::defaults::KEYRING_SERVICE,
+            crate::defaults::KEYRING_ACCOUNT,
+            false, // rekey is an interactive operation
+        ),
+    )?;
     let identity = any_identity.as_identity();
 
     let recipient_keys = resolve_recipient_keys(&repo_root, vec![])?;

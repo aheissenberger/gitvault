@@ -183,18 +183,38 @@ pub fn execute_effects_with(
     let mut identity_opt: Option<crate::crypto::AnyIdentity> = None;
     let mut secrets_opt: Option<Vec<(String, String)>> = None;
 
+    // Determine no_prompt from CheckProdBarrier effect (decrypt flows default to false).
+    let no_prompt = effects
+        .iter()
+        .find_map(|e| {
+            if let fhsm::Effect::CheckProdBarrier { no_prompt, .. } = e {
+                Some(*no_prompt)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false);
+
     for effect in effects {
         match effect {
             fhsm::Effect::CheckProdBarrier {
                 env,
                 prod,
-                no_prompt,
+                no_prompt: np,
             } => {
-                runner.check_prod_barrier(repo_root, &env, prod, no_prompt)?;
+                runner.check_prod_barrier(repo_root, &env, prod, np)?;
             }
             fhsm::Effect::ResolveIdentity { source } => {
                 let identity_str = runner.load_identity_str(&source)?;
-                identity_opt = Some(crate::crypto::parse_identity_any(&identity_str)?);
+                let passphrase = crate::identity::try_fetch_ssh_passphrase(
+                    crate::defaults::KEYRING_SERVICE,
+                    crate::defaults::KEYRING_ACCOUNT,
+                    no_prompt,
+                );
+                identity_opt = Some(crate::crypto::parse_identity_any_with_passphrase(
+                    &identity_str,
+                    passphrase,
+                )?);
             }
             fhsm::Effect::DecryptSecrets { env } => {
                 let identity = identity_opt

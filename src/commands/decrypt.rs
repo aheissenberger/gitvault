@@ -62,7 +62,14 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         .unwrap_or_else(|| load_identity_with_selector(None, opts.selector.as_deref()))?;
 
     let input_path = PathBuf::from(&opts.file);
-    let any_identity = crypto::parse_identity_any(&identity_str)?;
+    let any_identity = crypto::parse_identity_any_with_passphrase(
+        &identity_str,
+        crate::identity::try_fetch_ssh_passphrase(
+            crate::defaults::KEYRING_SERVICE,
+            crate::defaults::KEYRING_ACCOUNT,
+            opts.no_prompt,
+        ),
+    )?;
     let identity = any_identity.as_identity();
     let repo_root = crate::repo::find_repo_root()?;
 

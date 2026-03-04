@@ -1,6 +1,8 @@
 use crate::error::GitvaultError;
+use age::secrecy::SecretString;
 use age::{Decryptor, Encryptor, x25519};
 use std::io::Read;
+use zeroize::Zeroizing;
 
 /// Gitvault encrypted format version (REQ-55).
 /// Increment when the encryption format changes incompatibly.
@@ -36,8 +38,10 @@ pub fn parse_identity(privkey: &str) -> Result<x25519::Identity, GitvaultError> 
 pub enum AnyIdentity {
     /// Age X25519 (native) private key.
     X25519(x25519::Identity),
-    /// OpenSSH private key (ED25519 or ECDSA).
+    /// OpenSSH private key (ED25519 or ECDSA) without passphrase callbacks.
     Ssh(age::ssh::Identity),
+    /// OpenSSH private key with a passphrase callback for passphrase-encrypted keys.
+    SshDecryptable(Box<dyn age::Identity>),
 }
 
 impl AnyIdentity {
@@ -47,7 +51,30 @@ impl AnyIdentity {
         match self {
             Self::X25519(id) => id,
             Self::Ssh(id) => id,
+            Self::SshDecryptable(id) => id.as_ref(),
         }
+    }
+}
+
+/// An [`age::Callbacks`] implementation that provides a fixed passphrase from memory.
+///
+/// Used to unlock passphrase-encrypted SSH identity files without interactive prompts.
+#[derive(Clone)]
+struct ZeroizingPassphrase(Zeroizing<String>);
+
+impl age::Callbacks for ZeroizingPassphrase {
+    fn display_message(&self, _message: &str) {}
+
+    fn confirm(&self, _message: &str, _yes_string: &str, _no_string: Option<&str>) -> Option<bool> {
+        None
+    }
+
+    fn request_public_string(&self, _description: &str) -> Option<String> {
+        None
+    }
+
+    fn request_passphrase(&self, _description: &str) -> Option<SecretString> {
+        Some(SecretString::from(self.0.as_str().to_string()))
     }
 }
 
@@ -63,6 +90,23 @@ impl AnyIdentity {
 /// Returns [`GitvaultError::Decryption`] if the string does not match a supported
 /// identity format or the key material is invalid.
 pub fn parse_identity_any(s: &str) -> Result<AnyIdentity, GitvaultError> {
+    parse_identity_any_with_passphrase(s, None)
+}
+
+/// Parse any supported age identity from a string, with an optional SSH passphrase.
+///
+/// Like [`parse_identity_any`] but when `passphrase` is `Some`, wraps SSH identities
+/// with a [`ZeroizingPassphrase`] callback so passphrase-encrypted SSH keys can be
+/// used for decryption without an interactive prompt.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Decryption`] if the string does not match a supported
+/// identity format or the key material is invalid.
+pub fn parse_identity_any_with_passphrase(
+    s: &str,
+    passphrase: Option<Zeroizing<String>>,
+) -> Result<AnyIdentity, GitvaultError> {
     let trimmed = s.trim();
 
     if trimmed.starts_with("AGE-SECRET-KEY-") {
@@ -74,6 +118,10 @@ pub fn parse_identity_any(s: &str) -> Result<AnyIdentity, GitvaultError> {
         let identity =
             age::ssh::Identity::from_buffer(std::io::BufReader::new(trimmed.as_bytes()), None)
                 .map_err(|e| GitvaultError::Decryption(format!("Invalid SSH private key: {e}")))?;
+        if let Some(pass) = passphrase {
+            let decryptable = identity.with_callbacks(ZeroizingPassphrase(pass));
+            return Ok(AnyIdentity::SshDecryptable(Box::new(decryptable)));
+        }
         return Ok(AnyIdentity::Ssh(identity));
     }
 

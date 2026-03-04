@@ -69,6 +69,37 @@ pub fn keyring_delete(service: &str, account: &str) -> Result<(), GitvaultError>
 
 // ── Platform-independent injectable helpers (testable on all platforms) ───────
 
+/// Retrieve the SSH identity passphrase from the OS keyring (REQ-39 AC3).
+///
+/// Stored under `{account}-passphrase` to distinguish from the identity key itself.
+/// Returns `None` (source-not-available) if the passphrase is not found or the
+/// keyring is unavailable — callers must not treat this as a hard error.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] only on unexpected keyring access failures.
+pub fn keyring_get_identity_passphrase(service: &str, account: &str) -> Option<Zeroizing<String>> {
+    let passphrase_account = format!("{account}-passphrase");
+    keyring_get(service, &passphrase_account).ok()
+}
+
+/// Store an SSH identity passphrase in the OS keyring (REQ-39 AC3).
+///
+/// Stored under `{account}-passphrase` to distinguish from the identity key itself.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Keyring`] if the keyring entry cannot be created or the
+/// password cannot be stored.
+pub fn keyring_set_identity_passphrase(
+    passphrase: &str,
+    service: &str,
+    account: &str,
+) -> Result<(), GitvaultError> {
+    let passphrase_account = format!("{account}-passphrase");
+    keyring_set(passphrase, service, &passphrase_account)
+}
+
 /// Injectable variant of [`keyring_set`] — calls `set_password(service, username, key)`.
 ///
 /// # Errors
