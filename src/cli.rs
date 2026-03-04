@@ -182,7 +182,7 @@ pub enum Commands {
         /// Identity key file path
         #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
-        /// Require production barrier (required when env=prod)
+        /// Require production barrier (pass when deploying to the prod environment)
         #[arg(long)]
         prod: bool,
         /// Start child with empty environment
@@ -197,7 +197,7 @@ pub enum Commands {
     },
     /// Write a timed production allow token to .git/gitvault/.prod-token
     AllowProd {
-        /// Token lifetime in seconds [default: 3600; override with barrier.ttl_secs config key]
+        /// Token lifetime in seconds (config: barrier.ttl_secs) [default: 3600]
         #[arg(long)]
         ttl: Option<u64>,
     },
@@ -301,7 +301,7 @@ pub enum KeyringAction {
     /// Store the SSH identity file passphrase in the OS keyring; once stored,
     /// gitvault retrieves it automatically when loading an encrypted SSH identity.
     SetPassphrase {
-        /// Passphrase value; if omitted, reads from `GITVAULT_IDENTITY_PASSPHRASE`
+        /// Passphrase value (prefer GITVAULT_IDENTITY_PASSPHRASE env var to avoid shell history exposure)
         #[arg(value_name = "PASSPHRASE")]
         passphrase: Option<String>,
     },
