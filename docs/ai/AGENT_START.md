@@ -13,12 +13,12 @@ Minimize repeated source-code exploration by giving agents a shared map, fixed w
 - Binary entrypoint: `src/main.rs`
 - Automation entrypoint: `xtask/src/main.rs`
 - Requirement corpus: `specs/2026-03-01-safesecrets-req/`
-- Architecture notes: `docs/ai/hotspots.md`
+- Architecture notes: `docs/ai/agent-reference.md`
 - Generated code index: `docs/ai/code-index.json` (run `cargo xtask ai-index`)
 
 ## Required Workflow for Agents
 
-1. Read this file and `docs/ai/hotspots.md`.
+1. Read this file and `docs/ai/agent-reference.md`.
 2. If missing/stale, run `cargo xtask ai-index` and read `docs/ai/code-index.json`.
 3. Scope to the smallest impacted modules first; avoid broad repo scans.
 4. Append findings/assumptions to task output so the next agent can reuse context.
@@ -41,7 +41,7 @@ Minimize repeated source-code exploration by giving agents a shared map, fixed w
 
 ## Known Priority Risks
 
-See `docs/ai/hotspots.md` for the curated list of critical and architectural issues.
+See `docs/ai/agent-reference.md` for the curated list of critical and architectural issues.
 
 ## Done Criteria for Agent Tasks
 
@@ -64,4 +64,4 @@ See `docs/ai/hotspots.md` for the curated list of critical and architectural iss
 | `docs/cicd-recipes.md` | CI/CD best practices (GitHub Actions, Docker, Kubernetes recipes) |
 | `docs/secret-formats.md` | Secret formats cookbook (.env, JSON, YAML, TOML) |
 | `docs/ai/skill.md` | AI skill reference (embedded in binary; canonical AI reference for the tool) |
-| `docs/ai/hotspots.md` | Architecture hotspots and curated risk areas (read before touching core modules) |
+| `docs/ai/agent-reference.md` | Architecture hotspots and curated risk areas (read before touching core modules) |

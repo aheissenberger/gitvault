@@ -1,48 +1,25 @@
 //! Admin/status commands: harden, status, check, allow-prod, revoke-prod, merge-driver.
+//!
+//! # Sub-module layout
+//!
+//! | Module            | Responsibility                                        |
+//! |-------------------|-------------------------------------------------------|
+//! | [`gitattributes`] | Merge-driver git-config registration.                 |
+//! | [`hooks`]         | Git hook installation status (pre-commit, pre-push).  |
+//! | [`gitignore`]     | `.gitignore` entry management.                        |
 
-use std::path::Path;
+mod gitattributes;
+pub mod gitignore;
+pub mod hooks;
+
 use std::path::PathBuf;
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
-use crate::git::{git_output_raw, git_run};
+use crate::git::git_output_raw;
 use crate::identity::{load_identity_with_selector, probe_identity_sources};
 use crate::merge::merge_env_content;
 use crate::{barrier, crypto, env, repo};
-
-const MERGE_DRIVER_CONFIG_KEY: &str = "merge.gitvault-env.driver";
-const MERGE_DRIVER_CONFIG_VALUE: &str = "gitvault merge-driver %O %A %B";
-
-fn ensure_merge_driver_git_config(repo_root: &Path) -> Result<(), GitvaultError> {
-    // `git config --get` exits 1 when the key is absent — not an error.
-    let get_output = git_output_raw(
-        &["config", "--local", "--get", MERGE_DRIVER_CONFIG_KEY],
-        repo_root,
-    )?;
-
-    if get_output.status.success() {
-        return Ok(());
-    }
-
-    if get_output.status.code() != Some(1) {
-        let stderr = String::from_utf8_lossy(&get_output.stderr);
-        return Err(GitvaultError::Other(format!(
-            "git config --get {MERGE_DRIVER_CONFIG_KEY} failed: {stderr}"
-        )));
-    }
-
-    git_run(
-        &[
-            "config",
-            "--local",
-            MERGE_DRIVER_CONFIG_KEY,
-            MERGE_DRIVER_CONFIG_VALUE,
-        ],
-        repo_root,
-    )?;
-
-    Ok(())
-}
 
 /// Check repository safety status
 ///
@@ -102,7 +79,7 @@ pub fn cmd_harden(json: bool, no_prompt: bool) -> Result<CommandOutcome, Gitvaul
         &repo_root,
         &[crate::materialize::GITATTRIBUTES_MERGE_DRIVER_ENTRY],
     )?;
-    ensure_merge_driver_git_config(&repo_root)?;
+    gitattributes::ensure_merge_driver_git_config(&repo_root)?;
 
     // REQ-64/65/66/67/68: external hook-manager adapter (repo config + global fallback)
     let config = crate::config::effective_config(&repo_root)?;
@@ -594,10 +571,16 @@ pub fn cmd_harden_with_files(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::commands::test_helpers::*;
+    use std::path::Path;
     use std::process::Command;
+
     use tempfile::TempDir;
+
+    use super::*;
+    use crate::commands::admin::gitattributes::{
+        MERGE_DRIVER_CONFIG_KEY, MERGE_DRIVER_CONFIG_VALUE,
+    };
+    use crate::commands::test_helpers::*;
 
     fn local_git_config(repo_root: &Path, key: &str) -> Option<String> {
         let output = Command::new("git")

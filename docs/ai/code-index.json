@@ -1,7 +1,7 @@
 {
   "packageName": "gitvault",
-  "packageVersion": "0.4.6",
-  "filesScanned": 50,
+  "packageVersion": "0.4.7",
+  "filesScanned": 53,
   "entries": [
     {
       "path": "src/aws_config.rs",
@@ -46,7 +46,30 @@
       ]
     },
     {
-      "path": "src/commands/admin.rs",
+      "path": "src/commands/admin/gitattributes.rs",
+      "publicFunctions": [
+        "ensure_merge_driver_git_config"
+      ],
+      "publicTypes": [],
+      "publicConstants": [
+        "MERGE_DRIVER_CONFIG_KEY",
+        "MERGE_DRIVER_CONFIG_VALUE"
+      ]
+    },
+    {
+      "path": "src/commands/admin/gitignore.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/admin/hooks.rs",
+      "publicFunctions": [],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/admin/mod.rs",
       "publicFunctions": [
         "cmd_allow_prod",
         "cmd_check",
