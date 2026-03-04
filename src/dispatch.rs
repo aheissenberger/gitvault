@@ -113,9 +113,12 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cli.json,
         ),
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
-        Commands::Identity { action } => {
-            crate::commands::identity::cmd_identity(action, cli.json, cli.no_prompt)
-        }
+        Commands::Identity { action } => crate::commands::identity::cmd_identity(
+            action,
+            cli.identity_selector.clone(),
+            cli.json,
+            cli.no_prompt,
+        ),
         Commands::Ai { action } => crate::commands::ai::cmd_ai(action, cli.json),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
