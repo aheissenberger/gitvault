@@ -68,3 +68,7 @@ pub const MAX_RECIPIENTS: usize = 256;
 
 /// Maximum number of commits scanned by the history plaintext-leak check (REQ-81).
 pub const HISTORY_SCAN_LIMIT: usize = 10_000;
+
+/// Maximum length of an environment name read from the env file or env var (REQ-111).
+/// Env names are short identifiers; 255 bytes covers all realistic names.
+pub const MAX_ENV_NAME_BYTES: usize = 255;
