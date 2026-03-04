@@ -114,7 +114,7 @@ Commands:
   init          Onboard a new team member (identity, recipient, repo hardening)
   harden        Harden repo (hooks, .gitignore); or import+encrypt a file with harden <file>
   encrypt       Encrypt a secret file (--env, --keep-path, --fields, --value-only)
-  decrypt       Decrypt a .age file (--output, --fields, --value-only, --reveal)
+  decrypt       Decrypt a .age file or reveal encrypted fields in JSON/YAML/TOML (--output, --fields, --value-only, --reveal)
   materialize   Materialize secrets to root .env
   status        Check repository safety status
   run           Inject secrets into child process env (--clear-env, --keep-vars)
@@ -139,6 +139,7 @@ Commands:
 | Encrypt selected fields | `gitvault encrypt <file> --fields a.b,c` |
 | Encrypt `.env` per-value | `gitvault encrypt .env --value-only` |
 | Decrypt to stdout | `gitvault decrypt <file.age> --reveal` |
+| Reveal encrypted fields (auto-discover) | `gitvault decrypt <config.json> --reveal` |
 | Materialize root `.env` | `gitvault materialize` |
 | Run command with injected secrets | `gitvault run --keep-vars <VARS> -- <cmd> [args...]` |
 | Safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |

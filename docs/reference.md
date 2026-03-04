@@ -102,7 +102,7 @@ gitvault encrypt [OPTIONS] <FILE>
 
 ### decrypt
 
-Decrypt a `.age` encrypted file.
+Decrypt a `.age` encrypted file, or decrypt age-encrypted fields inside a JSON/YAML/TOML file.
 
 ```
 gitvault decrypt [OPTIONS] <FILE>
@@ -110,12 +110,31 @@ gitvault decrypt [OPTIONS] <FILE>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `<FILE>` | — | Encrypted `.age` file to decrypt |
+| `<FILE>` | — | Encrypted `.age` file **or** a JSON/YAML/TOML file with encrypted field values |
 | `-i, --identity <IDENTITY>` | — | Identity key file path. Also `GITVAULT_IDENTITY` |
 | `-o, --output [<OUTPUT>]` | strip `.age` extension | Output file path; use `-o -` to write to stdout |
-| `--fields <FIELDS>` | — | Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML) |
+| `--fields <FIELDS>` | auto-discover | Fields to decrypt (comma-separated key paths). **Optional for JSON/YAML/TOML** — when omitted, all age-encrypted values in the document are found and decrypted automatically |
 | `--reveal` | off | Print decrypted content to stdout instead of writing to file (shorthand for `-o -`) |
 | `--value-only` | off | Decrypt `.env` values individually (reverse of `encrypt --value-only`) |
+
+**Auto-discover mode** (JSON / YAML / TOML only)
+
+When `--fields` is omitted and the input file is a structured format, `gitvault decrypt`
+recursively walks every string value, identifies those that begin with the age ASCII-armor
+header, and decrypts only those fields — leaving all other values untouched:
+
+```bash
+# Reveal a partially-encrypted config without listing fields manually
+gitvault decrypt config/app.json --reveal
+
+# Write decrypted fields back to a new file
+gitvault decrypt config/app.json --output config/app.decrypted.json
+```
+
+Fields that cannot be decrypted with the current identity (e.g. encrypted for a different
+team's key) emit a warning to stderr and are left as-is; the rest of the document is still
+decrypted successfully. When no encrypted fields are found, a notice is printed and the
+command exits successfully.
 
 ---
 

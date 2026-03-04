@@ -177,6 +177,24 @@ Non-sensitive fields (`host`, `port`, `timeout`, `debug`, `log_level`) remain re
 
 > **Tip:** Use dot-notation for nested fields: `database.password` → `{"database": {"password": ...}}`. For array elements, use index notation: `servers.0.token`.
 
+**Decrypting: `--fields` is optional**
+
+You can decrypt individual fields explicitly, or let gitvault find them automatically:
+
+```bash
+# Explicit: list the fields you want decrypted
+gitvault decrypt .gitvault/store/prod/config/app.json.age \
+  --fields database.password,api.key --reveal
+
+# Auto-discover (no --fields required): decrypts every encrypted value in the file
+gitvault decrypt config/app.json --reveal
+
+# Auto-discover and write back to disk
+gitvault decrypt config/app.json --output config/app.decrypted.json
+```
+
+> **When to use auto-discover:** Working with a config file you received from a team-mate where you don't know which fields are encrypted. gitvault scans all values, decrypts what it can with your identity, and warns about fields it cannot reach.
+
 ---
 
 ## YAML Secrets
@@ -258,6 +276,17 @@ ingress:
 
 Non-sensitive Helm config (`username`, `database`, `persistence.size`, `ingress`) stays readable. Secrets are encrypted in place.
 
+**Decrypting:** omit `--fields` to let gitvault auto-discover all encrypted values:
+
+```bash
+# Auto-discover and reveal (no need to list field names)
+gitvault decrypt helm/values.yaml --reveal
+
+# Explicit fields, if you prefer
+gitvault decrypt helm/values.yaml \
+  --fields postgresql.auth.password,redis.auth.password --reveal
+```
+
 > **Kubernetes manifests:** Prefer whole-file encryption for `kind: Secret` manifests — they're opaque by design and the base64 values add no readability benefit when per-field encrypted.
 
 ---
@@ -315,6 +344,17 @@ pool_size = 10
 ```
 
 Non-sensitive settings (`address`, `log_level`, `port`, `pool_size`) remain readable.
+
+**Decrypting:** omit `--fields` to let gitvault auto-discover all encrypted values:
+
+```bash
+# Auto-discover and reveal
+gitvault decrypt Rocket.toml --reveal
+
+# Explicit, if you prefer
+gitvault decrypt Rocket.toml \
+  --fields production.secret_key,production.databases.postgres.password --reveal
+```
 
 > **Tip:** For Rust apps using `config` crate with multiple files (`config/default.toml`, `config/production.toml`), encrypt only the production file that contains secrets.
 
