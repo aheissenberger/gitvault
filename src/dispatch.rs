@@ -239,6 +239,7 @@ mod tests {
 
     #[test]
     fn test_ci_env_sets_no_prompt() {
+        let _lock = global_test_lock().lock().unwrap();
         with_env_var("CI", Some("1"), || {
             assert!(crate::output::resolve_no_prompt(false));
             assert!(crate::output::resolve_no_prompt(true));

@@ -1017,6 +1017,7 @@ mod tests {
 
     #[test]
     fn test_list_ssh_agent_keys_no_agent_returns_ok_or_not_available() {
+        let _lock = global_test_lock().lock().unwrap();
         // Without an SSH agent connected, ssh-add returns empty stdout → Ok([])
         // or errors with NotAvailable.  Both are valid outcomes.
         let result = with_env_var("SSH_AUTH_SOCK", None, list_ssh_agent_keys);
@@ -1902,6 +1903,7 @@ mod tests {
     /// Verify the key still resolves correctly when GITVAULT_NO_INLINE_KEY_WARN=1.
     #[test]
     fn test_load_identity_with_inline_key_resolves_correctly() {
+        let _lock = global_test_lock().lock().unwrap();
         use age::secrecy::ExposeSecret;
         let identity = age::x25519::Identity::generate();
         let inline_key = identity.to_string().expose_secret().to_string();
@@ -1925,6 +1927,7 @@ mod tests {
     /// REQ-77: passphrase warning suppression via GITVAULT_NO_PASSPHRASE_WARN=1.
     #[test]
     fn test_try_fetch_ssh_passphrase_suppressed_warn() {
+        let _lock = global_test_lock().lock().unwrap();
         let result = with_env_var(
             "GITVAULT_IDENTITY_PASSPHRASE",
             Some("my-secret-passphrase"),

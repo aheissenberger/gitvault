@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.11] - 2026-03-04
+
+### Fixed
+- Add missing `global_test_lock()` to 4 tests that mutate env vars without holding the lock, causing flaky race conditions on Windows (`identity.rs`, `dispatch.rs`, `keyring.rs`)
+
 ## [v0.4.10] - 2026-03-04
 
 ### Fixed

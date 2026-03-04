@@ -550,6 +550,7 @@ mod tests {
     /// Covers the `Usage` error path when neither `passphrase` nor env var is set (lines 123-128).
     #[test]
     fn test_cmd_keyring_set_passphrase_no_source_errors() {
+        let _lock = global_test_lock().lock().unwrap();
         let result = with_env_var("GITVAULT_IDENTITY_PASSPHRASE", None, || {
             cmd_keyring_set_passphrase(None, false)
         });
