@@ -8,6 +8,7 @@ pub mod decrypt;
 pub mod effects;
 pub mod encrypt;
 pub mod identity;
+pub mod init;
 pub mod keyring;
 pub mod materialize;
 pub mod recipients;
