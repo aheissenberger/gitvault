@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-024"
 title: "Plan: lefthook manager plugin integration"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:

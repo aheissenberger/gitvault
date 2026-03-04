@@ -1,7 +1,7 @@
 ---
 id: "S-20260303-028"
 title: "AI CLI command group: skill/context print"
-status: "draft"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:

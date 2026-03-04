@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-026"
 title: "Plan: Optional user-global config layer at ~/.config/gitvault/config.toml"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:

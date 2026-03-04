@@ -1,7 +1,7 @@
 ---
 id: "S-20260302-023"
 title: "Plan: pre-commit hook manager plugin integration"
-status: "active"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli", "vscode-ui", "vscode-bg"]
 scope:
