@@ -1,7 +1,7 @@
 {
   "packageName": "gitvault",
-  "packageVersion": "0.2.29",
-  "filesScanned": 46,
+  "packageVersion": "0.4.6",
+  "filesScanned": 50,
   "entries": [
     {
       "path": "src/aws_config.rs",
@@ -20,17 +20,19 @@
       "publicFunctions": [
         "allow_prod",
         "check_prod_barrier",
+        "check_prod_barrier_with_confirm",
         "revoke_prod"
       ],
       "publicTypes": [],
-      "publicConstants": []
+      "publicConstants": [
+        "MAX_TOKEN_TTL_SECS"
+      ]
     },
     {
       "path": "src/cli.rs",
       "publicFunctions": [],
       "publicTypes": [
         "AiAction",
-        "AiPrintAction",
         "Cli",
         "Commands",
         "IdentityAction",
@@ -49,6 +51,7 @@
         "cmd_allow_prod",
         "cmd_check",
         "cmd_harden",
+        "cmd_harden_with_files",
         "cmd_merge_driver",
         "cmd_revoke_prod",
         "cmd_status"
@@ -101,7 +104,16 @@
       "path": "src/commands/identity.rs",
       "publicFunctions": [
         "cmd_identity",
-        "cmd_identity_create"
+        "cmd_identity_create",
+        "cmd_identity_pubkey"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/commands/init.rs",
+      "publicFunctions": [
+        "cmd_init"
       ],
       "publicTypes": [],
       "publicConstants": []
@@ -110,6 +122,9 @@
       "path": "src/commands/keyring.rs",
       "publicFunctions": [
         "cmd_keyring",
+        "cmd_keyring_delete_passphrase",
+        "cmd_keyring_get_passphrase",
+        "cmd_keyring_set_passphrase",
         "cmd_keyring_with_ops"
       ],
       "publicTypes": [],
@@ -133,7 +148,8 @@
       "path": "src/commands/recipients.rs",
       "publicFunctions": [
         "cmd_recipient",
-        "cmd_rotate"
+        "cmd_recipient_add_self",
+        "cmd_rekey"
       ],
       "publicTypes": [],
       "publicConstants": []
@@ -172,13 +188,13 @@
         "account",
         "default_env",
         "effective_config",
-        "env_file",
         "load_config",
         "load_global_config",
         "materialize_output",
         "prod_name",
-        "recipients_file",
+        "recipients_dir",
         "service",
+        "store_dir",
         "ttl_secs"
       ],
       "publicTypes": [
@@ -204,6 +220,7 @@
         "encrypt_stream",
         "parse_identity",
         "parse_identity_any",
+        "parse_identity_any_with_passphrase",
         "parse_recipient"
       ],
       "publicTypes": [
@@ -223,11 +240,14 @@
         "DEFAULT_ENV",
         "DEFAULT_PROD_ENV",
         "ENV_FILE",
+        "HISTORY_SCAN_LIMIT",
         "KEYRING_ACCOUNT",
         "KEYRING_SERVICE",
         "MATERIALIZE_OUTPUT",
+        "MAX_ENV_NAME_BYTES",
+        "MAX_RECIPIENTS",
         "PLAIN_BASE_DIR",
-        "RECIPIENTS_FILE",
+        "RECIPIENTS_DIR",
         "SECRETS_DIR"
       ]
     },
@@ -280,10 +300,33 @@
       "publicConstants": []
     },
     {
+      "path": "src/fs_util.rs",
+      "publicFunctions": [
+        "atomic_write",
+        "ensure_dir",
+        "read_text"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/git.rs",
+      "publicFunctions": [
+        "git_output",
+        "git_output_async",
+        "git_output_raw",
+        "git_run"
+      ],
+      "publicTypes": [],
+      "publicConstants": []
+    },
+    {
       "path": "src/identity.rs",
       "publicFunctions": [
         "extract_identity_key",
+        "init_identity_from_stdin",
         "list_ssh_agent_keys",
+        "load_any_identity_with_passphrase",
         "load_identity",
         "load_identity_from_source",
         "load_identity_from_source_with_selector",
@@ -291,7 +334,8 @@
         "load_identity_with",
         "load_identity_with_selector",
         "probe_identity_sources",
-        "resolve_recipient_keys"
+        "resolve_recipient_keys",
+        "try_fetch_ssh_passphrase"
       ],
       "publicTypes": [
         "IdentitySourceState",
@@ -306,8 +350,10 @@
         "keyring_delete",
         "keyring_delete_with",
         "keyring_get",
+        "keyring_get_identity_passphrase",
         "keyring_get_with",
         "keyring_set",
+        "keyring_set_identity_passphrase",
         "keyring_set_with"
       ],
       "publicTypes": [],
@@ -373,6 +419,7 @@
       "path": "src/repo/drift.rs",
       "publicFunctions": [
         "check_no_tracked_plaintext",
+        "find_history_plaintext_leaks",
         "has_secrets_drift"
       ],
       "publicTypes": [],
@@ -425,7 +472,10 @@
     {
       "path": "src/repo/recipients.rs",
       "publicFunctions": [
+        "list_recipients",
         "read_recipients",
+        "remove_recipient_by_key",
+        "remove_recipient_by_name",
         "write_recipients"
       ],
       "publicTypes": [],
@@ -437,6 +487,17 @@
         "run_command"
       ],
       "publicTypes": [],
+      "publicConstants": []
+    },
+    {
+      "path": "src/ssh.rs",
+      "publicFunctions": [
+        "ssh_add_list_keys",
+        "ssh_keygen_fingerprint"
+      ],
+      "publicTypes": [
+        "SshError"
+      ],
       "publicConstants": []
     },
     {

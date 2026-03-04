@@ -91,10 +91,10 @@ pub enum Commands {
         /// Recipient age public key (repeat for multi-recipient; defaults to local identity if omitted)
         #[arg(short, long = "recipient", value_name = "PUBKEY")]
         recipients: Vec<String>,
-        /// Environment to use (overrides `GITVAULT_ENV` and .secrets/env)
+        /// Environment to use (overrides `GITVAULT_ENV` and .git/gitvault/env)
         #[arg(short, long)]
         env: Option<String>,
-        /// Preserve input path relative to repo root under secrets/<env>/
+        /// Preserve input path relative to repo root under .gitvault/store/<env>/
         #[arg(long)]
         keep_path: bool,
         /// Fields to encrypt (comma-separated key paths, for JSON/YAML/TOML field-level encryption)
@@ -131,7 +131,7 @@ pub enum Commands {
     },
     /// Materialize secrets to root .env
     Materialize {
-        /// Environment to use (overrides `GITVAULT_ENV` and .secrets/env)
+        /// Environment to use (overrides `GITVAULT_ENV` and .git/gitvault/env)
         #[arg(short, long)]
         env: Option<String>,
         /// Identity key file path
@@ -143,13 +143,13 @@ pub enum Commands {
     },
     /// Show repository safety status (gitignore, hooks, recipients, encrypted files)
     Status {
-        /// Exit with code 6 if secrets/ directory has uncommitted changes
+        /// Exit with code 6 if .gitvault/store/ directory has uncommitted changes
         #[arg(long)]
         fail_if_dirty: bool,
     },
     /// Interactive onboarding: set up identity, recipients, harden repo, and create config
     Init {
-        /// Target environment to activate (writes to .secrets/env)
+        /// Target environment to activate (writes to .git/gitvault/env)
         #[arg(short, long)]
         env: Option<String>,
         /// Export the newly created identity key to this file (instead of storing in OS keyring)
@@ -170,7 +170,7 @@ pub enum Commands {
         /// Delete source file after encrypting (default: keep source)
         #[arg(long, alias = "remove")]
         delete_source: bool,
-        /// Additional recipient keys (age1...) on top of .secrets/recipients/
+        /// Additional recipient keys (age1...) on top of .gitvault/recipients/
         #[arg(short, long = "recipient", value_name = "PUBKEY")]
         recipients: Vec<String>,
     },
@@ -321,7 +321,7 @@ pub enum IdentityAction {
         /// Export identity to file (optional; default: store in OS keyring)
         #[arg(long, alias = "out", value_name = "PATH")]
         output: Option<String>,
-        /// After creating identity, add own public key to .secrets/recipients/ (equivalent to running `recipient add-self` afterwards)
+        /// After creating identity, add own public key to .gitvault/recipients/ (equivalent to running `recipient add-self` afterwards)
         #[arg(long)]
         add_recipient: bool,
     },

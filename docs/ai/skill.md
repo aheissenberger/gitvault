@@ -266,7 +266,7 @@ Check repository safety status. Never decrypts.
 
 | Option | Description |
 |--------|-------------|
-| `--fail-if-dirty` | Exit `6` if `secrets/` has uncommitted changes |
+| `--fail-if-dirty` | Exit `6` if `.gitvault/store/` has uncommitted changes |
 
 **Example:**
 ```bash
@@ -287,7 +287,7 @@ Preflight validation of identity, recipients, and secrets dir — no side effect
 
 ---
 
-### `gitvault harden [<FILE>] [OPTIONS]`
+### `gitvault harden [OPTIONS] [FILES]...`
 
 Without a file argument: add `.env` and `.gitvault/plain/` to `.gitignore`, install pre-commit /
 pre-push git hooks, and register the `.env` merge driver in `.gitattributes`. Delegates to
@@ -334,15 +334,15 @@ Manage persistent recipients stored in `.gitvault/recipients/` (one `.pub` file 
 
 | Subcommand | Arguments | Description |
 |------------|-----------|-------------|
-| `add` | `<PUBKEY> [--name <NAME>]` | Add an age public key; saves to `<name>.pub` |
+| `add` | `<PUBKEY>` | Add an age public key to recipients |
 | `remove` | `<NAME\|PUBKEY>` | Remove a recipient by name or public key |
 | `list` | — | List current recipients |
-| `add-self` | `[--name <NAME>]` | Resolve own public key from keyring and add as recipient |
+| `add-self` | — | Resolve own public key from keyring and add as recipient |
 
 **Examples:**
 ```bash
-gitvault recipient add age1abc... --name alice
-gitvault recipient add-self --name bob
+gitvault recipient add age1abc...
+gitvault recipient add-self
 gitvault recipient list
 gitvault recipient remove alice
 ```
@@ -351,7 +351,7 @@ gitvault recipient remove alice
 
 ### `gitvault rekey [OPTIONS]`
 
-Re-encrypt all secrets in `secrets/` for the current recipient list. Phase-1 decrypts all files
+Re-encrypt all secrets in `.gitvault/store/` for the current recipient list. Phase-1 decrypts all files
 before any write to avoid mixed-key state on failure.
 
 | Option | Description |
