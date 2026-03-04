@@ -8,8 +8,8 @@ keywords = ["secrets", "encryption", "age", "git", "dotenv"]
 categories = ["command-line-utilities", "cryptography"]
 edition = "2024"
 rust-version = "1.93"
-description = "gitvault CLI"
-license = "MIT"
+description = "Git-native secrets manager for multi-developer and AI-agent workflows: age encryption, deterministic diffs, leak prevention, and secure runtime injection for repositories."
+license = "MIT OR Apache-2.0"
 
 [[bin]]
 name = "gitvault"

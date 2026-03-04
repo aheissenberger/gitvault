@@ -34,9 +34,7 @@ pub fn cmd_identity(
                     Err(GitvaultError::Usage(ref msg))
                         if msg.contains("not inside a git repository") =>
                     {
-                        eprintln!(
-                            "warning: --add-recipient skipped: not in a git repository"
-                        );
+                        eprintln!("warning: --add-recipient skipped: not in a git repository");
                     }
                     Err(e) => return Err(e),
                 }
@@ -186,7 +184,6 @@ pub fn cmd_identity_pubkey(
 
     Ok(CommandOutcome::Success)
 }
-
 
 ///
 /// # Errors
@@ -446,8 +443,8 @@ mod tests {
 
     /// Helper: create an age identity file and return (NamedTempFile, expected_pubkey).
     fn setup_pubkey_identity() -> (NamedTempFile, String) {
-        use age::x25519::Identity;
         use age::secrecy::ExposeSecret;
+        use age::x25519::Identity;
         let identity = Identity::generate();
         let pubkey = identity.to_public().to_string();
         let secret = identity.to_string();
@@ -490,8 +487,14 @@ mod tests {
         );
         // Verify JSON serialization is correct via serde_json directly
         let json_str = serde_json::json!({"public_key": &expected_pubkey}).to_string();
-        assert!(json_str.contains("public_key"), "JSON must have public_key field");
-        assert!(json_str.contains(&expected_pubkey), "JSON must contain the public key");
+        assert!(
+            json_str.contains("public_key"),
+            "JSON must have public_key field"
+        );
+        assert!(
+            json_str.contains(&expected_pubkey),
+            "JSON must contain the public key"
+        );
     }
 
     #[test]
@@ -566,14 +569,13 @@ mod tests {
             let pub_files: Vec<_> = std::fs::read_dir(&recipients_dir)
                 .expect("read recipients dir")
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map_or(false, |x| x == "pub"))
+                .filter(|e| e.path().extension().is_some_and(|x| x == "pub"))
                 .collect();
             assert!(
                 !pub_files.is_empty(),
                 "at least one .pub file should be written"
             );
-            let written_key = std::fs::read_to_string(pub_files[0].path())
-                .expect("read pub file");
+            let written_key = std::fs::read_to_string(pub_files[0].path()).expect("read pub file");
             assert!(
                 written_key.trim() == pubkey,
                 "written public key should match identity"

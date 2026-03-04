@@ -19,7 +19,13 @@ fn sanitise_name(name: &str) -> String {
     // Replace non-allowed characters with `-`
     let replaced: String = lower
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     // Collapse consecutive dashes
     let mut collapsed = String::with_capacity(replaced.len());
@@ -82,15 +88,14 @@ pub fn cmd_recipient_add_self(
     json: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     // 1. Resolve identity — exit code 2 if none found.
-    let key =
-        crate::identity::load_identity_with_selector(None, identity_selector.as_deref())
-            .map_err(|_| {
-                GitvaultError::Usage(
-                    "No identity resolved. Use GITVAULT_IDENTITY, --identity-selector, \
+    let key = crate::identity::load_identity_with_selector(None, identity_selector.as_deref())
+        .map_err(|_| {
+            GitvaultError::Usage(
+                "No identity resolved. Use GITVAULT_IDENTITY, --identity-selector, \
                      or store an identity in the OS keyring."
-                        .to_string(),
-                )
-            })?;
+                    .to_string(),
+            )
+        })?;
 
     // 2. Derive public key.
     let identity = crypto::parse_identity(&key)?;
@@ -122,7 +127,9 @@ pub fn cmd_recipient_add_self(
         })
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let name = git_name.as_deref().map_or_else(|| "self".to_string(), sanitise_name);
+    let name = git_name
+        .as_deref()
+        .map_or_else(|| "self".to_string(), sanitise_name);
 
     // 6. Write .pub file.
     repo::write_recipients(&repo_root, recipients_dir, &name, &pubkey)?;
@@ -130,14 +137,11 @@ pub fn cmd_recipient_add_self(
     // 7. Print success and reminder.
     crate::output::output_success(&format!("Added self as recipient: {name}.pub"), json);
     if !json {
-        println!(
-            "  Hint: git add .secrets/recipients/{name}.pub && git commit"
-        );
+        println!("  Hint: git add .secrets/recipients/{name}.pub && git commit");
     }
 
     Ok(CommandOutcome::Success)
 }
-
 
 ///
 /// # Errors
@@ -556,7 +560,8 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         let missing = x25519::Identity::generate().to_public().to_string();
-        let err = cmd_recipient(RecipientAction::Remove { pubkey: missing }, None, true).unwrap_err();
+        let err =
+            cmd_recipient(RecipientAction::Remove { pubkey: missing }, None, true).unwrap_err();
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
@@ -605,8 +610,8 @@ mod tests {
         std::fs::write(recipients_dir.join("bad.pub"), format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err =
-                cmd_rekey(None, None, false, None, false).expect_err("rekey with invalid recipient should fail");
+            let err = cmd_rekey(None, None, false, None, false)
+                .expect_err("rekey with invalid recipient should fail");
             assert!(
                 matches!(err, GitvaultError::Encryption(_)),
                 "expected Encryption error, got: {err:?}"
@@ -626,8 +631,7 @@ mod tests {
         let expected_pubkey = identity.to_public().to_string();
 
         with_identity_env(identity_file.path(), || {
-            cmd_recipient_add_self(None, false)
-                .expect("add-self should succeed");
+            cmd_recipient_add_self(None, false).expect("add-self should succeed");
         });
 
         // Verify at least one .pub file exists and contains the pubkey
@@ -656,8 +660,7 @@ mod tests {
         let (identity_file, _identity) = setup_identity_file();
 
         with_identity_env(identity_file.path(), || {
-            cmd_recipient_add_self(None, false)
-                .expect("first add-self should succeed");
+            cmd_recipient_add_self(None, false).expect("first add-self should succeed");
             // Second call should also succeed (idempotent)
             cmd_recipient_add_self(None, false)
                 .expect("second add-self should succeed (idempotent)");
@@ -726,8 +729,8 @@ mod tests {
         let original_bytes = std::fs::read(&file_path).expect("should read ciphertext");
 
         with_identity_env(identity_file.path(), || {
-            let outcome = cmd_rekey(None, None, false, None, true)
-                .expect("dry-run rekey should succeed");
+            let outcome =
+                cmd_rekey(None, None, false, None, true).expect("dry-run rekey should succeed");
             assert_eq!(outcome, CommandOutcome::Success);
         });
 
@@ -793,13 +796,7 @@ mod tests {
 
         // Write a third file encrypted with a DIFFERENT identity (our identity won't decrypt it).
         let other_identity = x25519::Identity::generate();
-        write_encrypted_env_file(
-            dir.path(),
-            "staging",
-            "c.env.age",
-            &other_identity,
-            "C=3\n",
-        );
+        write_encrypted_env_file(dir.path(), "staging", "c.env.age", &other_identity, "C=3\n");
 
         with_identity_env(identity_file.path(), || {
             // Should succeed: 2 rekeyed, 1 skipped (no-access), 0 errors.

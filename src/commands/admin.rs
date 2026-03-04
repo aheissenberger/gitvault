@@ -320,7 +320,7 @@ struct FileImportResult {
 ///
 /// Returns [`GitvaultError`] if repo-root detection, repo hardening, recipient key
 /// resolution, or any non-file-level I/O fails.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub fn cmd_harden_with_files(
     files: Vec<String>,
     env_name: Option<String>,
@@ -346,9 +346,7 @@ pub fn cmd_harden_with_files(
     let mut src_paths: Vec<PathBuf> = Vec::new();
     for pattern in &files {
         let matched: Vec<PathBuf> = glob::glob(pattern)
-            .map_err(|e| {
-                GitvaultError::Usage(format!("Invalid glob pattern '{pattern}': {e}"))
-            })?
+            .map_err(|e| GitvaultError::Usage(format!("Invalid glob pattern '{pattern}': {e}")))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -362,8 +360,7 @@ pub fn cmd_harden_with_files(
     }
 
     // Step 3: resolve recipient keys once for all files.
-    let recipient_keys =
-        crate::identity::resolve_recipient_keys(&repo_root, extra_recipients)?;
+    let recipient_keys = crate::identity::resolve_recipient_keys(&repo_root, extra_recipients)?;
 
     let mut results: Vec<FileImportResult> = Vec::new();
 
@@ -383,8 +380,7 @@ pub fn cmd_harden_with_files(
         };
 
         let age_name = format!("{filename}.age");
-        let target_path =
-            crate::repo::get_env_encrypted_path(&repo_root, &active_env, &age_name);
+        let target_path = crate::repo::get_env_encrypted_path(&repo_root, &active_env, &age_name);
 
         // Path-traversal guard on the output path.
         if let Err(e) = crate::repo::validate_write_path(&repo_root, &target_path) {
@@ -437,8 +433,7 @@ pub fn cmd_harden_with_files(
         let recipients: Vec<Box<dyn age::Recipient + Send>> = match recipient_keys
             .iter()
             .map(|k| {
-                crypto::parse_recipient(k)
-                    .map(|r| Box::new(r) as Box<dyn age::Recipient + Send>)
+                crypto::parse_recipient(k).map(|r| Box::new(r) as Box<dyn age::Recipient + Send>)
             })
             .collect::<Result<Vec<_>, _>>()
         {
@@ -469,16 +464,16 @@ pub fn cmd_harden_with_files(
         };
 
         // Create parent directories.
-        if let Some(parent) = target_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                results.push(FileImportResult {
-                    file: src_path.display().to_string(),
-                    encrypted_path: target_path.display().to_string(),
-                    status: "error".to_string(),
-                    error: Some(e.to_string()),
-                });
-                continue;
-            }
+        if let Some(parent) = target_path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            results.push(FileImportResult {
+                file: src_path.display().to_string(),
+                encrypted_path: target_path.display().to_string(),
+                status: "error".to_string(),
+                error: Some(e.to_string()),
+            });
+            continue;
         }
 
         // Atomic write.
@@ -794,8 +789,13 @@ mod tests {
 
         // Write a valid recipient so that the for loop executes.
         let pubkey = identity.to_public().to_string();
-        repo::write_recipients(dir.path(), crate::defaults::RECIPIENTS_DIR, "default", &pubkey)
-            .expect("write_recipients should succeed");
+        repo::write_recipients(
+            dir.path(),
+            crate::defaults::RECIPIENTS_DIR,
+            "default",
+            &pubkey,
+        )
+        .expect("write_recipients should succeed");
 
         with_identity_env(identity_file.path(), || {
             cmd_check(None, None, None, false).expect("check with valid recipient should succeed");
@@ -1163,12 +1163,12 @@ mod tests {
             cmd_harden_with_files(
                 vec![env_file.to_string_lossy().to_string()],
                 Some("dev".to_string()),
-                false,         // dry_run
-                false,         // remove_source
-                vec![pubkey],  // extra_recipients
-                false,         // json
-                false,         // no_prompt
-                None,          // identity_selector
+                false,        // dry_run
+                false,        // remove_source
+                vec![pubkey], // extra_recipients
+                false,        // json
+                false,        // no_prompt
+                None,         // identity_selector
             )
             .expect("harden-with-files should succeed");
         });
@@ -1209,7 +1209,7 @@ mod tests {
                 false,
                 false,
                 vec![pubkey.clone()],
-                true,  // json — cover JSON branch on second run too
+                true, // json — cover JSON branch on second run too
                 false,
                 None,
             )
@@ -1242,7 +1242,7 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         cmd_harden_with_files(
-            vec![],  // no files → delegate
+            vec![], // no files → delegate
             None,
             false,
             false,
@@ -1282,7 +1282,7 @@ mod tests {
             cmd_harden_with_files(
                 vec![env_file.to_string_lossy().to_string()],
                 Some("dev".to_string()),
-                true,          // dry_run = true
+                true, // dry_run = true
                 false,
                 vec![pubkey],
                 false,

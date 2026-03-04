@@ -112,10 +112,16 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::MergeDriver { base, ours, theirs } => {
             crate::commands::admin::cmd_merge_driver(base, ours, theirs, cli.json)
         }
-        Commands::Recipient { action } => {
-            crate::commands::recipients::cmd_recipient(action, cli.identity_selector.clone(), cli.json)
-        }
-        Commands::Rekey { identity, env, dry_run } => crate::commands::recipients::cmd_rekey(
+        Commands::Recipient { action } => crate::commands::recipients::cmd_recipient(
+            action,
+            cli.identity_selector.clone(),
+            cli.json,
+        ),
+        Commands::Rekey {
+            identity,
+            env,
+            dry_run,
+        } => crate::commands::recipients::cmd_rekey(
             identity,
             cli.identity_selector.clone(),
             cli.json,
@@ -388,7 +394,11 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
-                command: Commands::Rekey { identity: None, env: None, dry_run: false },
+                command: Commands::Rekey {
+                    identity: None,
+                    env: None,
+                    dry_run: false,
+                },
             };
 
             let outcome = run(cli).expect("rekey dispatch should succeed");

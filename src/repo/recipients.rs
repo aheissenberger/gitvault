@@ -88,18 +88,14 @@ pub fn remove_recipient_by_key(
 ) -> Result<(), GitvaultError> {
     let dir_path = repo_root.join(recipients_dir);
     if !dir_path.exists() {
-        return Err(GitvaultError::Usage(format!(
-            "Recipient not found: {key}"
-        )));
+        return Err(GitvaultError::Usage(format!("Recipient not found: {key}")));
     }
     for file_path in collect_pub_entries(&dir_path)? {
         let content = std::fs::read_to_string(&file_path)?;
         for line in content.lines() {
-            if let Ok(Some(parsed)) = parse_recipient_line(line) {
-                if parsed == key {
-                    std::fs::remove_file(&file_path)?;
-                    return Ok(());
-                }
+            if matches!(parse_recipient_line(line), Ok(Some(ref parsed)) if parsed == key) {
+                std::fs::remove_file(&file_path)?;
+                return Ok(());
             }
         }
     }
@@ -120,9 +116,7 @@ pub fn remove_recipient_by_name(
     let dir_path = repo_root.join(recipients_dir);
     let file_path = dir_path.join(format!("{name}.pub"));
     if !file_path.exists() {
-        return Err(GitvaultError::Usage(format!(
-            "Recipient not found: {name}"
-        )));
+        return Err(GitvaultError::Usage(format!("Recipient not found: {name}")));
     }
     std::fs::remove_file(&file_path)?;
     Ok(())
@@ -174,9 +168,7 @@ pub fn list_recipients(
 // ---------------------------------------------------------------------------
 
 /// Collect all `*.pub` file paths in `dir_path`, sorted for deterministic ordering.
-fn collect_pub_entries(
-    dir_path: &Path,
-) -> Result<Vec<std::path::PathBuf>, GitvaultError> {
+fn collect_pub_entries(dir_path: &Path) -> Result<Vec<std::path::PathBuf>, GitvaultError> {
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(dir_path)? {
         let entry = entry?;
@@ -281,8 +273,7 @@ mod tests {
     #[test]
     fn test_remove_by_key_not_found_errors() {
         let dir = TempDir::new().unwrap();
-        let err = remove_recipient_by_key(dir.path(), defaults::RECIPIENTS_DIR, KEY1)
-            .unwrap_err();
+        let err = remove_recipient_by_key(dir.path(), defaults::RECIPIENTS_DIR, KEY1).unwrap_err();
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
@@ -291,8 +282,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         // create dir so we hit the "file not found" branch
         std::fs::create_dir_all(dir.path().join(defaults::RECIPIENTS_DIR)).unwrap();
-        let err = remove_recipient_by_name(dir.path(), defaults::RECIPIENTS_DIR, "nobody")
-            .unwrap_err();
+        let err =
+            remove_recipient_by_name(dir.path(), defaults::RECIPIENTS_DIR, "nobody").unwrap_err();
         assert!(matches!(err, GitvaultError::Usage(_)));
     }
 
