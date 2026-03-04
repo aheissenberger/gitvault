@@ -44,40 +44,47 @@ Each release includes SHA256SUMS and cosign `.sig`/`.pem` files for verification
 
 ## Quick Start
 
-### New team member
+### 1. Set up a new repo
 
 ```bash
-gitvault init              # identity → add-self → harden → config.toml
+gitvault init              # one command: identity → add-self → harden → config.toml
+```
 
-# Commit your public key and open a PR:
+Then import any existing plaintext secret files with `harden`:
+
+```bash
+gitvault harden .env --env dev          # encrypts .env, git rm --cached, gitignores it
+gitvault harden config/secrets.json --env dev  # same for any other file
+```
+
+> `harden` with a file argument encrypts it, removes it from git tracking, and adds it to
+> `.gitignore` — the one-step import command. Use `gitvault encrypt` for files already gitignored.
+
+Finally, commit your encrypted files and public key, then add your team:
+
+```bash
+git add .gitvault/
+git commit -m "secrets: initial encrypted vault"
+git push
+```
+
+→ See [docs/recipient-management.md](docs/recipient-management.md) for the full workflow to add team members.
+
+### 2. Join an existing repo (new team member)
+
+```bash
+gitvault init              # creates identity, adds your public key to .gitvault/recipients/
+
+# Open a PR with your public key:
 git add .gitvault/recipients/ && git commit -m "onboard: add <your-name>"
 git push && gh pr create
 ```
 
 After a maintainer merges and rekeyes: `git pull && gitvault materialize`
 
-### First repo setup
+→ See [docs/recipient-management.md](docs/recipient-management.md) for the maintainer rekey steps.
 
-```bash
-gitvault identity create   # generate age identity (stored in OS keyring by default)
-gitvault recipient add-self
-gitvault harden            # .gitignore + git hooks
-
-# Encrypt a file and register it with the repo:
-gitvault harden .env --env dev   # encrypts, git rm --cached, gitignores .env
-
-# Or encrypt explicitly:
-gitvault encrypt .env --env dev
-```
-
-### Rekey after membership change
-
-```bash
-gitvault rekey             # re-encrypt all secrets to current recipients
-git add .gitvault/ && git commit -m "rekey: update recipients"
-```
-
-### CI/CD
+### 3. CI/CD
 
 ```bash
 # Recommended: use GITVAULT_IDENTITY_FD to avoid the key appearing in /proc/<PID>/environ
