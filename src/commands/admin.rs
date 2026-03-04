@@ -228,6 +228,7 @@ pub fn cmd_check(
     identity_path: Option<String>,
     selector: Option<String>,
     json: bool,
+    skip_history_check: bool,
 ) -> Result<CommandOutcome, GitvaultError> {
     let repo_root = crate::repo::find_repo_root()?;
     let cfg = crate::config::effective_config(&repo_root)?;
@@ -235,6 +236,14 @@ pub fn cmd_check(
 
     // Check 1: no tracked plaintext (REQ-10)
     repo::check_no_tracked_plaintext(&repo_root)?;
+
+    // Check 1b: committed history scan (REQ-81)
+    if !skip_history_check {
+        let history_leaks = repo::find_history_plaintext_leaks(&repo_root)?;
+        if !history_leaks.is_empty() {
+            return Err(GitvaultError::PlaintextLeak(history_leaks.join(", ")));
+        }
+    }
 
     // Probe identity source states for reporting (REQ-50)
     let source_states = probe_identity_sources(identity_path.as_deref(), selector.as_deref());
@@ -720,7 +729,7 @@ mod tests {
 
         with_identity_env(identity_file.path(), || {
             cmd_allow_prod(30, false).expect("allow-prod should succeed");
-            cmd_check(None, None, None, true)
+            cmd_check(None, None, None, true, true)
                 .expect("check should succeed with identity and clean repo");
         });
     }
@@ -760,7 +769,7 @@ mod tests {
         let (identity_file, _identity) = setup_identity_file();
 
         with_identity_env(identity_file.path(), || {
-            cmd_check(None, None, None, false).expect("plain check should succeed");
+            cmd_check(None, None, None, false, true).expect("plain check should succeed");
         });
     }
 
@@ -777,7 +786,7 @@ mod tests {
         std::fs::write(recipients_dir.join("bad.pub"), "not-a-valid-recipient\n").unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err = cmd_check(None, None, None, true).unwrap_err();
+            let err = cmd_check(None, None, None, true, true).unwrap_err();
             assert!(matches!(err, GitvaultError::Usage(_)));
         });
     }
@@ -801,7 +810,8 @@ mod tests {
         .expect("write_recipients should succeed");
 
         with_identity_env(identity_file.path(), || {
-            cmd_check(None, None, None, false).expect("check with valid recipient should succeed");
+            cmd_check(None, None, None, false, true)
+                .expect("check with valid recipient should succeed");
         });
     }
 
@@ -975,7 +985,7 @@ mod tests {
         std::fs::write(recipients_dir.join("bad.pub"), format!("{bad_key}\n")).unwrap();
 
         with_identity_env(identity_file.path(), || {
-            let err = cmd_check(None, None, None, false).unwrap_err();
+            let err = cmd_check(None, None, None, false, true).unwrap_err();
             // The error should come from the parse_recipient call in the for loop.
             assert!(
                 matches!(err, GitvaultError::Usage(_)),
@@ -1134,7 +1144,7 @@ mod tests {
                 with_identity_env(identity_file.path(), || {
                     // cmd_check with json=false triggers the for loop over source_states,
                     // hitting the Ambiguous arm (lines 283-285) for the ssh-agent source.
-                    let result = cmd_check(None, None, None, false);
+                    let result = cmd_check(None, None, None, false, true);
                     // Should succeed overall because GITVAULT_IDENTITY is available.
                     assert!(result.is_ok(), "cmd_check should succeed: {result:?}");
                 });
@@ -1300,5 +1310,70 @@ mod tests {
             !dir.path().join(".gitvault/store/dev/.env.age").exists(),
             "dry-run must not write any .age artifact"
         );
+    }
+
+    // ── REQ-81: history scan in cmd_check ────────────────────────────────────
+
+    /// `cmd_check` with `skip_history_check: false` succeeds on a clean repo
+    /// (no plaintext files in committed history). Covers lines 241-243.
+    #[test]
+    fn test_cmd_check_history_scan_clean_repo_succeeds() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, _) = setup_identity_file();
+
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_check(None, None, None, false, false);
+            assert!(
+                result.is_ok(),
+                "cmd_check with history scan should succeed on clean repo: {result:?}"
+            );
+        });
+    }
+
+    /// `cmd_check` with `skip_history_check: false` fails when a `.env` file
+    /// appears in committed history. Covers line 244 (PlaintextLeak return).
+    #[test]
+    fn test_cmd_check_history_scan_detects_committed_env() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Commit a .env file so it appears in git history.
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        std::fs::write(dir.path().join(".env"), "SECRET=leaked\n").unwrap();
+        Command::new("git")
+            .args(["add", ".env"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "add secrets"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        // Remove the file so check_no_tracked_plaintext doesn't fail first.
+        std::fs::remove_file(dir.path().join(".env")).unwrap();
+
+        let (identity_file, _) = setup_identity_file();
+        with_identity_env(identity_file.path(), || {
+            let err = cmd_check(None, None, None, false, false).unwrap_err();
+            assert!(
+                matches!(err, GitvaultError::PlaintextLeak(_)),
+                "history scan should report PlaintextLeak, got: {err:?}"
+            );
+        });
     }
 }

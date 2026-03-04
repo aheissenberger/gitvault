@@ -15,7 +15,7 @@ pub mod recipients;
 // Re-export the full public API so callers using `crate::repo::*` continue to work
 // without any changes.
 
-pub use drift::{check_no_tracked_plaintext, has_secrets_drift};
+pub use drift::{check_no_tracked_plaintext, find_history_plaintext_leaks, has_secrets_drift};
 pub use hooks::install_git_hooks;
 pub use paths::{
     PLAIN_BASE_DIR, SECRETS_DIR, decrypt_env_secrets, ensure_dirs, find_repo_root,

@@ -1,6 +1,6 @@
 [package]
 name = "gitvault"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Andreas Heissenberger"]
 repository = "https://github.com/aheissenberger/gitvault"
 homepage = "https://github.com/aheissenberger/gitvault"
@@ -33,6 +33,11 @@ regex = "1"
 glob = "0.3"
 base64 = "0.22"
 zeroize = { version = "1", features = ["zeroize_derive"] }
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+rand = "0.8"
+hex = "0.4"
 aws-config  = { version = "1.1.7",   features = ["behavior-version-latest"], optional = true }
 aws-sdk-ssm = { version = "1.106.0", optional = true }
 tokio       = { version = "1",        features = ["rt-multi-thread", "macros"], optional = true }

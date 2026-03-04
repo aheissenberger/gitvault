@@ -5,6 +5,57 @@ use std::path::Path;
 use std::sync::OnceLock;
 use zeroize::Zeroizing;
 
+// ─── Stdin identity override (REQ-74) ────────────────────────────────────────
+
+/// Holds an identity key read from stdin via `--identity-stdin`.
+/// Set once at startup by [`init_identity_from_stdin`], then consulted by the
+/// priority chain in [`load_identity_with`].
+static STDIN_IDENTITY: OnceLock<Zeroizing<String>> = OnceLock::new();
+
+/// Read an identity key from stdin (REQ-74).
+///
+/// Must be called before any identity loading. Subsequent calls are no-ops.
+/// Returns `Err` if stdin is a TTY, is empty, or cannot be read.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Usage`] if stdin is a terminal or the read fails.
+pub fn init_identity_from_stdin() -> Result<(), GitvaultError> {
+    use std::io::Read;
+    // Guard: refuse to read if stdin is a TTY — likely a user mistake.
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: checking stdin's FD via isatty is safe.
+        if libc_isatty(std::io::stdin().as_raw_fd()) {
+            return Err(GitvaultError::Usage(
+                "--identity-stdin requires stdin to be a pipe, not an interactive terminal"
+                    .to_string(),
+            ));
+        }
+    }
+    let mut content = String::new();
+    std::io::stdin().read_to_string(&mut content).map_err(|e| {
+        GitvaultError::Usage(format!("--identity-stdin: failed to read stdin: {e}"))
+    })?;
+    if content.trim().is_empty() {
+        return Err(GitvaultError::Usage(
+            "--identity-stdin: stdin was empty".to_string(),
+        ));
+    }
+    // Ignore if already set (e.g. in tests calling run() multiple times).
+    let _ = STDIN_IDENTITY.set(Zeroizing::new(content));
+    Ok(())
+}
+
+#[cfg(unix)]
+fn libc_isatty(fd: i32) -> bool {
+    unsafe extern "C" {
+        fn isatty(fd: std::ffi::c_int) -> std::ffi::c_int;
+    }
+    unsafe { isatty(fd) != 0 }
+}
+
 // ─── IdentitySourceState ──────────────────────────────────────────────────────
 
 /// Reports the resolution outcome of a single identity source in the chain.
@@ -430,6 +481,45 @@ pub fn load_identity_source(
 
 // ─── load_identity ────────────────────────────────────────────────────────────
 
+/// Load an identity key from a Unix file descriptor (REQ-73).
+///
+/// On Unix, reads the FD into a [`Zeroizing`] string and closes it.
+/// On non-Unix platforms this always returns `None` (FD passing is Unix-only).
+///
+/// The FD is read only once; errors (bad FD, invalid UTF-8, empty content)
+/// are propagated as `Err` rather than silently falling through.
+#[cfg(unix)]
+fn load_identity_from_fd(fd: u32) -> Result<Zeroizing<String>, GitvaultError> {
+    use std::io::Read;
+    use std::os::unix::io::FromRawFd;
+    // SAFETY: `fd` comes from `GITVAULT_IDENTITY_FD` env var parsed as u32;
+    // the caller is responsible for ensuring the FD is open and readable.
+    let mut f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
+    let mut content = String::new();
+    f.read_to_string(&mut content)
+        .map_err(|e| GitvaultError::Usage(format!("GITVAULT_IDENTITY_FD {fd}: {e}")))?;
+    if content.trim().is_empty() {
+        return Err(GitvaultError::Usage(format!(
+            "GITVAULT_IDENTITY_FD {fd}: file descriptor yielded empty content"
+        )));
+    }
+    Ok(Zeroizing::new(content))
+}
+
+/// Load a passphrase from a Unix file descriptor (REQ-76).
+#[cfg(unix)]
+fn load_passphrase_from_fd(fd: u32) -> Option<Zeroizing<String>> {
+    use std::io::Read;
+    use std::os::unix::io::FromRawFd;
+    // SAFETY: same as load_identity_from_fd — caller ensures FD is valid.
+    let mut f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
+    let mut content = String::new();
+    if f.read_to_string(&mut content).is_err() || content.trim().is_empty() {
+        return None;
+    }
+    Some(Zeroizing::new(content.trim().to_string()))
+}
+
 /// Load identity key string from file path or env vars, using the full resolution chain.
 ///
 /// # Errors
@@ -485,10 +575,28 @@ pub(crate) fn try_fetch_ssh_passphrase(
     account: &str,
     no_prompt: bool,
 ) -> Option<Zeroizing<String>> {
-    // 1. Env var override (useful in CI environments)
+    // 1a. GITVAULT_IDENTITY_PASSPHRASE_FD — Unix-only (REQ-76)
+    #[cfg(unix)]
+    if let Ok(fd_str) = std::env::var("GITVAULT_IDENTITY_PASSPHRASE_FD")
+        && let Ok(fd) = fd_str.parse::<u32>()
+        && let Some(pass) = load_passphrase_from_fd(fd)
+    {
+        return Some(pass);
+    }
+    // 1b. Env var override (useful in CI environments)
     if let Ok(p) = std::env::var("GITVAULT_IDENTITY_PASSPHRASE")
         && !p.is_empty()
     {
+        // REQ-77: warn when passphrase is supplied inline via env var.
+        // Suppress warning in tests via GITVAULT_NO_PASSPHRASE_WARN=1.
+        if std::env::var("GITVAULT_NO_PASSPHRASE_WARN").as_deref() != Ok("1") {
+            eprintln!(
+                "gitvault WARNING: GITVAULT_IDENTITY_PASSPHRASE is set as an environment \
+                 variable. Prefer the OS keyring (gitvault keyring set-passphrase) to \
+                 avoid passphrase exposure in process lists and shell history. \
+                 Set GITVAULT_NO_PASSPHRASE_WARN=1 to silence."
+            );
+        }
         return Some(Zeroizing::new(p));
     }
     if no_prompt {
@@ -549,12 +657,37 @@ pub fn load_identity_with<F>(
 where
     F: Fn() -> Result<Zeroizing<String>, GitvaultError>,
 {
+    // 0. --identity-stdin (REQ-74): highest priority when explicitly set.
+    if let Some(key) = STDIN_IDENTITY.get() {
+        return Ok(Zeroizing::new(key.trim().to_string()));
+    }
     // 1. Explicit: --identity flag
     if let Some(p) = path {
         return load_identity_source(&p, "--identity");
     }
+    // 1b. GITVAULT_IDENTITY_FD — Unix-only (REQ-73)
+    #[cfg(unix)]
+    if let Ok(fd_str) = std::env::var("GITVAULT_IDENTITY_FD") {
+        let fd: u32 = fd_str.parse().map_err(|_| {
+            GitvaultError::Usage(format!(
+                "GITVAULT_IDENTITY_FD must be a non-negative integer, got: {fd_str}"
+            ))
+        })?;
+        return load_identity_from_fd(fd);
+    }
     // 2. Explicit: GITVAULT_IDENTITY env var
     if let Ok(key) = std::env::var("GITVAULT_IDENTITY") {
+        // REQ-75: warn when the env var holds an inline private key (not a file path).
+        // Suppress warning in tests via GITVAULT_NO_INLINE_KEY_WARN=1.
+        if key.starts_with("AGE-SECRET-KEY-")
+            && std::env::var("GITVAULT_NO_INLINE_KEY_WARN").as_deref() != Ok("1")
+        {
+            eprintln!(
+                "gitvault WARNING: GITVAULT_IDENTITY contains an inline private key. \
+                 Prefer a file path or OS keyring to avoid key exposure in process lists \
+                 and shell history. Set GITVAULT_NO_INLINE_KEY_WARN=1 to silence."
+            );
+        }
         return load_identity_source(&key, "GITVAULT_IDENTITY");
     }
 
@@ -1745,5 +1878,45 @@ mod tests {
             "expected ssh-agent Ambiguous(2), got: {:?}",
             states[2]
         );
+    }
+
+    /// REQ-75: inline key warning fires when GITVAULT_IDENTITY starts with AGE-SECRET-KEY-.
+    /// Verify the key still resolves correctly when GITVAULT_NO_INLINE_KEY_WARN=1.
+    #[test]
+    fn test_load_identity_with_inline_key_resolves_correctly() {
+        use age::secrecy::ExposeSecret;
+        let identity = age::x25519::Identity::generate();
+        let inline_key = identity.to_string().expose_secret().to_string();
+        assert!(inline_key.starts_with("AGE-SECRET-KEY-"));
+
+        let result = with_env_var("GITVAULT_IDENTITY", Some(&inline_key), || {
+            with_env_var("GITVAULT_NO_INLINE_KEY_WARN", Some("1"), || {
+                load_identity_with(
+                    None,
+                    || Err(GitvaultError::Keyring("no key".to_string())),
+                    None,
+                )
+            })
+        });
+        assert!(
+            result.is_ok(),
+            "inline key should still resolve: {result:?}"
+        );
+    }
+
+    /// REQ-77: passphrase warning suppression via GITVAULT_NO_PASSPHRASE_WARN=1.
+    #[test]
+    fn test_try_fetch_ssh_passphrase_suppressed_warn() {
+        let result = with_env_var(
+            "GITVAULT_IDENTITY_PASSPHRASE",
+            Some("my-secret-passphrase"),
+            || {
+                with_env_var("GITVAULT_NO_PASSPHRASE_WARN", Some("1"), || {
+                    try_fetch_ssh_passphrase("gitvault", "age-identity", true)
+                })
+            },
+        );
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().as_str(), "my-secret-passphrase");
     }
 }

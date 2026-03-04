@@ -80,7 +80,7 @@ pub fn decrypt_env_values(
             if is_env_encrypted(&value) {
                 let encoded = &value[ENV_ENC_PREFIX.len()..];
                 let plain = decrypt_binary_b64(encoded, identity)?;
-                let plain_text = String::from_utf8(plain)
+                let plain_text = String::from_utf8(plain.to_vec())
                     .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?;
                 lines_out.push(rewrite_env_assignment_line(line, &plain_text));
             } else {

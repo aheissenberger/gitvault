@@ -78,8 +78,16 @@ fn format_env_content(pairs: &[&(String, String)]) -> String {
 }
 
 /// Escape a value for use in a double-quoted .env value.
-/// Escapes: backslashes, double quotes, $ (to prevent variable expansion),
-/// and newline/carriage-return characters.
+///
+/// | Character | Escaped as | Reason |
+/// |-----------|------------|--------|
+/// | `\`       | `\\`       | Escape sequences |
+/// | `"`       | `\"`       | String delimiter |
+/// | `$`       | `\$`       | Variable/`$()` expansion |
+/// | `` ` ``   | `` \` ``   | Backtick command substitution |
+/// | `\n`      | `\n`       | Newline |
+/// | `\r`      | `\r`       | Carriage return |
+/// | `\0` (NUL)| `\0`       | POSIX shell truncates at NUL; replaced with literal `\0` |
 fn escape_env_value(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -87,8 +95,10 @@ fn escape_env_value(value: &str) -> String {
             '\\' => result.push_str("\\\\"),
             '"' => result.push_str("\\\""),
             '$' => result.push_str("\\$"),
+            '`' => result.push_str("\\`"),
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
+            '\0' => result.push_str("\\0"),
             _ => result.push(ch),
         }
     }
@@ -379,6 +389,25 @@ mod tests {
     fn test_escape_env_value_escapes_control_and_dollar() {
         let escaped = escape_env_value("a$b\nc\rd");
         assert_eq!(escaped, "a\\$b\\nc\\rd");
+    }
+
+    /// REQ-82: backtick and NUL escaping in escape_env_value.
+    #[test]
+    fn test_escape_env_value_escapes_backtick_and_nul() {
+        // Backtick should be escaped to prevent command substitution in shells.
+        let escaped = escape_env_value("echo `id`");
+        assert_eq!(escaped, "echo \\`id\\`");
+
+        // NUL byte should be escaped to prevent shell truncation.
+        let escaped_nul = escape_env_value("before\0after");
+        assert_eq!(escaped_nul, "before\\0after");
+    }
+
+    #[test]
+    fn test_escape_env_value_escapes_all_special_chars() {
+        let input = "a$b`c\\d\"e\nf\rg\0h";
+        let escaped = escape_env_value(input);
+        assert_eq!(escaped, "a\\$b\\`c\\\\d\\\"e\\nf\\rg\\0h");
     }
 
     /// REQ-18 / C7: permissions must be set on the temp file BEFORE `persist()`

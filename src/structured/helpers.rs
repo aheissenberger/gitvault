@@ -18,10 +18,7 @@ pub(super) fn is_env_encrypted(value: &str) -> bool {
 pub(super) fn atomic_write(path: &Path, data: &[u8]) -> Result<(), GitvaultError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    // Writing to a NamedTempFile (backed by a real writable file) is infallible
-    // in all but extreme OS conditions (e.g. disk full), which are not unit-testable.
-    tmp.write_all(data)
-        .expect("NamedTempFile write_all is infallible in normal operation");
+    tmp.write_all(data).map_err(GitvaultError::Io)?;
     tmp.persist(path).map_err(|e| GitvaultError::Io(e.error))?;
     Ok(())
 }

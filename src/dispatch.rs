@@ -19,6 +19,13 @@ use crate::error::GitvaultError;
 /// Propagates any [`GitvaultError`] returned by the dispatched command.
 pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
     cli.no_prompt = crate::output::resolve_no_prompt(cli.no_prompt);
+
+    // REQ-74: --identity-stdin — read identity key from stdin (pipe-friendly).
+    // Store in a thread-local / env override so identity loading picks it up.
+    if cli.identity_stdin {
+        crate::identity::init_identity_from_stdin()?;
+    }
+
     match cli.command {
         Commands::Encrypt {
             file,
@@ -129,11 +136,16 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             dry_run,
         ),
         Commands::Keyring { action } => crate::commands::keyring::cmd_keyring(action, cli.json),
-        Commands::Check { env, identity } => crate::commands::admin::cmd_check(
+        Commands::Check {
+            env,
+            identity,
+            skip_history_check,
+        } => crate::commands::admin::cmd_check(
             env,
             identity,
             cli.identity_selector.clone(),
             cli.json,
+            skip_history_check,
         ),
         Commands::RevokeProd => crate::commands::admin::cmd_revoke_prod(cli.json),
         Commands::Identity { action } => crate::commands::identity::cmd_identity(
@@ -234,9 +246,11 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
+                identity_stdin: false,
                 command: Commands::Check {
                     env: None,
                     identity: None,
+                    skip_history_check: true,
                 },
             };
             let outcome = run(check_cli).expect("dispatch check should succeed");
@@ -248,6 +262,7 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
+                identity_stdin: false,
                 command: Commands::Status {
                     fail_if_dirty: false,
                 },
@@ -276,6 +291,7 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
+                identity_stdin: false,
                 command: Commands::Run {
                     env: Some("dev".to_string()),
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
@@ -310,6 +326,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Encrypt {
                 file: plain_file.to_string_lossy().to_string(),
                 recipients: vec![identity.to_public().to_string()],
@@ -331,6 +348,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Decrypt {
                 file: encrypted_path.to_string_lossy().to_string(),
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
@@ -367,6 +385,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::AllowProd { ttl: Some(60) },
         };
 
@@ -394,6 +413,7 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
+                identity_stdin: false,
                 command: Commands::Rekey {
                     identity: None,
                     env: None,
@@ -427,6 +447,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::MergeDriver {
                 base: base.to_string_lossy().to_string(),
                 ours: ours.to_string_lossy().to_string(),
@@ -446,6 +467,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::MergeDriver {
                 base: base.to_string_lossy().to_string(),
                 ours: ours.to_string_lossy().to_string(),
@@ -472,6 +494,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Keyring {
                 action: KeyringAction::Set {
                     identity: Some("/path/that/does/not/exist".to_string()),
@@ -519,6 +542,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::AllowProd { ttl: Some(60) },
         };
         run(allow_cli).expect("allow-prod should succeed");
@@ -529,6 +553,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::RevokeProd,
         };
         let outcome = run(revoke_cli).expect("revoke-prod dispatch should succeed");
@@ -551,6 +576,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Keyring {
                 action: KeyringAction::Set {
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
@@ -584,6 +610,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Decrypt {
                 file: dir
                     .path()
@@ -617,6 +644,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Harden {
                 files: vec![],
                 env: None,
@@ -645,6 +673,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Recipient {
                 action: crate::cli::RecipientAction::List,
             },
@@ -669,6 +698,7 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
+            identity_stdin: false,
             command: Commands::Identity {
                 action: crate::cli::IdentityAction::Create {
                     profile: crate::cli::IdentityProfile::Classic,
@@ -702,6 +732,7 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
+                identity_stdin: false,
                 command: Commands::Materialize {
                     env: Some("dev".to_string()),
                     identity: Some(identity_file.path().to_string_lossy().to_string()),

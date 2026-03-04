@@ -222,7 +222,7 @@ fn decrypt_fields_json(
         {
             let plain = decrypt_armor(s, identity)?;
             *v = serde_json::Value::String(
-                String::from_utf8(plain)
+                String::from_utf8(plain.to_vec())
                     .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
             );
         }
@@ -247,7 +247,7 @@ fn decrypt_fields_yaml(
         {
             let plain = decrypt_armor(s, identity)?;
             *v = serde_yml::Value::String(
-                String::from_utf8(plain)
+                String::from_utf8(plain.to_vec())
                     .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
             );
         }
@@ -272,7 +272,7 @@ fn decrypt_fields_toml(
         {
             let plain = decrypt_armor(s, identity)?;
             *v = toml::Value::String(
-                String::from_utf8(plain)
+                String::from_utf8(plain.to_vec())
                     .map_err(|e| GitvaultError::Decryption(format!("UTF-8 error: {e}")))?,
             );
         }

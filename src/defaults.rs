@@ -56,3 +56,15 @@ pub const KEYRING_SERVICE: &str = "gitvault";
 
 /// OS keyring account / username under which the age identity key is stored.
 pub const KEYRING_ACCOUNT: &str = "age-identity";
+
+// ── Security limits ───────────────────────────────────────────────────────────
+
+/// Maximum number of age recipients per encrypted file (REQ-83).
+///
+/// age writes one encrypted stanza per recipient; an unbounded list causes
+/// O(n) memory, CPU (key exchange), and storage consumption. 256 covers all
+/// realistic team sizes while bounding worst-case resource use.
+pub const MAX_RECIPIENTS: usize = 256;
+
+/// Maximum number of commits scanned by the history plaintext-leak check (REQ-81).
+pub const HISTORY_SCAN_LIMIT: usize = 10_000;

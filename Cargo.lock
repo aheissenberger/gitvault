@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "gitvault"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "age",
  "async-trait",
@@ -1259,12 +1259,17 @@ dependencies = [
  "clap",
  "dotenvy",
  "glob",
+ "hex",
+ "hmac",
  "keyring",
  "mockall",
+ "rand",
  "regex",
  "serde",
  "serde_json",
  "serde_yml",
+ "sha2",
+ "subtle",
  "tempfile",
  "thiserror",
  "tokio",

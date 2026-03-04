@@ -44,6 +44,10 @@ pub struct Cli {
     #[arg(long, global = true, env = "GITVAULT_IDENTITY_SELECTOR")]
     pub identity_selector: Option<String>,
 
+    /// Read identity key from stdin (pipe-friendly alternative to --identity; REQ-74)
+    #[arg(long, global = true, conflicts_with = "identity_selector")]
+    pub identity_stdin: bool,
+
     /// AWS profile name for SSM backend
     #[arg(long, global = true, env = "AWS_PROFILE")]
     pub aws_profile: Option<String>,
@@ -215,6 +219,9 @@ pub enum Commands {
         /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
+        /// Skip the committed-history plaintext leak scan (REQ-81 escape hatch)
+        #[arg(long)]
+        skip_history_check: bool,
     },
     /// Revoke the production allow token immediately.
     RevokeProd,

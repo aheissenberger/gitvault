@@ -1,3 +1,4 @@
+use crate::defaults::{HISTORY_SCAN_LIMIT, PLAIN_BASE_DIR};
 use crate::error::GitvaultError;
 use std::path::Path;
 use std::process::Command;
@@ -63,6 +64,43 @@ pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError>
     Ok(())
 }
 
+/// Check committed history for plaintext secret files. REQ-81.
+///
+/// Scans up to [`HISTORY_SCAN_LIMIT`] commits in `git log --all` for files that
+/// match the plain output directory or `.env` paths. Returns a list of paths
+/// found in committed history, or an empty vec if none are found.
+///
+/// Callers should treat a non-empty result as a [`GitvaultError::PlaintextLeak`].
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Other`] if `git log` cannot be spawned.
+pub fn find_history_plaintext_leaks(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
+    let output = Command::new("git")
+        .args([
+            "log",
+            "--all",
+            "--diff-filter=A",
+            "--name-only",
+            "--format=",
+            &format!("--max-count={HISTORY_SCAN_LIMIT}"),
+        ])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| GitvaultError::Other(format!("Failed to run git log: {e}")))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let leaks: Vec<String> = stdout
+        .lines()
+        .filter(|l| {
+            !l.is_empty() && (l.contains(PLAIN_BASE_DIR) || *l == ".env" || l.ends_with("/.env"))
+        })
+        .map(str::to_string)
+        .collect();
+
+    Ok(leaks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,14 +120,13 @@ mod tests {
     fn test_check_no_tracked_plaintext_clean_repo() {
         let dir = TempDir::new().unwrap();
         let result = check_no_tracked_plaintext(dir.path());
-        let _ = result; // just verify it doesn't panic
+        let _ = result;
     }
 
     #[test]
     fn test_has_secrets_drift_nonexistent_repo_root_returns_err() {
         let dir = TempDir::new().unwrap();
         let missing_root = dir.path().join("missing");
-        // git cannot run against a missing directory; error must propagate (M10 fix)
         let result = has_secrets_drift(&missing_root);
         assert!(
             result.is_err(),
@@ -132,8 +169,61 @@ mod tests {
     fn test_has_secrets_drift_in_git_repo() {
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
-        // In a fresh repo with no commits, `git diff HEAD` may fail/return true.
-        // We just verify the function returns Ok (doesn't panic or error).
         let _ = has_secrets_drift(dir.path());
+    }
+
+    /// REQ-81: find_history_plaintext_leaks returns Ok on a repo with no history.
+    #[test]
+    fn test_find_history_plaintext_leaks_empty_repo() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let leaks = find_history_plaintext_leaks(dir.path()).unwrap();
+        assert!(leaks.is_empty());
+    }
+
+    /// REQ-81: find_history_plaintext_leaks returns Err when git cannot run.
+    #[test]
+    fn test_find_history_plaintext_leaks_git_failure() {
+        let dir = TempDir::new().unwrap();
+        let missing_root = dir.path().join("missing");
+        let result = find_history_plaintext_leaks(&missing_root);
+        assert!(matches!(result, Err(GitvaultError::Other(_))));
+    }
+
+    /// REQ-81: find_history_plaintext_leaks detects a committed .env file.
+    #[test]
+    fn test_find_history_plaintext_leaks_detects_committed_env() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        // Configure git identity for commits
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+
+        std::fs::write(dir.path().join(".env"), "SECRET=plaintext\n").unwrap();
+        Command::new("git")
+            .args(["add", ".env"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "add .env"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+
+        let leaks = find_history_plaintext_leaks(dir.path()).unwrap();
+        assert!(
+            leaks.iter().any(|l| l == ".env"),
+            "expected .env in leaks, got: {leaks:?}"
+        );
     }
 }

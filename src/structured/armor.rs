@@ -1,14 +1,41 @@
+use crate::defaults::MAX_RECIPIENTS;
 use crate::error::GitvaultError;
 use base64::Engine;
 use std::io::{Read, Write};
+use zeroize::Zeroizing;
+
+/// Truncate a recipient key to the first 8 chars + `…` for use in error messages.
+/// Avoids logging full public key material while keeping the prefix identifiable.
+fn truncate_key_for_log(k: &str) -> String {
+    if k.len() > 8 {
+        format!("{}…", &k[..8])
+    } else {
+        k.to_string()
+    }
+}
 
 /// Encrypt plaintext bytes using age ASCII armor. Returns the armor text.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Encryption`] if `recipient_keys` is empty, exceeds
+/// [`MAX_RECIPIENTS`], contains an invalid key, or if the age encryption fails.
 pub fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<String, GitvaultError> {
+    if recipient_keys.len() > MAX_RECIPIENTS {
+        return Err(GitvaultError::Encryption(format!(
+            "recipient count {} exceeds limit {}",
+            recipient_keys.len(),
+            MAX_RECIPIENTS
+        )));
+    }
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
             let r: age::x25519::Recipient = k.parse().map_err(|e| {
-                GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}"))
+                GitvaultError::Encryption(format!(
+                    "Invalid recipient key {}: {e}",
+                    truncate_key_for_log(k)
+                ))
             })?;
             Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
         })
@@ -33,10 +60,13 @@ pub fn encrypt_armor(plaintext: &[u8], recipient_keys: &[String]) -> Result<Stri
 }
 
 /// Decrypt an age armor string using the given identity.
+///
+/// Returns the decrypted bytes in a [`Zeroizing`] wrapper so the plaintext
+/// is overwritten with zeros when the value is dropped (REQ-78).
 pub fn decrypt_armor(
     armored: &str,
     identity: &dyn age::Identity,
-) -> Result<Vec<u8>, GitvaultError> {
+) -> Result<Zeroizing<Vec<u8>>, GitvaultError> {
     let armor = age::armor::ArmoredReader::new(armored.as_bytes());
     let decryptor = age::Decryptor::new(armor)
         .map_err(|e| GitvaultError::Decryption(format!("Decryptor create: {e}")))?;
@@ -50,7 +80,7 @@ pub fn decrypt_armor(
             ));
         }
     };
-    let mut plaintext = Vec::new();
+    let mut plaintext = Zeroizing::new(Vec::new());
     reader
         .read_to_end(&mut plaintext)
         .map_err(|e| GitvaultError::Decryption(format!("Read decrypted: {e}")))?;
@@ -58,15 +88,30 @@ pub fn decrypt_armor(
 }
 
 /// Encrypt plaintext bytes using binary age (no armor), returning base64-encoded result.
+///
+/// # Errors
+///
+/// Returns [`GitvaultError::Encryption`] if `recipient_keys` exceeds [`MAX_RECIPIENTS`],
+/// contains an invalid key, or if the age encryption fails.
 pub fn encrypt_binary_b64(
     plaintext: &[u8],
     recipient_keys: &[String],
 ) -> Result<String, GitvaultError> {
+    if recipient_keys.len() > MAX_RECIPIENTS {
+        return Err(GitvaultError::Encryption(format!(
+            "recipient count {} exceeds limit {}",
+            recipient_keys.len(),
+            MAX_RECIPIENTS
+        )));
+    }
     let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
         .iter()
         .map(|k| {
             let r: age::x25519::Recipient = k.parse().map_err(|e| {
-                GitvaultError::Encryption(format!("Invalid recipient key {k}: {e}"))
+                GitvaultError::Encryption(format!(
+                    "Invalid recipient key {}: {e}",
+                    truncate_key_for_log(k)
+                ))
             })?;
             Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
         })
@@ -85,10 +130,14 @@ pub fn encrypt_binary_b64(
     Ok(base64::engine::general_purpose::STANDARD.encode(&output))
 }
 
+/// Decrypt binary age (base64-encoded) using the given identity.
+///
+/// Returns the decrypted bytes in a [`Zeroizing`] wrapper so the plaintext
+/// is overwritten with zeros when the value is dropped (REQ-78).
 pub fn decrypt_binary_b64(
     encoded: &str,
     identity: &dyn age::Identity,
-) -> Result<Vec<u8>, GitvaultError> {
+) -> Result<Zeroizing<Vec<u8>>, GitvaultError> {
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|e| GitvaultError::Decryption(format!("Invalid base64 payload: {e}")))?;
@@ -104,13 +153,12 @@ pub fn decrypt_binary_b64(
             ));
         }
     };
-    let mut plaintext = Vec::new();
+    let mut plaintext = Zeroizing::new(Vec::new());
     reader
         .read_to_end(&mut plaintext)
         .map_err(|e| GitvaultError::Decryption(format!("Read decrypted: {e}")))?;
     Ok(plaintext)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,7 +228,7 @@ mod tests {
 
         let armored = encrypt_armor(plain, &keys).unwrap();
         let decrypted = decrypt_armor(&armored, &identity).unwrap();
-        assert_eq!(decrypted, plain);
+        assert_eq!(*decrypted, plain as &[u8]);
     }
 
     #[test]
@@ -191,7 +239,7 @@ mod tests {
 
         let encoded = encrypt_binary_b64(plain, &keys).unwrap();
         let decrypted = decrypt_binary_b64(&encoded, &identity).unwrap();
-        assert_eq!(decrypted, plain);
+        assert_eq!(*decrypted, plain as &[u8]);
     }
 
     // ── invalid recipient key ────────────────────────────────────────────────
@@ -234,6 +282,53 @@ mod tests {
             err.to_string().contains("At least one recipient"),
             "got: {err}"
         );
+    }
+
+    // ── REQ-83: recipient count limit ────────────────────────────────────────
+
+    #[test]
+    fn test_encrypt_armor_over_limit_errors() {
+        let identity = gen_identity();
+        let key = identity_to_recipient_keys(&identity)[0].clone();
+        let keys: Vec<String> = (0..=MAX_RECIPIENTS).map(|_| key.clone()).collect();
+        let err = encrypt_armor(b"data", &keys).unwrap_err();
+        assert!(err.to_string().contains("exceeds limit"), "got: {err}");
+    }
+
+    #[test]
+    fn test_encrypt_binary_b64_over_limit_errors() {
+        let identity = gen_identity();
+        let key = identity_to_recipient_keys(&identity)[0].clone();
+        let keys: Vec<String> = (0..=MAX_RECIPIENTS).map(|_| key.clone()).collect();
+        let err = encrypt_binary_b64(b"data", &keys).unwrap_err();
+        assert!(err.to_string().contains("exceeds limit"), "got: {err}");
+    }
+
+    // ── REQ-84: truncate_key_for_log ─────────────────────────────────────────
+
+    #[test]
+    fn test_truncate_key_for_log_long_key() {
+        let key = "AGE-SECRET-KEY-1234567890";
+        let truncated = truncate_key_for_log(key);
+        assert_eq!(truncated, "AGE-SECR…");
+    }
+
+    #[test]
+    fn test_truncate_key_for_log_short_key() {
+        let key = "short";
+        let truncated = truncate_key_for_log(key);
+        assert_eq!(truncated, "short");
+    }
+
+    #[test]
+    fn test_encrypt_armor_invalid_key_truncates_in_error() {
+        // REQ-84: error message must NOT contain the full (long) key.
+        let fake_key = format!("{:0>64}", "bad-key-padding");
+        let keys = vec![fake_key.clone()];
+        let err = encrypt_armor(b"data", &keys).unwrap_err();
+        let msg = err.to_string();
+        // The error should contain the truncated form (first 8 chars + ellipsis) not the full key.
+        assert!(!msg.contains(&fake_key), "full key leaked in error: {msg}");
     }
 
     // ── wrong identity (decrypt with a different key) ────────────────────────
