@@ -302,11 +302,12 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
-        let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
-        write!(tmp, r#"{{"password":"hunter2","user":"alice"}}"#).unwrap();
-        let path = tmp.into_temp_path();
+        // Use a plain file in a temp dir so atomic_write (rename) works on Windows.
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().join("test.json");
+        std::fs::write(&path, r#"{"password":"hunter2","user":"alice"}"#).unwrap();
 
-        encrypt_fields(path.as_ref(), &["password"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["password"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&after_enc).unwrap();
@@ -331,14 +332,14 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
-        let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
-        write!(tmp, r#"{{"secret":"mysecret","other":"value"}}"#).unwrap();
-        let path = tmp.into_temp_path();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().join("test.json");
+        std::fs::write(&path, r#"{"secret":"mysecret","other":"value"}"#).unwrap();
 
-        encrypt_fields(path.as_ref(), &["secret"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["secret"], &identity, &keys).unwrap();
         let first_enc = std::fs::read_to_string(&path).unwrap();
 
-        encrypt_fields(path.as_ref(), &["secret"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["secret"], &identity, &keys).unwrap();
         let second_enc = std::fs::read_to_string(&path).unwrap();
 
         assert_eq!(
@@ -353,11 +354,11 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
-        let mut tmp = NamedTempFile::with_suffix(".yaml").unwrap();
-        write!(tmp, "database_password: secret123\nhost: localhost\n").unwrap();
-        let path = tmp.into_temp_path();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().join("test.yaml");
+        std::fs::write(&path, "database_password: secret123\nhost: localhost\n").unwrap();
 
-        encrypt_fields(path.as_ref(), &["database_password"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["database_password"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: serde_yml::Value = serde_yml::from_str(&after_enc).unwrap();
@@ -381,11 +382,11 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
-        let mut tmp = NamedTempFile::with_suffix(".toml").unwrap();
-        write!(tmp, "api_key = \"top-secret\"\nname = \"app\"\n").unwrap();
-        let path = tmp.into_temp_path();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().join("test.toml");
+        std::fs::write(&path, "api_key = \"top-secret\"\nname = \"app\"\n").unwrap();
 
-        encrypt_fields(path.as_ref(), &["api_key"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["api_key"], &identity, &keys).unwrap();
 
         let after_enc = std::fs::read_to_string(&path).unwrap();
         let v: toml::Value = after_enc.parse().unwrap();
@@ -409,31 +410,27 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
-        let mut tmp = NamedTempFile::with_suffix(".json").unwrap();
-        write!(tmp, r#"{{"a":"alpha","b":"beta"}}"#).unwrap();
-        let path = tmp.into_temp_path();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().join("test.json");
+        std::fs::write(&path, r#"{"a":"alpha","b":"beta"}"#).unwrap();
 
         // Encrypt both fields
-        encrypt_fields(path.as_ref(), &["a", "b"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["a", "b"], &identity, &keys).unwrap();
         let both_enc = std::fs::read_to_string(&path).unwrap();
         let v1: serde_json::Value = serde_json::from_str(&both_enc).unwrap();
         let a_enc1 = v1["a"].as_str().unwrap().to_string();
 
         // Now overwrite 'b' with a new value and re-encrypt
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
         let new_b_ciphertext = v1["b"].as_str().unwrap().to_string();
         // Manually write a JSON where 'b' is changed plaintext but 'a' keeps its ciphertext
-        write!(
-            f,
-            r#"{{"a":{},"b":"new_beta"}}"#,
-            serde_json::to_string(&a_enc1).unwrap()
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"a":{},"b":"new_beta"}}"#,
+                serde_json::to_string(&a_enc1).unwrap()
+            ),
         )
         .unwrap();
-        drop(f);
 
         encrypt_fields(path.as_ref(), &["a", "b"], &identity, &keys).unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
@@ -623,11 +620,11 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
 
-        let mut tmp = NamedTempFile::with_suffix(".yml").unwrap();
-        write!(tmp, "token: secret_token\nenv: prod\n").unwrap();
-        let path = tmp.into_temp_path();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().join("test.yml");
+        std::fs::write(&path, "token: secret_token\nenv: prod\n").unwrap();
 
-        encrypt_fields(path.as_ref(), &["token"], &identity, &keys).unwrap();
+        encrypt_fields(&path, &["token"], &identity, &keys).unwrap();
         let v: serde_yml::Value =
             serde_yml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(is_age_armor(v["token"].as_str().unwrap()));
