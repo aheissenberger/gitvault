@@ -31,11 +31,16 @@ brew install aheissenberger/tools/gitvault
 
 # Build from source
 cargo build --release
-
-# Prebuilt binaries — see GitHub Releases
-# gitvault-linux-x86_64.tar.gz | gitvault-macos-aarch64.tar.gz | gitvault-windows-x86_64.zip
-# Each release ships SHA256SUMS + cosign .sig/.pem files
 ```
+
+### Prebuilt binaries
+
+Download the latest release from [GitHub Releases](https://github.com/aheissenberger/gitvault/releases):
+- `gitvault-linux-x86_64.tar.gz`
+- `gitvault-macos-aarch64.tar.gz`
+- `gitvault-windows-x86_64.zip`
+
+Each release includes SHA256SUMS and cosign `.sig`/`.pem` files for verification.
 
 ## Quick Start
 
