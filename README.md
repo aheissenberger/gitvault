@@ -304,6 +304,7 @@ Hook manager adapters require the corresponding binary on `PATH` (`gitvault-husk
 
 - Getting started: this README
 - Identity setup guide: [docs/identity-setup.md](docs/identity-setup.md)
+- Recipient management: [docs/recipient-management.md](docs/recipient-management.md)
 - CI/CD recipes: [docs/cicd-recipes.md](docs/cicd-recipes.md)
 - Secret formats cookbook: [docs/secret-formats.md](docs/secret-formats.md)
 - Development workflows: [docs/development.md](docs/development.md)

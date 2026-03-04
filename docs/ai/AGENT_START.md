@@ -59,6 +59,7 @@ See `docs/ai/hotspots.md` for the curated list of critical and architectural iss
 |------|---------|
 | `README.md` | User-facing reference (CLI, configuration, exit codes, identity resolution) |
 | `docs/identity-setup.md` | Identity setup guide (OS keyring, age files, SSH keys, SSH agent, FD-based) |
+| `docs/recipient-management.md` | Recipient lifecycle: onboarding, offboarding, rekeying, team scaling patterns |
 | `docs/cicd-recipes.md` | CI/CD best practices (GitHub Actions, Docker, Kubernetes recipes) |
 | `docs/secret-formats.md` | Secret formats cookbook (.env, JSON, YAML, TOML) |
 | `docs/ai/skill.md` | AI skill reference (embedded in binary; canonical AI reference for the tool) |

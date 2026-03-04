@@ -549,3 +549,7 @@ GITVAULT_IDENTITY_FD=3 gitvault run --no-prompt --env prod -- ./deploy.sh \
 ---
 
 *For architecture details and the full CLI reference, see the [README](../README.md) and other files in [`docs/`](.).*
+
+---
+
+*For adding CI service accounts as recipients and the full onboarding ceremony, see [docs/recipient-management.md](recipient-management.md).*

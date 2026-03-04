@@ -418,3 +418,7 @@ Store `$PASSPHRASE` as a masked secret in your CI platform alongside the identit
 - Hardware-backed SSH agents (YubiKey, Secretive) provide the strongest protection because the
   private key never leaves the hardware device.
 - Ensure your SSH agent socket path (`SSH_AUTH_SOCK`) is not world-writable.
+
+---
+
+*Once your identity is set up, see [docs/recipient-management.md](recipient-management.md) for how to add yourself as a recipient and onboard to a vault.*
