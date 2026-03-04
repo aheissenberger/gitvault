@@ -137,6 +137,9 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cli.no_prompt,
         ),
         Commands::Ai { action } => crate::commands::ai::cmd_ai(action, cli.json),
+        Commands::Init { env, out } => {
+            crate::commands::init::cmd_init(env, out, cli.json, cli.no_prompt)
+        }
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
             dispatch_ssm(action, cli.aws_profile, cli.aws_role_arn, cli.json)

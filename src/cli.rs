@@ -121,6 +121,15 @@ pub enum Commands {
         #[arg(long)]
         fail_if_dirty: bool,
     },
+    /// Interactive onboarding: set up identity, recipients, harden repo, and create config
+    Init {
+        /// Target environment to activate (writes to .secrets/env)
+        #[arg(long)]
+        env: Option<String>,
+        /// Path to export identity file (forwarded to identity create)
+        #[arg(long, value_name = "PATH")]
+        out: Option<String>,
+    },
     /// Harden repository and optionally import plain files as encrypted secrets
     Harden {
         /// Plain text file(s) to encrypt and import (supports globs, e.g. ".env*")
