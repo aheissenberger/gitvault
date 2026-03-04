@@ -340,9 +340,10 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
 fn load_global_config_impl(home_override: Option<&Path>) -> Result<GitvaultConfig, GitvaultError> {
     let home_path = match home_override {
         Some(p) => p.to_path_buf(),
-        None => match std::env::var("HOME") {
-            Ok(h) if !h.is_empty() => std::path::PathBuf::from(h),
-            _ => return Ok(GitvaultConfig::default()),
+        // REQ-99: use dirs::home_dir() for cross-platform home resolution.
+        None => match dirs::home_dir() {
+            Some(h) => h,
+            None => return Ok(GitvaultConfig::default()),
         },
     };
 

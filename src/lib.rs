@@ -24,6 +24,7 @@ pub mod output;
 pub mod permissions;
 pub mod repo;
 pub mod run;
+pub mod ssh;
 #[cfg(feature = "ssm")]
 pub mod ssm;
 pub mod structured;

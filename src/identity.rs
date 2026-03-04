@@ -114,12 +114,9 @@ impl std::fmt::Display for SshAgentError {
 /// Returns [`SshAgentError::NotAvailable`] when `ssh-add` cannot be executed or the
 /// agent has no identities.
 pub fn list_ssh_agent_keys() -> Result<Vec<SshAgentKey>, SshAgentError> {
-    let output = std::process::Command::new("ssh-add")
-        .args(["-l", "-E", "sha256"])
-        .output()
-        .map_err(|e| SshAgentError::NotAvailable(format!("ssh-add not available: {e}")))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw =
+        crate::ssh::ssh_add_list_keys().map_err(|e| SshAgentError::NotAvailable(e.to_string()))?;
+    let stdout = String::from_utf8_lossy(&raw);
 
     // "The agent has no identities." → empty list
     if stdout.contains("no identities") || stdout.trim().is_empty() {
@@ -160,19 +157,18 @@ pub fn list_ssh_agent_keys() -> Result<Vec<SshAgentKey>, SshAgentError> {
 /// 3. All private-key-like files in `~/.ssh/` (no `.pub`, not config/known_hosts/
 ///    authorized_keys, not a directory), verified by fingerprint.
 ///
-/// Fingerprint verification uses `ssh-keygen -l -E sha256 -f <path>`.
+/// Fingerprint verification uses `ssh-keygen -l -E sha256 -f <path>` via
+/// [`crate::ssh::ssh_keygen_fingerprint`] (REQ-98).
+///
+/// Home directory is resolved via [`dirs::home_dir`] (REQ-99) for cross-platform
+/// correctness (Windows uses `USERPROFILE` / `SHGetKnownFolderPath`, not `HOME`).
 fn find_ssh_key_file(key: &SshAgentKey) -> Option<std::path::PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    let ssh_dir = std::path::Path::new(&home).join(".ssh");
+    let ssh_dir = dirs::home_dir()?.join(".ssh");
 
     // Returns true if the file's fingerprint matches the agent key.
     let matches_fingerprint = |path: &std::path::Path| -> bool {
-        std::process::Command::new("ssh-keygen")
-            .args(["-l", "-E", "sha256", "-f"])
-            .arg(path)
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&key.fingerprint))
+        crate::ssh::ssh_keygen_fingerprint(path)
+            .map(|line| line.contains(&key.fingerprint))
             .unwrap_or(false)
     };
 

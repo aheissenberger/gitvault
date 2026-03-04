@@ -31,68 +31,17 @@ pub enum AdapterLookup {
 
 /// Look up `adapter.binary_name()` on `PATH`.
 ///
-/// Uses the same search strategy as the OS shell: walks every directory in
-/// `PATH` and returns the first executable match.
+/// Uses the [`which`] crate for cross-platform binary resolution (REQ-100).
+/// Handles `PATHEXT` expansion on Windows, UNC paths, and symlink resolution.
 #[must_use]
 pub fn find_adapter_binary(adapter: &HookAdapter) -> AdapterLookup {
     let binary = adapter.binary_name();
-    which_binary(binary).map_or_else(
-        |()| AdapterLookup::NotFound {
+    which::which(binary).map_or_else(
+        |_| AdapterLookup::NotFound {
             binary: binary.to_string(),
         },
         AdapterLookup::Found,
     )
-}
-
-/// Resolve a binary name to its full path by searching `PATH`, mirroring
-/// the behaviour of the `which` shell built-in without pulling in an external
-/// crate.
-fn which_binary(name: &str) -> Result<PathBuf, ()> {
-    let path_var = std::env::var_os("PATH").ok_or(())?;
-
-    #[cfg(windows)]
-    let candidates: Vec<String> = {
-        let path = std::path::Path::new(name);
-        if path.extension().is_some() {
-            vec![name.to_string()]
-        } else {
-            let pathext =
-                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
-            let mut out = vec![name.to_string()];
-            out.extend(
-                pathext
-                    .split(';')
-                    .filter(|ext| !ext.is_empty())
-                    .map(|ext| format!("{name}{ext}")),
-            );
-            out
-        }
-    };
-
-    #[cfg(not(windows))]
-    let candidates: Vec<String> = vec![name.to_string()];
-
-    for dir in std::env::split_paths(&path_var) {
-        for binary_name in &candidates {
-            let candidate = dir.join(binary_name);
-            if candidate.is_file() {
-                // Check execute permission on Unix.
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let meta = std::fs::metadata(&candidate).map_err(|_| ())?;
-                    if meta.permissions().mode() & 0o111 != 0 {
-                        return Ok(candidate);
-                    }
-                }
-                #[cfg(not(unix))]
-                {
-                    return Ok(candidate);
-                }
-            }
-        }
-    }
-    Err(())
 }
 
 // ---------------------------------------------------------------------------
@@ -168,8 +117,8 @@ mod tests {
         #[cfg(not(windows))]
         let probe = "echo";
 
-        // We test the underlying `which_binary` helper with a known shell binary.
-        let result = which_binary(probe);
+        // Verify that which::which resolves a known binary.
+        let result = which::which(probe);
         assert!(result.is_ok(), "{probe} should be found on PATH");
         let path = result.unwrap();
         assert!(path.is_absolute());
@@ -177,16 +126,7 @@ mod tests {
 
     #[test]
     fn test_which_binary_not_found_returns_err() {
-        let _lock = global_test_lock().lock().unwrap();
-        let original_path = std::env::var_os("PATH");
-        unsafe {
-            std::env::set_var("PATH", "/tmp/__no_such_dir_gitvault_test__");
-        }
-        let result = which_binary("gitvault-fake-binary-xyz");
-        match original_path {
-            Some(p) => unsafe { std::env::set_var("PATH", p) },
-            None => unsafe { std::env::remove_var("PATH") },
-        }
+        let result = which::which("gitvault-fake-binary-xyz-that-does-not-exist");
         assert!(result.is_err());
     }
 
