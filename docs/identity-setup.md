@@ -1,5 +1,7 @@
 # Identity Setup Guide
 
+> **[← README](../README.md)** · Identity Setup · [Recipient Management](recipient-management.md) · [CI/CD Recipes](cicd-recipes.md) · [Secret Formats](secret-formats.md) · [CLI Reference](reference.md)
+
 This guide explains how to configure your gitvault identity — the age identity key used to encrypt
 and decrypt secrets. Choose the method that best fits your workflow and security requirements.
 
@@ -18,16 +20,7 @@ and decrypt secrets. Choose the method that best fits your workflow and security
 
 ## Overview
 
-gitvault resolves your identity from the first source that succeeds, in this priority order:
-
-| Priority | Source | How to use |
-|----------|--------|------------|
-| 0 (highest) | `--identity-stdin` flag | `echo "$KEY" \| gitvault --identity-stdin <cmd>` |
-| 1 | `--identity <file>` flag | Pass a path to an age key file |
-| 1b | `GITVAULT_IDENTITY_FD` env var (Unix only) | Pass the file descriptor number; key is read from the open FD |
-| 2 | `GITVAULT_IDENTITY` env var | Set to a file path or a raw `AGE-SECRET-KEY-…` string |
-| 3 | OS keyring | Populated by `gitvault identity create` (default) or `gitvault keyring set` |
-| 4 (lowest) | SSH agent | Opt-in via `GITVAULT_SSH_AGENT=1` or a running `SSH_AUTH_SOCK` |
+Identity is resolved in this order: `--identity-stdin` → `--identity` / `GITVAULT_IDENTITY_FD` → `GITVAULT_IDENTITY` → OS keyring → SSH agent. → [Full resolution table](reference.md#identity-resolution)
 
 **Quick decision guide:**
 
@@ -37,7 +30,7 @@ gitvault resolves your identity from the first source that succeeds, in this pri
 - **Team uses ssh-agent / hardware token** → [Option 4: SSH Agent](#option-4-ssh-agent)
 - **CI/CD pipelines** → [Option 5: Piped / FD-based](#option-5-pipedfd-based-cicd)
 
-> **Note:** Priority numbering above (0–4) matches the canonical reference in [README.md § Identity resolution](../README.md#identity-resolution). Priority 1 (`--identity`) and 1b (`GITVAULT_IDENTITY_FD`) are both treated as CLI-flag level; `GITVAULT_IDENTITY_FD` is preferred in CI because the key does not appear in the process environment listing.
+> **Note:** `GITVAULT_IDENTITY_FD` and `--identity` share priority level 1; `GITVAULT_IDENTITY_FD` is preferred in CI because the key does not appear in the process environment listing.
 
 ---
 
@@ -340,14 +333,7 @@ have a passphrase protecting the private key.
 
 ### Resolution priority
 
-gitvault resolves the SSH key passphrase from the first source that succeeds:
-
-| Priority | Source |
-|----------|--------|
-| 1 (highest) | `GITVAULT_IDENTITY_PASSPHRASE_FD` — open file descriptor |
-| 2 | `GITVAULT_IDENTITY_PASSPHRASE` — environment variable |
-| 3 | OS keyring (stored via `gitvault keyring set-passphrase`) |
-| 4 (lowest) | Interactive prompt |
+> **All passphrase resolution sources:** [docs/reference.md § Identity Resolution](reference.md#identity-resolution)
 
 ### Store passphrase in the OS keyring
 
@@ -422,3 +408,8 @@ Store `$PASSPHRASE` as a masked secret in your CI platform alongside the identit
 ---
 
 *Once your identity is set up, see [docs/recipient-management.md](recipient-management.md) for how to add yourself as a recipient and onboard to a vault.*
+
+## See also
+- [CLI Reference — Identity Resolution](reference.md#identity-resolution)
+- [CI/CD Recipes](cicd-recipes.md) — using your identity in pipelines
+- [Recipient Management](recipient-management.md) — adding yourself as a recipient

@@ -1,5 +1,7 @@
 # CI/CD Best Practices & Recipes for gitvault
 
+> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · [Recipient Management](recipient-management.md) · CI/CD Recipes · [Secret Formats](secret-formats.md) · [CLI Reference](reference.md)
+
 gitvault is a Git-native, age-encrypted secrets manager. This guide covers how to integrate it safely into CI/CD pipelines, container builds, and orchestration platforms.
 
 ---
@@ -37,16 +39,9 @@ These principles apply regardless of which CI/CD platform you use.
 
 ## Identity Resolution Order
 
-gitvault resolves the decryption identity in this order, stopping at the first match:
+Identity is resolved in this order: `--identity-stdin` → `--identity` / `GITVAULT_IDENTITY_FD` → `GITVAULT_IDENTITY` → OS keyring → SSH agent. → [Full resolution table](reference.md#identity-resolution)
 
-1. `--identity-stdin` flag — key read from standard input
-2. `-i / --identity <file>` flag — key read from the specified file path
-3. `GITVAULT_IDENTITY_FD=<n>` — key read from file descriptor `n` *(most secure for CI; key not visible in process environment)*
-4. `GITVAULT_IDENTITY="<key>"` — key read from environment variable *(simpler, slightly less secure)*
-5. OS keyring — interactive desktop use
-6. SSH agent — interactive desktop use
-
-In headless CI environments you will almost always use option **3** or **4**.
+In headless CI environments you will almost always use `GITVAULT_IDENTITY_FD` (most secure) or `GITVAULT_IDENTITY`.
 
 > **See also:** [docs/identity-setup.md](identity-setup.md) for a detailed breakdown of every identity method with setup instructions.
 
@@ -54,27 +49,17 @@ In headless CI environments you will almost always use option **3** or **4**.
 
 ## Exit Codes Reference
 
-| Code | Meaning | CI action |
-|------|---------|-----------|
-| `0` | Success | Continue |
-| `1` | General error | Fail build |
-| `2` | Usage / argument error | Fix the command |
-| `3` | Plaintext secret detected in repo | Fail build — do not deploy |
-| `4` | Decryption error (wrong key) | Check the stored secret value |
-| `5` | Production barrier not satisfied | Run `allow-prod` first |
-| `6` | Secrets drift detected | Re-encrypt or reconcile secrets |
+→ Exit codes reference: [docs/reference.md § Exit Codes](reference.md#exit-codes)
+
+Exit code `3` (plaintext secret detected) and `6` (drift) will automatically fail CI steps — use them as gates in your pipeline.
 
 ---
 
 ## Environment Variables Reference
 
-| Variable | Value | Purpose |
-|----------|-------|---------|
-| `CI` | `1` or `true` | Auto-enables `--no-prompt`; set by most CI systems |
-| `GITVAULT_IDENTITY_FD` | file descriptor number (e.g. `3`) | Most secure key supply method |
-| `GITVAULT_IDENTITY` | raw key string | Simpler alternative; key visible in `/proc/<pid>/environ` |
-| `GITVAULT_NO_INLINE_KEY_WARN` | `1` | Suppress the inline-key security warning |
-| `GITVAULT_NO_PASSPHRASE_WARN` | `1` | Suppress the passphrase security warning |
+> **All environment variables:** [docs/reference.md § Environment Variables](reference.md#environment-variables)
+
+Key variables used in the recipes below: `GITVAULT_IDENTITY_FD` (most secure key supply), `GITVAULT_IDENTITY` (simpler alternative), `GITVAULT_NO_INLINE_KEY_WARN=1` (suppress inline-key warning), `CI=1` (auto-enables `--no-prompt`).
 
 ---
 
@@ -553,3 +538,8 @@ GITVAULT_IDENTITY_FD=3 gitvault run --no-prompt --env prod -- ./deploy.sh \
 ---
 
 *For adding CI service accounts as recipients and the full onboarding ceremony, see [docs/recipient-management.md](recipient-management.md).*
+
+## See also
+- [CLI Reference — Environment Variables](reference.md#environment-variables)
+- [CLI Reference — Exit Codes](reference.md#exit-codes)
+- [Identity Setup](identity-setup.md) — configuring your identity for CI

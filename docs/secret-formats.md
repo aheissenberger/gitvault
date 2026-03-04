@@ -1,5 +1,7 @@
 # Secret Formats Cookbook
 
+> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · [Recipient Management](recipient-management.md) · [CI/CD Recipes](cicd-recipes.md) · Secret Formats · [CLI Reference](reference.md)
+
 A practical guide to encrypting different file types with gitvault — copy-pastable examples for real-world workflows.
 
 ---
@@ -444,3 +446,8 @@ git commit -m "secrets: rekey for new team member"
 | Run `gitvault status` after changes | Confirms active environment and shows drift between store and working tree |
 
 > **Security reminder:** age encryption is strong, but your identity key is only as safe as the machine it lives on. Store your identity in the OS keyring (`gitvault identity create`, which stores in the keyring by default) rather than a plaintext file where possible. See [docs/identity-setup.md](identity-setup.md) for all identity storage options.
+
+## See also
+- [CLI Reference — encrypt](reference.md#encrypt)
+- [CLI Reference — decrypt](reference.md#decrypt)
+- [Recipient Management](recipient-management.md) — who can decrypt secrets

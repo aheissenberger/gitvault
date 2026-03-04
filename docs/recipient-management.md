@@ -1,5 +1,7 @@
 # Recipient Management
 
+> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · Recipient Management · [CI/CD Recipes](cicd-recipes.md) · [Secret Formats](secret-formats.md) · [CLI Reference](reference.md)
+
 This guide covers the full lifecycle of managing recipients in a gitvault-encrypted repository: onboarding new team members, offboarding departing ones, and rekeying secrets when the recipient set changes.
 
 ## Overview
@@ -238,3 +240,9 @@ gitvault rekey --json   # structured JSON output for scripting or audit logs
 
 *For identity creation and key storage options, see [docs/identity-setup.md](identity-setup.md).*
 *For CI/CD integration patterns, see [docs/cicd-recipes.md](cicd-recipes.md).*
+
+## See also
+- [CLI Reference — recipient](reference.md#recipient)
+- [CLI Reference — rekey](reference.md#rekey)
+- [Identity Setup](identity-setup.md) — creating your identity before adding yourself
+- [CI/CD Recipes](cicd-recipes.md) — using secrets in pipelines after rekeying

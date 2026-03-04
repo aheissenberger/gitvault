@@ -156,38 +156,18 @@ Commands:
 
 ---
 
-## Defaults & configuration reference
+## Configuration
 
-All built-in defaults can be overridden via config file and, where marked, via a `GITVAULT_*`
-environment variable. Precedence (highest → lowest): CLI flag → `GITVAULT_*` env var → project
-`.gitvault/config.toml` → user-global `~/.config/gitvault/config.toml` → built-in default.
+Precedence (highest → lowest): CLI flag → `GITVAULT_*` env var → `.gitvault/config.toml` → `~/.config/gitvault/config.toml` → built-in default.
 
-| Setting | Default | Config file key | `GITVAULT_*` env var |
-|---------|---------|-----------------|----------------------|
-| Active environment | `dev` | `[env] default` | `GITVAULT_ENV` |
-| Production env name | `prod` | `[env] prod_name` | — |
-| Environment name file | `.git/gitvault/env` | `[env] env_file` | — |
-| Prod allow-token TTL (s) | `3600` | `[barrier] ttl_secs` | — |
-| Recipients directory | `.gitvault/recipients/` | `[paths] recipients_dir` | — |
-| Encrypted secrets dir | `.gitvault/store/` | — | — |
-| Materialize output file | `.env` | `[paths] materialize_output` | — |
-| Keyring service name | `gitvault` | `[keyring] service` | — |
-| Keyring account name | `age-identity` | `[keyring] account` | — |
-| Hook manager adapter | *(none)* | `[hooks] adapter` | — |
-| Identity key path/string | — | — | `GITVAULT_IDENTITY` |
-| Identity key via FD (Unix) | — | — | `GITVAULT_IDENTITY_FD=<n>` |
-| SSH identity passphrase | — | — | `GITVAULT_IDENTITY_PASSPHRASE` |
-| SSH passphrase via FD (Unix) | — | — | `GITVAULT_IDENTITY_PASSPHRASE_FD=<n>` |
-| Suppress inline key warning | — | — | `GITVAULT_NO_INLINE_KEY_WARN=1` |
-| Suppress passphrase warning | — | — | `GITVAULT_NO_PASSPHRASE_WARN=1` |
-| SSH-agent key selector | — | — | `GITVAULT_IDENTITY_SELECTOR` |
-| SSH-agent enabled | off | — | `GITVAULT_SSH_AGENT=1` |
-| Non-interactive mode | off | — | `CI=1` |
-| AWS profile (SSM) | — | — | `AWS_PROFILE` |
-| AWS role ARN (SSM) | — | — | `AWS_ROLE_ARN` |
+Two optional TOML config files — missing files are silently ignored:
 
-Each Git worktree resolves its active environment independently. The environment can also be
-overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `check`).
+| File | Scope |
+|------|-------|
+| `.gitvault/config.toml` | Repository-level (commit with project) |
+| `~/.config/gitvault/config.toml` | User-global personal defaults |
+
+→ Full configuration reference, all `GITVAULT_*` env vars, and TOML examples: [docs/reference.md § Configuration](docs/reference.md#configuration-files)
 
 ---
 
@@ -229,99 +209,35 @@ overridden per-command with `--env` (on `encrypt`, `materialize`, `run`, and `ch
 
 ## Identity resolution
 
-Priority order for loading the age identity:
+Priority order (highest → lowest): `--identity-stdin` → `--identity` / `GITVAULT_IDENTITY_FD` → `GITVAULT_IDENTITY` → OS keyring → SSH agent.
 
-| Priority | Source |
-|----------|--------|
-| 0 | `--identity-stdin` global flag (pipe-friendly; stdin must not be a TTY) |
-| 1 | `--identity <file>` flag |
-| 1b | `GITVAULT_IDENTITY_FD` (Unix only: file descriptor number; key is read from the FD) |
-| 2 | `GITVAULT_IDENTITY` environment variable (key file path or raw `AGE-SECRET-KEY-` string) |
-| 3 | OS keyring (always tried automatically) |
-| 4 | SSH-agent when `GITVAULT_SSH_AGENT=1` or `SSH_AUTH_SOCK` is set |
-
-> **Security note:** Using a raw `AGE-SECRET-KEY-…` inline in `GITVAULT_IDENTITY` exposes
-> the key in process listings and shell history. Prefer `GITVAULT_IDENTITY_FD` (Unix) or a
-> key file path. A warning is emitted when an inline key is detected; suppress with
-> `GITVAULT_NO_INLINE_KEY_WARN=1`.
-
-**SSH passphrase unlock (highest → lowest priority):**
-
-| Priority | Source |
-|----------|--------|
-| 1a | `GITVAULT_IDENTITY_PASSPHRASE_FD` (Unix only) |
-| 1b | `GITVAULT_IDENTITY_PASSPHRASE` env var (CI-safe; warns if set — suppress with `GITVAULT_NO_PASSPHRASE_WARN=1`) |
-| 2 | OS keyring passphrase store |
-
-In CI (`--no-prompt` / `CI=1`) only the env var / FD sources are tried.
-
-Manage the stored passphrase with:
-```bash
-gitvault keyring set-passphrase [<passphrase>]   # store (omit arg to read from env var)
-gitvault keyring get-passphrase                  # check if stored
-gitvault keyring delete-passphrase               # remove
-```
-
----
-
-## Configuration
-
-Two optional TOML config layers (both optional — missing file/section silently uses defaults):
-
-| File | Scope |
-|------|-------|
-| `.gitvault/config.toml` | Repository-level; commit with the project |
-| `~/.config/gitvault/config.toml` | User-global; personal defaults for all repos |
-
-```toml
-# .gitvault/config.toml
-
-[env]
-default = "staging"         # default environment (built-in: "dev")
-prod_name = "production"    # name that triggers the production barrier (built-in: "prod")
-env_file = ".config/env"    # path to env-name file (built-in: ".git/gitvault/env")
-
-[barrier]
-ttl_secs = 1800             # production allow-token lifetime in seconds (built-in: 3600)
-
-[paths]
-materialize_output = ".env.local"            # built-in: ".env"
-recipients_dir = ".gitvault/recipients"      # built-in: ".gitvault/recipients"
-
-[hooks]
-adapter = "husky"           # hook manager: husky | pre-commit | lefthook
-```
-
-```toml
-# ~/.config/gitvault/config.toml
-[keyring]
-service = "my-company-gitvault"   # avoid collisions with other gitvault instances
-account = "default-identity"
-```
-
-Hook manager adapters require the corresponding binary on `PATH` (`gitvault-husky`,
-`gitvault-pre-commit`, `gitvault-lefthook`).
-
-> **Validation:** unknown keys inside a known section produce a `Usage` error (exit `2`).
-> Unknown top-level sections are silently ignored for forward compatibility.
+→ Setup instructions for each identity method: [docs/identity-setup.md](docs/identity-setup.md)  
+→ Full priority tables and security notes: [docs/reference.md § Identity Resolution](docs/reference.md#identity-resolution)
 
 ---
 
 ## Documentation
 
-- Getting started: this README
-- Identity setup guide: [docs/identity-setup.md](docs/identity-setup.md)
-- Recipient management: [docs/recipient-management.md](docs/recipient-management.md)
-- CI/CD recipes: [docs/cicd-recipes.md](docs/cicd-recipes.md)
-- Secret formats cookbook: [docs/secret-formats.md](docs/secret-formats.md)
-- Development workflows: [docs/development.md](docs/development.md)
-- AI agent onboarding: [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md)
-- Release runbook: [docs/releasing.md](docs/releasing.md)
+**How-to guides** — task-oriented walkthroughs:
+| Guide | Description |
+|-------|-------------|
+| [docs/identity-setup.md](docs/identity-setup.md) | Set up your identity key (keyring, age file, SSH, FD-based) |
+| [docs/recipient-management.md](docs/recipient-management.md) | Add/remove team members, PR ceremony, rekey workflow |
+| [docs/cicd-recipes.md](docs/cicd-recipes.md) | GitHub Actions, Docker, Kubernetes recipes |
+| [docs/secret-formats.md](docs/secret-formats.md) | Encrypt .env, JSON, YAML, TOML files |
 
-Additional developer references:
-- Architecture hotspots: [docs/ai/hotspots.md](docs/ai/hotspots.md)
-- AI skill reference (embedded in binary): [docs/ai/skill.md](docs/ai/skill.md)
-- Regenerate AI code index: `cargo xtask ai-index` → `docs/ai/code-index.json`
+**Reference** — complete technical specification:
+| Reference | Description |
+|-----------|-------------|
+| [docs/reference.md](docs/reference.md) | Full CLI reference: all commands, flags, env vars, config, exit codes |
+| [docs/ai/skill.md](docs/ai/skill.md) | AI agent skill reference (embedded in binary) |
+
+**Developer docs:**
+| Doc | Description |
+|-----|-------------|
+| [docs/development.md](docs/development.md) | Build, test, and development workflows |
+| [docs/releasing.md](docs/releasing.md) | Release runbook for maintainers |
+| [docs/ai/AGENT_START.md](docs/ai/AGENT_START.md) | AI agent onboarding and architecture |
 
 ---
 
