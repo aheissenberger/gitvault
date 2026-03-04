@@ -123,11 +123,7 @@ pub fn ensure_gitattributes(repo_root: &Path, entries: &[&str]) -> Result<(), Gi
     };
 
     if let Some(content) = merge_gitattributes_entries(&existing, entries) {
-        let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
-        tmp.write_all(content.as_bytes())
-            .map_err(GitvaultError::Io)?;
-        tmp.persist(&gitattributes_path)
-            .map_err(|e| GitvaultError::Io(e.error))?;
+        crate::fs_util::atomic_write(&gitattributes_path, content.as_bytes())?;
     }
 
     Ok(())
@@ -152,11 +148,7 @@ pub fn ensure_gitignored(repo_root: &Path, entries: &[&str]) -> Result<(), Gitva
     };
 
     if let Some(content) = merge_gitignore_entries(&existing, entries) {
-        let mut tmp = NamedTempFile::new_in(repo_root).map_err(GitvaultError::Io)?;
-        tmp.write_all(content.as_bytes())
-            .map_err(GitvaultError::Io)?;
-        tmp.persist(&gitignore_path)
-            .map_err(|e| GitvaultError::Io(e.error))?;
+        crate::fs_util::atomic_write(&gitignore_path, content.as_bytes())?;
     }
 
     Ok(())

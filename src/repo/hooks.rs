@@ -1,7 +1,6 @@
 use crate::error::GitvaultError;
 use crate::git::git_output_raw;
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 const MANAGED_BLOCK_BEGIN: &str = "# --- gitvault managed begin ---";
@@ -25,15 +24,6 @@ if command -v gitvault >/dev/null 2>&1; then
         gitvault status --no-prompt --fail-if-dirty
 fi
 ";
-
-fn atomic_write(path: &Path, content: &[u8]) -> Result<(), GitvaultError> {
-    let mut tmp = tempfile::Builder::new()
-        .prefix(".gitvault-tmp-")
-        .tempfile_in(path.parent().unwrap_or_else(|| Path::new(".")))?;
-    tmp.write_all(content)?;
-    tmp.persist(path).map_err(|e| GitvaultError::Io(e.error))?;
-    Ok(())
-}
 
 fn managed_block(body: &str) -> String {
     format!(
@@ -120,10 +110,10 @@ fn install_hook(hook_path: &Path, body: &str) -> Result<(), GitvaultError> {
         }
 
         let content = upsert_managed_block(&existing, body);
-        atomic_write(hook_path, content.as_bytes())?;
+        crate::fs_util::atomic_write(hook_path, content.as_bytes())?;
     } else {
         let content = managed_script(body);
-        atomic_write(hook_path, content.as_bytes())?;
+        crate::fs_util::atomic_write(hook_path, content.as_bytes())?;
     }
 
     ensure_executable(hook_path)?;
