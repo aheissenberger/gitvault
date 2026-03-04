@@ -121,8 +121,24 @@ pub enum Commands {
         #[arg(long)]
         fail_if_dirty: bool,
     },
-    /// Harden repository (update .gitignore, install hooks)
-    Harden,
+    /// Harden repository and optionally import plain files as encrypted secrets
+    Harden {
+        /// Plain text file(s) to encrypt and import (supports globs, e.g. ".env*")
+        /// If omitted, only repo hardening (gitignore, hooks) is performed
+        files: Vec<String>,
+        /// Target environment for encrypted files (e.g. --env dev)
+        #[arg(long)]
+        env: Option<String>,
+        /// Print what would happen without writing any files
+        #[arg(long)]
+        dry_run: bool,
+        /// Delete source file after encrypting (default: keep source)
+        #[arg(long)]
+        remove: bool,
+        /// Additional recipient keys (age1...) on top of .secrets/recipients/
+        #[arg(short, long = "recipient")]
+        recipients: Vec<String>,
+    },
     /// Run a command with secrets injected as environment variables
     Run {
         /// Environment to use

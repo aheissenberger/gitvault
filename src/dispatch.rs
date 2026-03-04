@@ -63,7 +63,22 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Status { fail_if_dirty } => {
             crate::commands::admin::cmd_status(cli.json, fail_if_dirty)
         }
-        Commands::Harden => crate::commands::admin::cmd_harden(cli.json, cli.no_prompt),
+        Commands::Harden {
+            files,
+            env,
+            dry_run,
+            remove,
+            recipients,
+        } => crate::commands::admin::cmd_harden_with_files(
+            files,
+            env,
+            dry_run,
+            remove,
+            recipients,
+            cli.json,
+            cli.no_prompt,
+            cli.identity_selector.clone(),
+        ),
         Commands::Run {
             env,
             identity,
@@ -589,7 +604,13 @@ mod tests {
             aws_profile: None,
             aws_role_arn: None,
             identity_selector: None,
-            command: Commands::Harden,
+            command: Commands::Harden {
+                files: vec![],
+                env: None,
+                dry_run: false,
+                remove: false,
+                recipients: vec![],
+            },
         };
         // No adapter configured, so harden should succeed with built-in hooks.
         let outcome = run(cli).expect("harden dispatch should succeed");
