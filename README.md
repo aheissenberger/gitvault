@@ -99,11 +99,11 @@ Global options:  --json  --no-prompt  --identity-selector  --aws-profile  --aws-
 
 Commands:
   init          Onboard a new team member (identity, recipient, repo hardening)
+  harden        Harden repo (hooks, .gitignore); or import+encrypt a file with harden <file>
   encrypt       Encrypt a secret file (--env, --keep-path, --fields, --value-only)
   decrypt       Decrypt a .age file (--output, --fields, --value-only, --reveal)
   materialize   Materialize secrets to root .env
   status        Check repository safety status
-  harden        Harden repo (hooks, .gitignore); or import+encrypt a file with harden <file>
   run           Inject secrets into child process env (--clear-env, --pass)
   allow-prod    Write a timed production allow token
   revoke-prod   Revoke the production allow token immediately
@@ -122,10 +122,10 @@ Commands:
 | Task | Command |
 |------|---------|
 | Onboard new team member | `gitvault init` |
+| Import + encrypt existing file | `gitvault harden <file> --env <env>` |
 | Encrypt whole file | `gitvault encrypt <file> --env <env>` |
 | Encrypt selected fields | `gitvault encrypt <file> --fields a.b,c` |
 | Encrypt `.env` per-value | `gitvault encrypt .env --value-only` |
-| Import + encrypt existing file | `gitvault harden <file> --env <env>` |
 | Decrypt to stdout | `gitvault decrypt <file.age> --reveal` |
 | Materialize root `.env` | `gitvault materialize` |
 | Run command with injected secrets | `gitvault run -- <cmd> [args...]` |
