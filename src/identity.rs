@@ -153,6 +153,23 @@ pub fn list_ssh_agent_keys() -> Result<Vec<SshAgentKey>, SshAgentError> {
     Ok(keys)
 }
 
+/// Sanitize an SSH key comment for use as a filename component.
+///
+/// Returns `None` if the sanitized name would be empty (skip the lookup).
+/// Strips path separators and leading dots to prevent path traversal.
+fn sanitize_comment_for_filename(comment: &str) -> Option<&str> {
+    // Reject if any path separator present — the raw comment must be a plain name.
+    if comment.contains('/') || comment.contains('\\') || comment.contains('\0') {
+        return None;
+    }
+    // Strip leading dots (hidden file / relative path tricks).
+    let stripped = comment.trim_start_matches('.');
+    if stripped.is_empty() {
+        return None;
+    }
+    Some(stripped)
+}
+
 /// Find the SSH private key file on disk that corresponds to `key`.
 ///
 /// Search order:
@@ -185,9 +202,9 @@ fn find_ssh_key_file(key: &SshAgentKey) -> Option<std::path::PathBuf> {
         }
     }
 
-    // Priority 2: comment as filename.
-    if !key.comment.is_empty() {
-        let by_comment = ssh_dir.join(&key.comment);
+    // Priority 2: comment as filename (sanitized to prevent path traversal).
+    if let Some(safe_comment) = sanitize_comment_for_filename(&key.comment) {
+        let by_comment = ssh_dir.join(safe_comment);
         if by_comment.exists() && matches_fingerprint(&by_comment) {
             return Some(by_comment);
         }
@@ -1919,5 +1936,55 @@ mod tests {
         );
         assert!(result.is_some());
         assert_eq!(result.unwrap().as_str(), "my-secret-passphrase");
+    }
+
+    // ─── sanitize_comment_for_filename ────────────────────────────────────────
+
+    /// Normal comment with no separators returns Some(comment).
+    #[test]
+    fn test_sanitize_comment_normal() {
+        assert_eq!(sanitize_comment_for_filename("my_key"), Some("my_key"));
+        assert_eq!(
+            sanitize_comment_for_filename("id_ed25519"),
+            Some("id_ed25519")
+        );
+        assert_eq!(sanitize_comment_for_filename("user@host"), Some("user@host"));
+    }
+
+    /// Comment containing `/` returns None (path traversal attempt).
+    #[test]
+    fn test_sanitize_comment_with_forward_slash() {
+        assert_eq!(sanitize_comment_for_filename("../../etc/passwd"), None);
+        assert_eq!(sanitize_comment_for_filename("../id_rsa"), None);
+        assert_eq!(sanitize_comment_for_filename("a/b"), None);
+    }
+
+    /// Comment containing `\` returns None (Windows path traversal attempt).
+    #[test]
+    fn test_sanitize_comment_with_backslash() {
+        assert_eq!(sanitize_comment_for_filename("..\\id_rsa"), None);
+        assert_eq!(sanitize_comment_for_filename("a\\b"), None);
+    }
+
+    /// Comment starting with `.` has leading dots stripped.
+    #[test]
+    fn test_sanitize_comment_leading_dot() {
+        assert_eq!(sanitize_comment_for_filename(".hidden"), Some("hidden"));
+        assert_eq!(sanitize_comment_for_filename("..foo"), Some("foo"));
+    }
+
+    /// Comment that is only dots returns None (nothing left after stripping).
+    #[test]
+    fn test_sanitize_comment_only_dots() {
+        assert_eq!(sanitize_comment_for_filename("."), None);
+        assert_eq!(sanitize_comment_for_filename(".."), None);
+        assert_eq!(sanitize_comment_for_filename("..."), None);
+    }
+
+    /// Comment containing a NUL byte returns None.
+    #[test]
+    fn test_sanitize_comment_nul_byte() {
+        assert_eq!(sanitize_comment_for_filename("key\0name"), None);
+        assert_eq!(sanitize_comment_for_filename("\0"), None);
     }
 }
