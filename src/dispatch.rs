@@ -74,13 +74,13 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             files,
             env,
             dry_run,
-            remove,
+            delete_source,
             recipients,
         } => crate::commands::admin::cmd_harden_with_files(
             files,
             env,
             dry_run,
-            remove,
+            delete_source,
             recipients,
             cli.json,
             cli.no_prompt,
@@ -91,14 +91,14 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             identity,
             prod,
             clear_env,
-            pass,
+            keep_vars,
             command,
         } => crate::commands::run_cmd::cmd_run(crate::commands::run_cmd::RunOptions {
             env,
             identity,
             prod,
             clear_env,
-            pass_raw: pass,
+            pass_raw: keep_vars,
             command,
             no_prompt: cli.no_prompt,
             selector: cli.identity_selector.clone(),
@@ -155,8 +155,8 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             cli.no_prompt,
         ),
         Commands::Ai { action } => crate::commands::ai::cmd_ai(action, cli.json),
-        Commands::Init { env, out } => {
-            crate::commands::init::cmd_init(env, out, cli.json, cli.no_prompt)
+        Commands::Init { env, output } => {
+            crate::commands::init::cmd_init(env, output, cli.json, cli.no_prompt)
         }
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
@@ -214,6 +214,29 @@ mod tests {
     use crate::error::GitvaultError;
     use tempfile::TempDir;
 
+    /// Build a [`Cli`] for tests, handling cfg-gated SSM fields.
+    fn make_cli(json: bool, no_prompt: bool, command: Commands) -> Cli {
+        #[cfg(not(feature = "ssm"))]
+        let cli = Cli {
+            json,
+            no_prompt,
+            identity_selector: None,
+            identity_stdin: false,
+            command,
+        };
+        #[cfg(feature = "ssm")]
+        let cli = Cli {
+            json,
+            no_prompt,
+            identity_selector: None,
+            identity_stdin: false,
+            aws_profile: None,
+            aws_role_arn: None,
+            command,
+        };
+        cli
+    }
+
     #[test]
     fn test_ci_env_sets_no_prompt() {
         with_env_var("CI", Some("1"), || {
@@ -240,33 +263,25 @@ mod tests {
         let (identity_file, _) = setup_identity_file();
 
         with_identity_env(identity_file.path(), || {
-            let check_cli = Cli {
-                json: true,
-                no_prompt: true,
-                aws_profile: None,
-                aws_role_arn: None,
-                identity_selector: None,
-                identity_stdin: false,
-                command: Commands::Check {
+            let check_cli = make_cli(
+                true,
+                true,
+                Commands::Check {
                     env: None,
                     identity: None,
                     skip_history_check: true,
                 },
-            };
+            );
             let outcome = run(check_cli).expect("dispatch check should succeed");
             assert_eq!(outcome, CommandOutcome::Success);
 
-            let status_cli = Cli {
-                json: false,
-                no_prompt: true,
-                aws_profile: None,
-                aws_role_arn: None,
-                identity_selector: None,
-                identity_stdin: false,
-                command: Commands::Status {
+            let status_cli = make_cli(
+                false,
+                true,
+                Commands::Status {
                     fail_if_dirty: false,
                 },
-            };
+            );
             let outcome = run(status_cli).expect("dispatch status should succeed");
             assert_eq!(outcome, CommandOutcome::Success);
         });
@@ -285,22 +300,18 @@ mod tests {
         write_encrypted_env_file(dir.path(), "dev", "run.env.age", &identity, "X=1\n");
 
         with_identity_env(identity_file.path(), || {
-            let cli = Cli {
-                json: false,
-                no_prompt: true,
-                aws_profile: None,
-                aws_role_arn: None,
-                identity_selector: None,
-                identity_stdin: false,
-                command: Commands::Run {
+            let cli = make_cli(
+                false,
+                true,
+                Commands::Run {
                     env: Some("dev".to_string()),
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
                     prod: false,
                     clear_env: false,
-                    pass: None,
+                    keep_vars: None,
                     command: vec!["sh".to_string(), "-c".to_string(), "exit 7".to_string()],
                 },
-            };
+            );
 
             let outcome = run(cli).expect("run dispatch should succeed");
             assert_eq!(outcome, CommandOutcome::Exit(7));
@@ -320,14 +331,10 @@ mod tests {
         let plain_file = dir.path().join("dispatch.txt");
         std::fs::write(&plain_file, "DISPATCH=1\n").unwrap();
 
-        let encrypt_cli = Cli {
-            json: true,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Encrypt {
+        let encrypt_cli = make_cli(
+            true,
+            true,
+            Commands::Encrypt {
                 file: plain_file.to_string_lossy().to_string(),
                 recipients: vec![identity.to_public().to_string()],
                 env: None,
@@ -335,21 +342,17 @@ mod tests {
                 fields: None,
                 value_only: false,
             },
-        };
+        );
         let encrypt_outcome = run(encrypt_cli).expect("encrypt dispatch should succeed");
         assert_eq!(encrypt_outcome, CommandOutcome::Success);
 
         let encrypted_path = dir.path().join(".gitvault/store/dev/dispatch.txt.age");
         assert!(encrypted_path.exists());
 
-        let decrypt_cli = Cli {
-            json: true,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Decrypt {
+        let decrypt_cli = make_cli(
+            true,
+            true,
+            Commands::Decrypt {
                 file: encrypted_path.to_string_lossy().to_string(),
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
                 output: Some(
@@ -362,7 +365,7 @@ mod tests {
                 reveal: false,
                 value_only: false,
             },
-        };
+        );
         let decrypt_outcome = run(decrypt_cli).expect("decrypt dispatch should succeed");
         assert_eq!(decrypt_outcome, CommandOutcome::Success);
 
@@ -379,15 +382,7 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        let cli = Cli {
-            json: true,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::AllowProd { ttl: Some(60) },
-        };
+        let cli = make_cli(true, true, Commands::AllowProd { ttl: Some(60) });
 
         let outcome = run(cli).expect("allow-prod dispatch should succeed");
         assert_eq!(outcome, CommandOutcome::Success);
@@ -407,19 +402,15 @@ mod tests {
         write_encrypted_env_file(dir.path(), "dev", "rekey.env.age", &identity, "A=1\n");
 
         with_identity_env(identity_file.path(), || {
-            let cli = Cli {
-                json: true,
-                no_prompt: true,
-                aws_profile: None,
-                aws_role_arn: None,
-                identity_selector: None,
-                identity_stdin: false,
-                command: Commands::Rekey {
+            let cli = make_cli(
+                true,
+                true,
+                Commands::Rekey {
                     identity: None,
                     env: None,
                     dry_run: false,
                 },
-            };
+            );
 
             let outcome = run(cli).expect("rekey dispatch should succeed");
             assert_eq!(outcome, CommandOutcome::Success);
@@ -441,19 +432,15 @@ mod tests {
         std::fs::write(&ours, "A=1\n").unwrap();
         std::fs::write(&theirs, "A=2\n").unwrap();
 
-        let clean_cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::MergeDriver {
+        let clean_cli = make_cli(
+            false,
+            true,
+            Commands::MergeDriver {
                 base: base.to_string_lossy().to_string(),
                 ours: ours.to_string_lossy().to_string(),
                 theirs: theirs.to_string_lossy().to_string(),
             },
-        };
+        );
         let clean_outcome = run(clean_cli).expect("merge-driver clean dispatch should succeed");
         assert_eq!(clean_outcome, CommandOutcome::Success);
 
@@ -461,19 +448,15 @@ mod tests {
         std::fs::write(&ours, "A=2\n").unwrap();
         std::fs::write(&theirs, "A=3\n").unwrap();
 
-        let conflict_cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::MergeDriver {
+        let conflict_cli = make_cli(
+            false,
+            true,
+            Commands::MergeDriver {
                 base: base.to_string_lossy().to_string(),
                 ours: ours.to_string_lossy().to_string(),
                 theirs: theirs.to_string_lossy().to_string(),
             },
-        };
+        );
         let conflict_outcome =
             run(conflict_cli).expect("merge-driver conflict dispatch should return outcome");
         assert_eq!(conflict_outcome, CommandOutcome::Exit(1));
@@ -488,19 +471,15 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        let cli = Cli {
-            json: true,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Keyring {
+        let cli = make_cli(
+            true,
+            true,
+            Commands::Keyring {
                 action: KeyringAction::Set {
                     identity: Some("/path/that/does/not/exist".to_string()),
                 },
             },
-        };
+        );
 
         let err = run(cli).expect_err("invalid identity source should fail keyring set");
         assert!(matches!(err, GitvaultError::Usage(_)));
@@ -536,26 +515,10 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         // Allow prod first so there's a token to revoke.
-        let allow_cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::AllowProd { ttl: Some(60) },
-        };
+        let allow_cli = make_cli(false, true, Commands::AllowProd { ttl: Some(60) });
         run(allow_cli).expect("allow-prod should succeed");
 
-        let revoke_cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::RevokeProd,
-        };
+        let revoke_cli = make_cli(false, true, Commands::RevokeProd);
         let outcome = run(revoke_cli).expect("revoke-prod dispatch should succeed");
         assert_eq!(outcome, CommandOutcome::Success);
     }
@@ -570,19 +533,15 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, _identity) = setup_identity_file();
 
-        let cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Keyring {
+        let cli = make_cli(
+            false,
+            true,
+            Commands::Keyring {
                 action: KeyringAction::Set {
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
                 },
             },
-        };
+        );
         // The dispatch path is exercised regardless of whether the OS keyring
         // is available. On headless CI the real keyring returns an error; on
         // developer machines it succeeds.  Both are acceptable — we only assert
@@ -604,14 +563,10 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, _identity) = setup_identity_file();
 
-        let cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Decrypt {
+        let cli = make_cli(
+            false,
+            true,
+            Commands::Decrypt {
                 file: dir
                     .path()
                     .join("no_such_file.age")
@@ -623,7 +578,7 @@ mod tests {
                 reveal: false,
                 value_only: false,
             },
-        };
+        );
         // Decrypting a nonexistent file should propagate the error.
         let err = run(cli).expect_err("decrypt of nonexistent file should fail");
         assert!(matches!(err, GitvaultError::Io(_)));
@@ -638,21 +593,17 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        let cli = Cli {
-            json: false,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Harden {
+        let cli = make_cli(
+            false,
+            true,
+            Commands::Harden {
                 files: vec![],
                 env: None,
                 dry_run: false,
-                remove: false,
+                delete_source: false,
                 recipients: vec![],
             },
-        };
+        );
         // No adapter configured, so harden should succeed with built-in hooks.
         let outcome = run(cli).expect("harden dispatch should succeed");
         assert_eq!(outcome, CommandOutcome::Success);
@@ -667,17 +618,13 @@ mod tests {
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
 
-        let cli = Cli {
-            json: true,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Recipient {
+        let cli = make_cli(
+            true,
+            true,
+            Commands::Recipient {
                 action: crate::cli::RecipientAction::List,
             },
-        };
+        );
         let outcome = run(cli).expect("recipient list dispatch should succeed");
         assert_eq!(outcome, CommandOutcome::Success);
     }
@@ -692,21 +639,17 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         let out_file = dir.path().join("test_identity.age");
-        let cli = Cli {
-            json: true,
-            no_prompt: true,
-            aws_profile: None,
-            aws_role_arn: None,
-            identity_selector: None,
-            identity_stdin: false,
-            command: Commands::Identity {
+        let cli = make_cli(
+            true,
+            true,
+            Commands::Identity {
                 action: crate::cli::IdentityAction::Create {
                     profile: crate::cli::IdentityProfile::Classic,
-                    out: Some(out_file.to_string_lossy().to_string()),
+                    output: Some(out_file.to_string_lossy().to_string()),
                     add_recipient: false,
                 },
             },
-        };
+        );
         // Identity create with --out should succeed regardless of keyring availability.
         match run(cli) {
             Ok(outcome) => assert_eq!(outcome, CommandOutcome::Success),
@@ -726,22 +669,78 @@ mod tests {
         let (identity_file, _identity) = setup_identity_file();
 
         with_identity_env(identity_file.path(), || {
-            let cli = Cli {
-                json: false,
-                no_prompt: true,
-                aws_profile: None,
-                aws_role_arn: None,
-                identity_selector: None,
-                identity_stdin: false,
-                command: Commands::Materialize {
+            let cli = make_cli(
+                false,
+                true,
+                Commands::Materialize {
                     env: Some("dev".to_string()),
                     identity: Some(identity_file.path().to_string_lossy().to_string()),
                     prod: false,
                 },
-            };
+            );
             // A repo with no secrets materializes nothing — should succeed.
             let outcome = run(cli).expect("materialize dispatch should succeed with no secrets");
             assert_eq!(outcome, CommandOutcome::Success);
         });
+    }
+
+    #[cfg(feature = "ssm")]
+    #[test]
+    fn test_run_dispatch_ssm_set_prod_without_flag_returns_barrier_error() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            identity_selector: None,
+            identity_stdin: false,
+            command: Commands::Ssm {
+                action: crate::cli::SsmAction::Set {
+                    key: "DB_PASS".to_string(),
+                    value: "secret".to_string(),
+                    env: Some("prod".to_string()),
+                    prod: false,
+                },
+            },
+        };
+
+        let err = run(cli).expect_err("ssm set in prod without --prod must fail closed");
+        assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
+    }
+
+    #[cfg(feature = "ssm")]
+    #[test]
+    fn test_run_dispatch_ssm_push_prod_without_flag_returns_barrier_error() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let cli = Cli {
+            json: true,
+            no_prompt: true,
+            aws_profile: None,
+            aws_role_arn: None,
+            identity_selector: None,
+            identity_stdin: false,
+            command: Commands::Ssm {
+                action: crate::cli::SsmAction::Push {
+                    env: Some("prod".to_string()),
+                    prod: false,
+                },
+            },
+        };
+
+        let err = run(cli).expect_err("ssm push in prod without --prod must fail closed");
+        assert!(matches!(err, GitvaultError::BarrierNotSatisfied(_)));
     }
 }

@@ -109,7 +109,7 @@ mod tests {
     async fn test_get_app_name_from_git_remote() {
         let dir = TempDir::new().unwrap();
         std::process::Command::new("git")
-            .args(["init"])
+            .args(["init", "-q"])
             .current_dir(dir.path())
             .status()
             .unwrap();

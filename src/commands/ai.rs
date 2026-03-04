@@ -4,7 +4,7 @@
 //! filesystem access is performed at runtime, so the commands work correctly
 //! from any working directory and in any deployment (installed binary, CI, etc.).
 
-use crate::cli::{AiAction, AiPrintAction};
+use crate::cli::AiAction;
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 
@@ -25,12 +25,8 @@ const CONTEXT_CONTENT: &str = include_str!("../../docs/ai/AGENT_START.md");
 /// Returns [`GitvaultError::Other`] if JSON serialization fails unexpectedly.
 pub fn cmd_ai(action: AiAction, json: bool) -> Result<CommandOutcome, GitvaultError> {
     match action {
-        AiAction::Skill {
-            action: AiPrintAction::Print,
-        } => print_content(SKILL_CONTENT, json),
-        AiAction::Context {
-            action: AiPrintAction::Print,
-        } => print_content(CONTEXT_CONTENT, json),
+        AiAction::Skill => print_content(SKILL_CONTENT, json),
+        AiAction::Context => print_content(CONTEXT_CONTENT, json),
     }
 }
 
@@ -62,16 +58,11 @@ fn print_content(content: &str, json: bool) -> Result<CommandOutcome, GitvaultEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{AiAction, AiPrintAction};
+    use crate::cli::AiAction;
 
     #[test]
     fn test_ai_skill_print_human_succeeds() {
-        let result = cmd_ai(
-            AiAction::Skill {
-                action: AiPrintAction::Print,
-            },
-            false,
-        );
+        let result = cmd_ai(AiAction::Skill, false);
         assert_eq!(
             result.expect("skill print human should succeed"),
             CommandOutcome::Success
@@ -80,12 +71,7 @@ mod tests {
 
     #[test]
     fn test_ai_context_print_human_succeeds() {
-        let result = cmd_ai(
-            AiAction::Context {
-                action: AiPrintAction::Print,
-            },
-            false,
-        );
+        let result = cmd_ai(AiAction::Context, false);
         assert_eq!(
             result.expect("context print human should succeed"),
             CommandOutcome::Success
@@ -94,12 +80,7 @@ mod tests {
 
     #[test]
     fn test_ai_skill_print_json_succeeds() {
-        let result = cmd_ai(
-            AiAction::Skill {
-                action: AiPrintAction::Print,
-            },
-            true,
-        );
+        let result = cmd_ai(AiAction::Skill, true);
         assert_eq!(
             result.expect("skill print json should succeed"),
             CommandOutcome::Success
@@ -108,12 +89,7 @@ mod tests {
 
     #[test]
     fn test_ai_context_print_json_succeeds() {
-        let result = cmd_ai(
-            AiAction::Context {
-                action: AiPrintAction::Print,
-            },
-            true,
-        );
+        let result = cmd_ai(AiAction::Context, true);
         assert_eq!(
             result.expect("context print json should succeed"),
             CommandOutcome::Success

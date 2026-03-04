@@ -44,15 +44,17 @@ pub struct Cli {
     #[arg(long, global = true, env = "GITVAULT_IDENTITY_SELECTOR")]
     pub identity_selector: Option<String>,
 
-    /// Read identity key from stdin (pipe-friendly alternative to --identity; REQ-74)
+    /// Read identity key from stdin instead of a file path (pipe-friendly)
     #[arg(long, global = true, conflicts_with = "identity_selector")]
     pub identity_stdin: bool,
 
     /// AWS profile name for SSM backend
+    #[cfg(feature = "ssm")]
     #[arg(long, global = true, env = "AWS_PROFILE")]
     pub aws_profile: Option<String>,
 
     /// AWS role ARN to assume for SSM backend
+    #[cfg(feature = "ssm")]
     #[arg(long, global = true, env = "AWS_ROLE_ARN")]
     pub aws_role_arn: Option<String>,
 
@@ -67,7 +69,7 @@ pub enum Commands {
         /// File to encrypt
         file: String,
         /// Recipient age public key (repeat for multi-recipient; defaults to local identity if omitted)
-        #[arg(short, long = "recipient")]
+        #[arg(short, long = "recipient", value_name = "PUBKEY")]
         recipients: Vec<String>,
         /// Environment to use (overrides `GITVAULT_ENV` and .secrets/env)
         #[arg(short, long)]
@@ -86,8 +88,8 @@ pub enum Commands {
     Decrypt {
         /// Encrypted .age file to decrypt
         file: String,
-        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
-        #[arg(short, long)]
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
         /// Output file path (default: strip .age extension)
         #[arg(
@@ -113,26 +115,26 @@ pub enum Commands {
         #[arg(short, long)]
         env: Option<String>,
         /// Identity key file path
-        #[arg(short, long)]
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
         /// Require production barrier for prod env
         #[arg(long)]
         prod: bool,
     },
-    /// Check repository safety status
+    /// Show repository safety status (gitignore, hooks, recipients, encrypted files)
     Status {
-        /// Fail with exit code 6 if secrets/ has uncommitted changes
+        /// Exit with code 6 if secrets/ directory has uncommitted changes
         #[arg(long)]
         fail_if_dirty: bool,
     },
     /// Interactive onboarding: set up identity, recipients, harden repo, and create config
     Init {
         /// Target environment to activate (writes to .secrets/env)
-        #[arg(long)]
+        #[arg(short, long)]
         env: Option<String>,
         /// Path to export identity file (forwarded to identity create)
-        #[arg(long, value_name = "PATH")]
-        out: Option<String>,
+        #[arg(long, alias = "out", value_name = "PATH")]
+        output: Option<String>,
     },
     /// Harden repository and optionally import plain files as encrypted secrets
     Harden {
@@ -140,16 +142,16 @@ pub enum Commands {
         /// If omitted, only repo hardening (gitignore, hooks) is performed
         files: Vec<String>,
         /// Target environment for encrypted files (e.g. --env dev)
-        #[arg(long)]
+        #[arg(short, long)]
         env: Option<String>,
         /// Print what would happen without writing any files
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         dry_run: bool,
         /// Delete source file after encrypting (default: keep source)
-        #[arg(long)]
-        remove: bool,
+        #[arg(long, alias = "remove")]
+        delete_source: bool,
         /// Additional recipient keys (age1...) on top of .secrets/recipients/
-        #[arg(short, long = "recipient")]
+        #[arg(short, long = "recipient", value_name = "PUBKEY")]
         recipients: Vec<String>,
     },
     /// Run a command with secrets injected as environment variables
@@ -157,8 +159,8 @@ pub enum Commands {
         /// Environment to use
         #[arg(short, long)]
         env: Option<String>,
-        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
-        #[arg(short, long)]
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
         /// Require production barrier (required when env=prod)
         #[arg(long)]
@@ -166,21 +168,21 @@ pub enum Commands {
         /// Start child with empty environment
         #[arg(long)]
         clear_env: bool,
-        /// Comma-separated vars to pass through when --clear-env is set
-        #[arg(long, value_name = "VARS")]
-        pass: Option<String>,
+        /// Comma-separated env vars to pass through when --clear-env is set
+        #[arg(long, alias = "pass", value_name = "VARS")]
+        keep_vars: Option<String>,
         /// Command and arguments to run
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
     /// Write a timed production allow token
     AllowProd {
-        /// Token lifetime in seconds (default: from [barrier].ttl_secs config, then 3600)
+        /// Token lifetime in seconds [default: 3600; override with barrier.ttl_secs config key]
         #[arg(long)]
         ttl: Option<u64>,
     },
     /// Run as git merge driver for .env files
-    /// Usage: git config merge.gitvault-env.driver "gitvault merge-driver %O %A %B"
+    #[command(hide = true)]
     MergeDriver {
         /// Base version (ancestor)
         base: String,
@@ -196,14 +198,14 @@ pub enum Commands {
     },
     /// Re-encrypt all secrets with the current recipients list
     Rekey {
-        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
-        #[arg(short, long)]
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
         /// Only rekey files in the given environment subtree (e.g. --env dev)
-        #[arg(long)]
+        #[arg(short, long)]
         env: Option<String>,
         /// Print what would be rekeyed without writing any files
-        #[arg(long)]
+        #[arg(short = 'n', long)]
         dry_run: bool,
     },
     /// Manage identity key in OS keyring
@@ -216,10 +218,10 @@ pub enum Commands {
         /// Environment to validate
         #[arg(short, long)]
         env: Option<String>,
-        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
-        #[arg(short, long)]
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
-        /// Skip the committed-history plaintext leak scan (REQ-81 escape hatch)
+        /// Skip the committed-history plaintext leak scan
         #[arg(long)]
         skip_history_check: bool,
     },
@@ -268,17 +270,17 @@ pub enum RecipientAction {
 pub enum KeyringAction {
     /// Store identity key in OS keyring
     Set {
-        /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
-        #[arg(short, long)]
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
     },
     /// Show public key of stored identity
     Get,
     /// Remove stored identity from OS keyring
     Delete,
-    /// Store the SSH identity file passphrase in the OS keyring (REQ-39 AC3).
+    /// Store the SSH identity file passphrase in the OS keyring.
     ///
-    /// Once stored, gitvault automatically retrieves this passphrase when loading
+    /// Once stored, gitvault automatically retrieves the passphrase when loading
     /// a passphrase-encrypted SSH identity file, enabling non-interactive operation.
     SetPassphrase {
         /// Passphrase value; if omitted, reads from `GITVAULT_IDENTITY_PASSPHRASE`
@@ -299,8 +301,8 @@ pub enum IdentityAction {
         #[arg(long, value_enum, default_value = "classic")]
         profile: IdentityProfile,
         /// Export identity to file (optional; default: store in OS keyring)
-        #[arg(long, value_name = "PATH")]
-        out: Option<String>,
+        #[arg(long, alias = "out", value_name = "PATH")]
+        output: Option<String>,
         /// After creating identity, add own public key to .secrets/recipients/
         #[arg(long)]
         add_recipient: bool,
@@ -368,22 +370,9 @@ mod tests {
 #[derive(Subcommand)]
 pub enum AiAction {
     /// Print canonical gitvault skill content for Copilot usage
-    Skill {
-        #[command(subcommand)]
-        action: AiPrintAction,
-    },
+    Skill,
     /// Print concise project AI context for agent onboarding
-    Context {
-        #[command(subcommand)]
-        action: AiPrintAction,
-    },
-}
-
-/// AI print sub-subcommand.
-#[derive(Subcommand, Clone)]
-pub enum AiPrintAction {
-    /// Print the content
-    Print,
+    Context,
 }
 
 #[cfg(feature = "ssm")]

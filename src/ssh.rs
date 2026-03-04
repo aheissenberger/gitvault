@@ -101,4 +101,27 @@ mod tests {
         let result = ssh_keygen_fingerprint(Path::new("/tmp"));
         assert!(result.is_none());
     }
+
+    #[test]
+    fn ssh_error_display_not_available_contains_context() {
+        let err = SshError::NotAvailable("missing binary".to_string());
+        let rendered = err.to_string();
+        assert!(rendered.contains("SSH tool not available"));
+        assert!(rendered.contains("missing binary"));
+    }
+
+    #[test]
+    fn ssh_error_display_failed_contains_context() {
+        let err = SshError::Failed("non-zero exit".to_string());
+        let rendered = err.to_string();
+        assert!(rendered.contains("SSH tool failed"));
+        assert!(rendered.contains("non-zero exit"));
+    }
+
+    #[test]
+    fn ssh_error_debug_includes_variant_name() {
+        let err = SshError::Failed("boom".to_string());
+        let dbg = format!("{err:?}");
+        assert!(dbg.contains("Failed"));
+    }
 }

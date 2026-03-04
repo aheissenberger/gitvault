@@ -21,10 +21,10 @@ pub fn cmd_identity(
     match action {
         IdentityAction::Create {
             profile,
-            out,
+            output,
             add_recipient,
         } => {
-            cmd_identity_create(profile, out, json, no_prompt)?;
+            cmd_identity_create(profile, output, json, no_prompt)?;
             if add_recipient {
                 match crate::commands::recipients::cmd_recipient_add_self(
                     identity_selector.clone(),
@@ -379,7 +379,7 @@ mod tests {
         let result = cmd_identity(
             crate::cli::IdentityAction::Create {
                 profile: IdentityProfile::Classic,
-                out: Some(path),
+                output: Some(path),
                 add_recipient: false,
             },
             None, // identity_selector
@@ -547,7 +547,7 @@ mod tests {
             let result = cmd_identity(
                 crate::cli::IdentityAction::Create {
                     profile: IdentityProfile::Classic,
-                    out: None,
+                    output: None,
                     add_recipient: true,
                 },
                 None, // identity_selector
@@ -603,7 +603,7 @@ mod tests {
             let result = cmd_identity(
                 crate::cli::IdentityAction::Create {
                     profile: IdentityProfile::Classic,
-                    out: None,
+                    output: None,
                     add_recipient: true,
                 },
                 None,
