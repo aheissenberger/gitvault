@@ -93,3 +93,17 @@ links: { issue: "", pr: "" }
 - `req-070.md` -> REQ-70
 - `req-071.md` -> REQ-71
 - `req-072.md` -> REQ-72
+- `req-073.md` -> REQ-73
+- `req-074.md` -> REQ-74
+- `req-075.md` -> REQ-75
+- `req-076.md` -> REQ-76
+- `req-077.md` -> REQ-77
+- `req-078.md` -> REQ-78
+- `req-079.md` -> REQ-79
+- `req-080.md` -> REQ-80
+- `req-081.md` -> REQ-81
+- `req-082.md` -> REQ-82
+- `req-083.md` -> REQ-83
+- `req-084.md` -> REQ-84
+- `req-085.md` -> REQ-85
+- `req-086.md` -> REQ-86

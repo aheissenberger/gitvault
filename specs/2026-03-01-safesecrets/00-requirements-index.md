@@ -77,6 +77,9 @@ Provide a one-to-one traceability map from the consolidated requirement IDs to i
 - `25-hook-adapter-config.md` -> Plan: .gitvault/config.toml canonical config and hook-adapter selection
 - `26-global-config-layer.md` -> Plan: optional user-global config fallback and precedence
 - `28-ai-cli-skill-context-print.md` -> Plan: AI command group with skill/context print contracts
+- `29-identity-security-improvements.md` -> Plan: GITVAULT_IDENTITY security improvements (REQ-73, REQ-74, REQ-75)
+- `30-passphrase-security-improvements.md` -> Plan: GITVAULT_IDENTITY_PASSPHRASE security improvements (REQ-76, REQ-77)
+- `31-security-hardening.md` -> Plan: Security hardening findings #3–#11 (REQ-78–REQ-86)
 
 ## Acceptance Criteria
 - AC1: Coverage map exists and is complete.
