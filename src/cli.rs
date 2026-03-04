@@ -170,6 +170,12 @@ pub enum Commands {
         /// Identity key file path (or use `GITVAULT_IDENTITY` env var)
         #[arg(short, long)]
         identity: Option<String>,
+        /// Only rekey files in the given environment subtree (e.g. --env dev)
+        #[arg(long)]
+        env: Option<String>,
+        /// Print what would be rekeyed without writing any files
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Manage identity key in OS keyring
     Keyring {

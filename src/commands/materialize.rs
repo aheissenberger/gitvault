@@ -58,7 +58,7 @@ mod tests {
         with_identity_env(identity_file.path(), || {
             cmd_materialize(None, None, false, false, true, None)
                 .expect("materialize should decrypt env-scoped secrets");
-            crate::commands::recipients::cmd_rekey(None, None, true)
+            crate::commands::recipients::cmd_rekey(None, None, true, None, false)
                 .expect("rekey should process env-scoped files");
         });
 

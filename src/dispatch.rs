@@ -100,10 +100,12 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Recipient { action } => {
             crate::commands::recipients::cmd_recipient(action, cli.identity_selector.clone(), cli.json)
         }
-        Commands::Rekey { identity } => crate::commands::recipients::cmd_rekey(
+        Commands::Rekey { identity, env, dry_run } => crate::commands::recipients::cmd_rekey(
             identity,
             cli.identity_selector.clone(),
             cli.json,
+            env,
+            dry_run,
         ),
         Commands::Keyring { action } => crate::commands::keyring::cmd_keyring(action, cli.json),
         Commands::Check { env, identity } => crate::commands::admin::cmd_check(
@@ -368,7 +370,7 @@ mod tests {
                 aws_profile: None,
                 aws_role_arn: None,
                 identity_selector: None,
-                command: Commands::Rekey { identity: None },
+                command: Commands::Rekey { identity: None, env: None, dry_run: false },
             };
 
             let outcome = run(cli).expect("rekey dispatch should succeed");
