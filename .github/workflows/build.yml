@@ -100,7 +100,9 @@ jobs:
         uses: taiki-e/install-action@cargo-audit
 
       - name: Security audit
-        run: cargo audit
+        # RUSTSEC-2023-0071: Marvin Attack in rsa 0.9.10 (transitive via age, no fix available).
+        # gitvault is a local CLI; not a network RSA oracle. See audit.toml for rationale.
+        run: cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

@@ -28,4 +28,5 @@ ENV PATH=/home/${USERNAME}/.cargo/bin:${PATH}
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION} \
     && rustup component add clippy rustfmt \
-    && rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    && rustup target add aarch64-apple-darwin x86_64-apple-darwin \
+    && cargo install --locked rust-script
