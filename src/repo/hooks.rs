@@ -93,7 +93,10 @@ pub(crate) fn resolve_hooks_dir(repo_root: &Path) -> PathBuf {
     if let Ok(out) = git_output_raw(&["rev-parse", "--git-path", "hooks"], repo_root)
         && out.status.success()
     {
-        let resolved = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        // REQ-101: strict UTF-8 on hook paths to avoid silently mangling non-UTF-8 paths.
+        let resolved = String::from_utf8(out.stdout)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
         if !resolved.is_empty() {
             let path = PathBuf::from(&resolved);
             let absolute = if path.is_absolute() {

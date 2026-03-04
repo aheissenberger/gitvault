@@ -42,14 +42,17 @@ pub(super) fn validate_app_name(app_name: &str) -> Result<(), GitvaultError> {
 pub(super) async fn get_app_name(repo_root: &Path) -> Result<String, GitvaultError> {
     if let Ok(raw) = crate::git::git_output_async(&["remote", "get-url", "origin"], repo_root).await
     {
-        let url = String::from_utf8_lossy(&raw);
-        let url = url.trim();
-        // Last path component, stripped of ".git"
-        if let Some(name) = url.split('/').next_back() {
-            let name = name.trim_end_matches(".git").trim();
-            if !name.is_empty() {
-                validate_app_name(name)?;
-                return Ok(name.to_string());
+        // REQ-101: strict UTF-8 on remote URL; non-UTF-8 remote URLs are invalid and
+        // should be skipped (fall through to directory-name fallback).
+        if let Ok(url_str) = String::from_utf8(raw) {
+            let url = url_str.trim();
+            // Last path component, stripped of ".git"
+            if let Some(name) = url.split('/').next_back() {
+                let name = name.trim_end_matches(".git").trim();
+                if !name.is_empty() {
+                    validate_app_name(name)?;
+                    return Ok(name.to_string());
+                }
             }
         }
     }

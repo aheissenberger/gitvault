@@ -254,7 +254,17 @@ pub fn decrypt_env_secrets(
         let ciphertext = std::fs::read(&path)?;
         match crypto::decrypt(identity, &ciphertext) {
             Ok(plaintext) => {
-                let text = String::from_utf8_lossy(&plaintext);
+                // REQ-101: strict UTF-8 conversion — reject non-UTF-8 secret content rather
+                // than silently replacing bytes. Zeroizing<String> ensures the plaintext
+                // string is overwritten when dropped, even if parse_env_pairs errors.
+                let text = zeroize::Zeroizing::new(String::from_utf8(plaintext.to_vec()).map_err(
+                    |_| {
+                        GitvaultError::Usage(format!(
+                            "Decrypted content of {} is not valid UTF-8",
+                            path.display()
+                        ))
+                    },
+                )?);
                 secrets.extend(merge::parse_env_pairs(&text)?);
             }
             Err(e) => {
@@ -277,7 +287,16 @@ fn find_repo_root_from_with_runner(
 
     match output {
         Ok(out) if out.status.success() => {
-            let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // REQ-101: strict UTF-8 — reject non-UTF-8 repo root paths rather than
+            // silently mangling them with replacement characters.
+            let root = String::from_utf8(out.stdout)
+                .map_err(|_| {
+                    crate::error::GitvaultError::Other(
+                        "git rev-parse output contains non-UTF-8 characters".into(),
+                    )
+                })?
+                .trim()
+                .to_string();
             if root.is_empty() {
                 return Err(crate::error::GitvaultError::Usage(
                     "not inside a git repository (no .git directory found)".to_string(),

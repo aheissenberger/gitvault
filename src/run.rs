@@ -29,6 +29,20 @@ pub fn run_command(
     clear_env: bool,
     pass_vars: &[String],
 ) -> Result<i32, GitvaultError> {
+    // REQ-105: Guard against PATH injection via injected secrets.
+    // If a secret key is named "PATH" (or platform equivalent), the command
+    // binary lookup would use the attacker-supplied PATH instead of the system PATH.
+    // Warn to stderr so the operator is informed; the secret is still injected
+    // (the caller may intentionally set PATH in clear_env mode), but the risk is surfaced.
+    for (key, _) in secrets {
+        if key == "PATH" || key == "LD_PRELOAD" || key == "LD_LIBRARY_PATH" {
+            eprintln!(
+                "gitvault: warning: secret key '{key}' overrides a sensitive environment \
+                 variable — verify this is intentional"
+            );
+        }
+    }
+
     let mut command = Command::new(cmd);
     command.args(args);
 

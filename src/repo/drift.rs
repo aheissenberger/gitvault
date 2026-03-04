@@ -40,7 +40,10 @@ pub fn has_secrets_drift(repo_root: &Path) -> Result<bool, GitvaultError> {
 /// Returns [`GitvaultError::PlaintextLeak`] if plaintext secrets are staged.
 pub fn check_no_tracked_plaintext(repo_root: &Path) -> Result<(), GitvaultError> {
     let raw = git_output(&["diff", "--cached", "--name-only"], repo_root)?;
-    let staged = String::from_utf8_lossy(&raw);
+    // REQ-101: strict UTF-8 — git paths on Linux can be non-UTF-8; reject rather
+    // than silently replacing bytes (which could cause false-negative leak detection).
+    let staged = String::from_utf8(raw)
+        .map_err(|_| GitvaultError::Other("git diff output contains non-UTF-8 path".into()))?;
     let files: Vec<&str> = staged
         .lines()
         .filter(|l| {
@@ -83,7 +86,8 @@ pub fn find_history_plaintext_leaks(repo_root: &Path) -> Result<Vec<String>, Git
         ],
         repo_root,
     )?;
-    let stdout = String::from_utf8_lossy(&raw);
+    let stdout = String::from_utf8(raw)
+        .map_err(|_| GitvaultError::Other("git log output contains non-UTF-8 path".into()))?;
     let leaks: Vec<String> = stdout
         .lines()
         .filter(|l| {

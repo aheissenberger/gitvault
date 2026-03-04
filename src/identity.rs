@@ -116,7 +116,11 @@ impl std::fmt::Display for SshAgentError {
 pub fn list_ssh_agent_keys() -> Result<Vec<SshAgentKey>, SshAgentError> {
     let raw =
         crate::ssh::ssh_add_list_keys().map_err(|e| SshAgentError::NotAvailable(e.to_string()))?;
-    let stdout = String::from_utf8_lossy(&raw);
+    // REQ-101: strict UTF-8 — ssh-add output is always ASCII/UTF-8 in practice.
+    // Non-UTF-8 key comments would silently corrupt fingerprint matching; skip
+    // the entire output and treat it as "no usable keys" instead.
+    let stdout = String::from_utf8(raw)
+        .map_err(|_| SshAgentError::NotAvailable("ssh-add output is not valid UTF-8".into()))?;
 
     // "The agent has no identities." → empty list
     if stdout.contains("no identities") || stdout.trim().is_empty() {
@@ -476,8 +480,17 @@ pub fn load_identity_source(
 fn load_identity_from_fd(fd: u32) -> Result<Zeroizing<String>, GitvaultError> {
     use std::io::Read;
     use std::os::unix::io::FromRawFd;
+    // REQ-104: validate FD fits in i32 before casting to avoid sign overflow.
+    // A value > i32::MAX would wrap to a negative FD on cast, which is invalid on all
+    // Unix platforms and causes undefined behavior inside from_raw_fd.
+    if fd > i32::MAX as u32 {
+        return Err(GitvaultError::Usage(format!(
+            "GITVAULT_IDENTITY_FD {fd}: file descriptor value exceeds i32::MAX"
+        )));
+    }
     // SAFETY: `fd` comes from `GITVAULT_IDENTITY_FD` env var parsed as u32;
-    // the caller is responsible for ensuring the FD is open and readable.
+    // we have verified fd <= i32::MAX above. The caller is responsible for
+    // ensuring the FD is open and readable.
     let mut f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
     let mut content = String::new();
     f.read_to_string(&mut content)
@@ -495,7 +508,11 @@ fn load_identity_from_fd(fd: u32) -> Result<Zeroizing<String>, GitvaultError> {
 fn load_passphrase_from_fd(fd: u32) -> Option<Zeroizing<String>> {
     use std::io::Read;
     use std::os::unix::io::FromRawFd;
-    // SAFETY: same as load_identity_from_fd — caller ensures FD is valid.
+    // REQ-104: same FD range validation as load_identity_from_fd.
+    if fd > i32::MAX as u32 {
+        return None;
+    }
+    // SAFETY: same as load_identity_from_fd — fd <= i32::MAX verified above.
     let mut f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
     let mut content = String::new();
     if f.read_to_string(&mut content).is_err() || content.trim().is_empty() {

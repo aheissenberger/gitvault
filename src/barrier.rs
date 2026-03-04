@@ -148,7 +148,7 @@ pub fn allow_prod(repo_root: &Path, ttl_secs: u64) -> Result<u64, GitvaultError>
     }
 
     let key = load_or_create_token_key(repo_root)?;
-    let mac = compute_hmac(&key, expiry);
+    let mac = compute_hmac(&key, expiry)?;
     let token_str = format!("{expiry}:{mac}");
 
     let token_parent = token_path.parent().unwrap_or(repo_root);
@@ -206,7 +206,9 @@ fn has_valid_token(repo_root: &Path) -> bool {
     let Ok(key) = load_or_create_token_key(repo_root) else {
         return false;
     };
-    let expected_mac = compute_hmac(&key, expiry);
+    let Ok(expected_mac) = compute_hmac(&key, expiry) else {
+        return false;
+    };
     // subtle::ConstantTimeEq for constant-time byte comparison.
     use subtle::ConstantTimeEq;
     mac_hex.as_bytes().ct_eq(expected_mac.as_bytes()).into()
@@ -227,17 +229,17 @@ fn now_secs() -> Result<u64, GitvaultError> {
 /// REQ-88: `expiry` is encoded as 8 big-endian bytes (`to_be_bytes()`) for
 /// canonical, unambiguous MAC input rather than a decimal ASCII string.
 ///
-/// # Panics
-///
-/// Does not panic: `new_from_slice` for HMAC-SHA256 accepts any non-empty key;
-/// a `[u8; 32]` is always valid.
-fn compute_hmac(key: &[u8; 32], expiry: u64) -> String {
-    let mut mac =
-        HmacSha256::new_from_slice(key).expect("HMAC key is always 32 bytes — infallible");
+/// REQ-103: returns `Result` instead of using `expect()`, propagating any
+/// HMAC key initialisation failure as `GitvaultError::Other`.
+fn compute_hmac(key: &[u8; 32], expiry: u64) -> Result<String, GitvaultError> {
+    // new_from_slice accepts any non-empty slice; a [u8; 32] always satisfies this,
+    // so the error branch is statically unreachable — but we propagate rather than panic.
+    let mut mac = HmacSha256::new_from_slice(key)
+        .map_err(|_| GitvaultError::Other("HMAC key initialisation failed".into()))?;
     // REQ-88: canonical big-endian encoding, not decimal string.
     mac.update(&expiry.to_be_bytes());
     let result = mac.finalize().into_bytes();
-    hex::encode(result)
+    Ok(hex::encode(result))
 }
 
 /// Load the HMAC signing key from disk, creating it (with restricted permissions) if absent.
@@ -252,6 +254,20 @@ fn load_or_create_token_key(repo_root: &Path) -> Result<[u8; 32], GitvaultError>
     // REQ-91: match directly on read result — no exists() pre-check.
     match fs::read_to_string(&key_path) {
         Ok(raw) => {
+            // REQ-102: verify the key file has restricted permissions (0600 on Unix)
+            // before using the key. A world-readable key file on a shared system allows
+            // another user to forge prod tokens.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = fs::metadata(&key_path)?.permissions().mode() & 0o777;
+                if mode & 0o077 != 0 {
+                    return Err(GitvaultError::Other(format!(
+                        "token key file has insecure permissions (mode {mode:04o}); \
+                         expected 0600 — run `gitvault allow-prod` to regenerate"
+                    )));
+                }
+            }
             // REQ-89: zeroize the raw content string on drop.
             let content = Zeroizing::new(raw);
             // REQ-89: zeroize the decoded bytes on drop.
@@ -351,7 +367,7 @@ mod tests {
         std::fs::create_dir_all(token_path.parent().unwrap()).unwrap();
         // Create key and write a token with expiry=1 (1970-01-01 00:00:01 UTC).
         let key = load_or_create_token_key(dir.path()).unwrap();
-        let mac = compute_hmac(&key, 1);
+        let mac = compute_hmac(&key, 1).unwrap();
         std::fs::write(&token_path, format!("1:{mac}")).unwrap();
         let err = check_prod_barrier(dir.path(), "prod", true, true, defaults::DEFAULT_PROD_ENV)
             .unwrap_err();
@@ -537,16 +553,40 @@ mod tests {
 
     /// REQ-92: all-zero key loaded from disk is rejected.
     #[test]
+    #[cfg(unix)]
     fn load_or_create_token_key_rejects_all_zero_key() {
+        use std::os::unix::fs::PermissionsExt;
         let dir = root();
         let key_path = dir.path().join(TOKEN_KEY_FILE);
         std::fs::create_dir_all(key_path.parent().unwrap()).unwrap();
-        // Write a 32-byte all-zero key as hex.
+        // Write a 32-byte all-zero key as hex with correct 0600 permissions so that
+        // the permissions check (REQ-102) passes and the entropy check (REQ-92) fires.
         std::fs::write(&key_path, hex::encode([0u8; 32])).unwrap();
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let result = load_or_create_token_key(dir.path());
         assert!(
             matches!(result, Err(GitvaultError::Other(ref m)) if m.contains("all-zeros")),
             "expected all-zeros error, got: {result:?}"
+        );
+    }
+
+    /// REQ-102: key file with insecure permissions is rejected on load (Unix only).
+    #[test]
+    #[cfg(unix)]
+    fn load_or_create_token_key_rejects_insecure_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = root();
+        let key_path = dir.path().join(TOKEN_KEY_FILE);
+        std::fs::create_dir_all(key_path.parent().unwrap()).unwrap();
+        // Write a valid random key but with world-readable permissions.
+        let mut key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut key);
+        std::fs::write(&key_path, hex::encode(key)).unwrap();
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let result = load_or_create_token_key(dir.path());
+        assert!(
+            matches!(result, Err(GitvaultError::Other(ref m)) if m.contains("insecure permissions")),
+            "expected insecure permissions error, got: {result:?}"
         );
     }
 
