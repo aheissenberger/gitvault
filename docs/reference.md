@@ -37,6 +37,7 @@ Top-level commands:
 - `ai`
 - `seal`
 - `unseal`
+- `edit`
 - `ssm` (feature-gated with `--features ssm`)
 
 ## Global Options
@@ -111,6 +112,53 @@ gitvault unseal [OPTIONS] <FILE>
 | `-i, --identity <IDENTITY>` | Identity key file path (or `GITVAULT_IDENTITY`) |
 | `--fields <FIELDS>` | Only decrypt listed fields (comma-separated) |
 | `--reveal` | Print decrypted content to stdout instead of writing back to file |
+
+### `edit`
+
+Open a sealed or encrypted file in an editor, then re-seal / re-encrypt on save.
+
+```bash
+gitvault edit [OPTIONS] <FILE>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<FILE>` | File to edit — sealed format (`.json`, `.yaml`, `.yml`, `.toml`, `.env`) **or** `.age` store file / source path |
+| `-i, --identity <IDENTITY>` | Identity key file path (or `GITVAULT_IDENTITY`) |
+| `-e, --env <ENV>` | Environment for store-path resolution and recipient lookup |
+| `--fields <FIELDS>` | Only unseal/re-seal listed dot-path fields (sealed-file mode only) |
+| `--editor <CMD>` | Override editor command for this run |
+
+**Input modes** (auto-detected by file extension):
+
+- **Sealed-file mode** (`.json`, `.yaml`, `.yml`, `.toml`, `.env`): values are decrypted in
+  memory, written to a temp file, opened in the editor, then re-sealed on save.
+- **Store-file mode** (`.age` extension or source path that resolves to `.gitvault/store/`):
+  the archive is decrypted, written to a temp file, opened in the editor, then re-encrypted
+  to the same store path on save.
+
+The temp file is created in `$TMPDIR/<random>/` with the **same filename** as the original
+(e.g. editing `conf/dbsecrets.json` creates `$TMPDIR/<random>/dbsecrets.json`), so editors
+apply correct syntax highlighting.
+
+**Editor resolution** (first non-empty wins, all platforms):
+
+1. `--editor <CMD>` CLI flag
+2. `[editor] command` in `.gitvault/config.toml`
+3. `$VISUAL` environment variable
+4. `$EDITOR` environment variable
+5. Platform fallback: `open -W -n` (macOS), `notepad.exe` (Windows), `vi` (Linux/other)
+
+```toml
+# .gitvault/config.toml
+[editor]
+command = "code --wait"
+```
+
+Notes:
+- `--fields` is not supported in store-file mode (edit the full decrypted content directly).
+- If content is unchanged after the editor exits, no re-sealing or re-encrypting occurs.
+- The temp file is zeroized (overwritten with zeros) and deleted before the command exits.
 
 ### `materialize`
 
