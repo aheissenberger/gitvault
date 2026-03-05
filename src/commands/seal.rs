@@ -2880,4 +2880,290 @@ mod tests {
             "Password should be encrypted"
         );
     }
+
+    // ── cmd_seal: gitvault config guard ────────────────────────────────────
+
+    #[test]
+    fn test_cmd_seal_rejects_gitvault_config_files() {
+        use crate::commands::test_helpers::{CwdGuard, global_test_lock, init_git_repo};
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Create .gitvault/config.toml and try to seal it
+        let gitvault_dir = dir.path().join(".gitvault");
+        std::fs::create_dir_all(&gitvault_dir).unwrap();
+        let config_file = gitvault_dir.join("config.toml");
+        std::fs::write(&config_file, "[seal]\npatterns = []\n").unwrap();
+
+        let err = cmd_seal(SealOptions {
+            file: config_file.to_string_lossy().to_string(),
+            recipients: vec![],
+            env: None,
+            fields: None,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .unwrap_err();
+
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "sealing a .gitvault config file should be rejected: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cannot seal gitvault configuration files"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    // ── cmd_unseal: reveal=true (print to stdout) ──────────────────────────
+
+    #[test]
+    fn test_cmd_unseal_reveal_true() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+
+        // Write recipient key so seal works
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Seal a JSON file
+        let content = r#"{"secret": "topsecretvalue"}"#;
+        let keys = vec![pub_key.clone()];
+        let sealed = seal_json(content, None, &keys).unwrap();
+        let json_file = dir.path().join("secrets.json");
+        std::fs::write(&json_file, &sealed).unwrap();
+
+        // cmd_unseal with reveal=true
+        let result = cmd_unseal(UnsealOptions {
+            file: json_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            fields: None,
+            reveal: true,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(
+            result.is_ok(),
+            "cmd_unseal with reveal=true should succeed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_unseal_reveal_true_yaml() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Seal a YAML file
+        let content = "password: supersecret\nhost: localhost\n";
+        let keys = vec![pub_key];
+        let sealed = seal_yaml(content, None, &keys).unwrap();
+        let yaml_file = dir.path().join("config.yaml");
+        std::fs::write(&yaml_file, &sealed).unwrap();
+
+        let result = cmd_unseal(UnsealOptions {
+            file: yaml_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            fields: None,
+            reveal: true,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(
+            result.is_ok(),
+            "YAML unseal with reveal=true should succeed"
+        );
+    }
+
+    // ── cmd_unseal: in-place write (reveal=false) ──────────────────────────
+
+    #[test]
+    fn test_cmd_unseal_in_place_json() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Seal a JSON file in-place
+        let content = r#"{"api_key": "supersecret123", "host": "localhost"}"#;
+        let keys = vec![pub_key];
+        let sealed = seal_json(content, None, &keys).unwrap();
+        let json_file = dir.path().join("app.json");
+        std::fs::write(&json_file, &sealed).unwrap();
+
+        // Unseal in-place (reveal=false)
+        let result = cmd_unseal(UnsealOptions {
+            file: json_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            fields: None,
+            reveal: false,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(result.is_ok(), "in-place unseal should succeed: {result:?}");
+
+        // Verify the file is now unsealed
+        let after = std::fs::read_to_string(&json_file).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&after).unwrap();
+        assert_eq!(
+            v["api_key"].as_str().unwrap(),
+            "supersecret123",
+            "unsealed value should match original plaintext"
+        );
+        assert_eq!(v["host"].as_str().unwrap(), "localhost");
+    }
+
+    #[test]
+    fn test_cmd_unseal_in_place_toml() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        let content = "token = \"mysecret\"\nenv = \"prod\"\n";
+        let keys = vec![pub_key];
+        let sealed = seal_toml(content, None, &keys).unwrap();
+        let toml_file = dir.path().join("config.toml");
+        std::fs::write(&toml_file, &sealed).unwrap();
+
+        let result = cmd_unseal(UnsealOptions {
+            file: toml_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            fields: None,
+            reveal: false,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(result.is_ok(), "TOML in-place unseal should succeed");
+
+        let after = std::fs::read_to_string(&toml_file).unwrap();
+        let v: toml::Value = after.parse().unwrap();
+        assert_eq!(v["token"].as_str().unwrap(), "mysecret");
+    }
+
+    #[test]
+    fn test_cmd_unseal_with_specific_fields() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Seal all fields in JSON
+        let content = r#"{"secret": "hidden", "name": "app"}"#;
+        let keys = vec![pub_key];
+        let sealed = seal_json(content, None, &keys).unwrap();
+        let json_file = dir.path().join("data.json");
+        std::fs::write(&json_file, &sealed).unwrap();
+
+        // Unseal only "secret" field
+        let result = cmd_unseal(UnsealOptions {
+            file: json_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            fields: Some("secret".to_string()),
+            reveal: true,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(
+            result.is_ok(),
+            "unseal with specific fields should succeed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_cmd_unseal_env_file_reveal() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        let content = "API_KEY=secret_api_key\nDB_HOST=localhost\n";
+        let keys = vec![pub_key];
+        let sealed = seal_env(content, None, &keys).unwrap();
+        let env_file = dir.path().join(".env");
+        std::fs::write(&env_file, &sealed).unwrap();
+
+        let result = cmd_unseal(UnsealOptions {
+            file: env_file.to_string_lossy().to_string(),
+            identity: Some(identity_file.path().to_string_lossy().to_string()),
+            fields: None,
+            reveal: true,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(
+            result.is_ok(),
+            ".env unseal with reveal=true should succeed"
+        );
+    }
 }

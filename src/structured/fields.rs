@@ -931,4 +931,164 @@ mod tests {
             decrypt_fields_content(&json, "json", &["key"], &wrong_identity, false).unwrap_err();
         assert!(err.to_string().contains("Decrypt"), "got: {err}");
     }
+
+    // ── REQ-110: array traversal in collect_encrypted_* ───────────────────
+
+    #[test]
+    fn test_collect_encrypted_field_paths_json_array_element() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        // Array inside an object: items[0] is encrypted, items[1] is plain
+        let json = format!(
+            r#"{{"items":[{},"plain"],"name":"app"}}"#,
+            serde_json::to_string(&enc).unwrap()
+        );
+        let paths = collect_encrypted_field_paths(&json, "json").unwrap();
+        // collect_encrypted_json traverses arrays: should report "items.0"
+        assert!(
+            paths.contains(&"items.0".to_string()),
+            "encrypted array element should be reported as 'items.0': got {paths:?}"
+        );
+        // "items.1" is plain, should not appear
+        assert!(
+            !paths.contains(&"items.1".to_string()),
+            "plain element should not be reported: got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_yaml_sequence_element() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        // Build YAML with an encrypted value inside a sequence under a key.
+        // We'll put the armored value as a scalar string in a YAML sequence.
+        let mut map = serde_yaml::Mapping::new();
+        let seq = serde_yaml::Value::Sequence(vec![
+            serde_yaml::Value::String(enc),
+            serde_yaml::Value::String("plain".to_string()),
+        ]);
+        map.insert(serde_yaml::Value::String("items".to_string()), seq);
+        let yaml_str = serde_yaml::to_string(&serde_yaml::Value::Mapping(map)).unwrap();
+        let paths = collect_encrypted_field_paths(&yaml_str, "yaml").unwrap();
+        // collect_encrypted_yaml traverses sequences: should report "items.0"
+        assert!(
+            paths.contains(&"items.0".to_string()),
+            "encrypted YAML sequence element should be reported: got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_encrypted_field_paths_toml_array_element() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        // Build TOML with an encrypted string inside an array.
+        let mut map = toml::value::Table::new();
+        map.insert(
+            "items".to_string(),
+            toml::Value::Array(vec![
+                toml::Value::String(enc),
+                toml::Value::String("plain".to_string()),
+            ]),
+        );
+        let toml_str = toml::to_string_pretty(&toml::Value::Table(map)).unwrap();
+        let paths = collect_encrypted_field_paths(&toml_str, "toml").unwrap();
+        // collect_encrypted_toml traverses arrays: should report "items.0"
+        assert!(
+            paths.contains(&"items.0".to_string()),
+            "encrypted TOML array element should be reported: got {paths:?}"
+        );
+    }
+
+    // ── decrypt_fields_content: YAML and TOML skip_undecryptable ─────────
+
+    #[test]
+    fn test_decrypt_fields_content_yaml_skip_undecryptable() {
+        let enc_identity = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let yaml = format!("key: |\n  {}\n", enc.trim().replace('\n', "\n  "));
+
+        let wrong_identity = gen_identity();
+        // skip_undecryptable=true → must succeed (field stays as ciphertext)
+        let out = decrypt_fields_content(&yaml, "yaml", &["key"], &wrong_identity, true).unwrap();
+        // The output should contain the key but the value should still be armored (not decrypted)
+        assert!(out.contains("key"), "output must contain key: {out}");
+    }
+
+    #[test]
+    fn test_decrypt_fields_content_yaml_fail_on_undecryptable_strict() {
+        let enc_identity = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let yaml = format!("key: |\n  {}\n", enc.trim().replace('\n', "\n  "));
+
+        let wrong_identity = gen_identity();
+        // skip_undecryptable=false → must return error
+        let err =
+            decrypt_fields_content(&yaml, "yaml", &["key"], &wrong_identity, false).unwrap_err();
+        assert!(err.to_string().contains("Decrypt"), "got: {err}");
+    }
+
+    #[test]
+    fn test_decrypt_fields_content_toml_skip_undecryptable() {
+        let enc_identity = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let mut map = toml::value::Table::new();
+        map.insert("key".to_string(), toml::Value::String(enc));
+        let toml_str = toml::to_string_pretty(&toml::Value::Table(map)).unwrap();
+
+        let wrong_identity = gen_identity();
+        // skip_undecryptable=true → must succeed
+        let out =
+            decrypt_fields_content(&toml_str, "toml", &["key"], &wrong_identity, true).unwrap();
+        assert!(out.contains("key"), "output must contain key: {out}");
+    }
+
+    #[test]
+    fn test_decrypt_fields_content_toml_fail_on_undecryptable_strict() {
+        let enc_identity = gen_identity();
+        let keys = identity_to_recipient_keys(&enc_identity);
+        let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
+        let mut map = toml::value::Table::new();
+        map.insert("key".to_string(), toml::Value::String(enc));
+        let toml_str = toml::to_string_pretty(&toml::Value::Table(map)).unwrap();
+
+        let wrong_identity = gen_identity();
+        // skip_undecryptable=false → must return error
+        let err = decrypt_fields_content(&toml_str, "toml", &["key"], &wrong_identity, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("Decrypt"), "got: {err}");
+    }
+
+    // ── decrypt_fields_content: YAML roundtrip ───────────────────────────
+
+    #[test]
+    fn test_decrypt_fields_content_yaml_roundtrip() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"topsecret", &keys).unwrap();
+        let yaml = format!("key: |\n  {}\n", enc.trim().replace('\n', "\n  "));
+        let out = decrypt_fields_content(&yaml, "yaml", &["key"], &identity, false).unwrap();
+        let v: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(v["key"].as_str().unwrap().trim(), "topsecret");
+    }
+
+    // ── decrypt_fields_content: TOML roundtrip ───────────────────────────
+
+    #[test]
+    fn test_decrypt_fields_content_toml_roundtrip() {
+        let identity = gen_identity();
+        let keys = identity_to_recipient_keys(&identity);
+        let enc = super::super::armor::encrypt_armor(b"topsecret", &keys).unwrap();
+        let mut map = toml::value::Table::new();
+        map.insert("key".to_string(), toml::Value::String(enc));
+        let toml_str = toml::to_string_pretty(&toml::Value::Table(map)).unwrap();
+        let out = decrypt_fields_content(&toml_str, "toml", &["key"], &identity, false).unwrap();
+        let v: toml::Value = out.parse().unwrap();
+        assert_eq!(v["key"].as_str().unwrap(), "topsecret");
+    }
 }

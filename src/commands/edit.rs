@@ -473,6 +473,34 @@ mod tests {
         });
     }
 
+    #[test]
+    fn test_resolve_editor_config_used_when_no_cli() {
+        // config_editor is used when CLI flag is absent/empty and no VISUAL/EDITOR env.
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        with_env_var("VISUAL", None, || {
+            with_env_var("EDITOR", None, || {
+                let tokens = resolve_editor(None, Some("vim --no-fork"));
+                assert_eq!(tokens, vec!["vim", "--no-fork"]);
+            });
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_empty_cli_falls_through_to_config() {
+        // Empty CLI flag should be ignored and fall through to config.
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        with_env_var("VISUAL", None, || {
+            with_env_var("EDITOR", None, || {
+                let tokens = resolve_editor(Some(""), Some("gedit"));
+                assert_eq!(tokens, vec!["gedit"]);
+            });
+        });
+    }
+
     // ── cmd_edit integration test ───────────────────────────────────────────
 
     /// Full integration test: editor that does NOT modify the file → "No changes".
@@ -544,5 +572,231 @@ mod tests {
                 "file should be unchanged when editor makes no modifications"
             );
         });
+    }
+
+    /// Integration test: editor that MODIFIES the file → file is re-sealed.
+    #[test]
+    #[cfg(unix)]
+    fn test_cmd_edit_with_change_reseals() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let dir = TempDir::new().expect("temp dir should be created");
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pub_key = {
+            use age::x25519::Identity;
+            let id: &Identity = &identity;
+            id.to_public().to_string()
+        };
+
+        let recipients_dir = dir.path().join(".gitvault").join("recipients");
+        std::fs::create_dir_all(&recipients_dir).expect("recipients dir should be created");
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key)
+            .expect("recipient file should be written");
+
+        let env_file = dir.path().join(".env");
+        std::fs::write(&env_file, "SECRET=original\n").expect("env file should be written");
+
+        with_identity_env(identity_file.path(), || {
+            crate::commands::seal::cmd_seal(crate::commands::seal::SealOptions {
+                file: env_file.to_string_lossy().into_owned(),
+                recipients: vec![],
+                env: None,
+                fields: None,
+                json: true,
+                no_prompt: true,
+                selector: None,
+            })
+            .expect("cmd_seal should succeed");
+
+            let sealed_before = std::fs::read(&env_file).expect("sealed file should be readable");
+
+            // Write a tiny shell script that overwrites the temp file.
+            let script = dir.path().join("editor.sh");
+            std::fs::write(&script, "#!/bin/sh\nprintf 'SECRET=updated\\n' > \"$1\"\n")
+                .expect("script should be written");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+                    .expect("chmod should succeed");
+            }
+
+            let outcome = cmd_edit(EditOptions {
+                file: env_file.to_string_lossy().into_owned(),
+                identity: Some(identity_file.path().to_string_lossy().into_owned()),
+                env: None,
+                fields: None,
+                editor: Some(script.to_string_lossy().into_owned()),
+                json: true,
+                no_prompt: true,
+                selector: None,
+            })
+            .expect("cmd_edit with modification should succeed");
+
+            assert_eq!(outcome, CommandOutcome::Success);
+
+            // Sealed file must have changed (been re-sealed with new content).
+            let sealed_after =
+                std::fs::read(&env_file).expect("sealed file should still be readable");
+            assert_ne!(
+                sealed_before, sealed_after,
+                "file should be re-sealed after editor modifies it"
+            );
+        });
+    }
+
+    // ── cmd_edit_store ─────────────────────────────────────────────────────
+
+    /// --fields is not supported for store (.age) files → returns Usage error.
+    #[test]
+    fn test_cmd_edit_store_fields_error() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let dir = TempDir::new().expect("temp dir should be created");
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        write_encrypted_env_file(dir.path(), "dev", "app.env", &identity, "K=v\n");
+        let age_path = dir
+            .path()
+            .join(".gitvault/store/dev/app.env.age")
+            .to_string_lossy()
+            .into_owned();
+
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_edit(EditOptions {
+                file: age_path.clone(),
+                editor: Some("true".to_string()),
+                fields: Some("K".to_string()),
+                identity: Some(identity_file.path().to_string_lossy().into_owned()),
+                env: Some("dev".to_string()),
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(
+                matches!(result, Err(GitvaultError::Usage(_))),
+                "expected Usage error, got {:?}",
+                result
+            );
+        });
+    }
+
+    /// Editor does not change the file → "No changes" (store mode, no re-encrypt).
+    #[test]
+    #[cfg(unix)]
+    fn test_cmd_edit_store_no_change() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let dir = TempDir::new().expect("temp dir should be created");
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        write_encrypted_env_file(dir.path(), "dev", "app.env.age", &identity, "K=v\n");
+        let age_path = dir
+            .path()
+            .join(".gitvault/store/dev/app.env.age")
+            .to_string_lossy()
+            .into_owned();
+
+        // "true" exits 0 without modifying the temp file → no-change path.
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_edit(EditOptions {
+                file: age_path.clone(),
+                editor: Some("true".to_string()),
+                fields: None,
+                identity: Some(identity_file.path().to_string_lossy().into_owned()),
+                env: Some("dev".to_string()),
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(
+                matches!(result, Ok(CommandOutcome::Success)),
+                "expected Success, got {:?}",
+                result
+            );
+        });
+    }
+
+    /// Editor modifies the file → file is re-encrypted (store mode).
+    #[test]
+    #[cfg(unix)]
+    fn test_cmd_edit_store_with_change() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let dir = TempDir::new().expect("temp dir should be created");
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        // Also write a recipient so re-encrypt succeeds.
+        let pub_key = {
+            use age::x25519::Identity as X25519Identity;
+            let id: &X25519Identity = &identity;
+            id.to_public().to_string()
+        };
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).expect("recipients dir should be created");
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key)
+            .expect("recipient file should be written");
+
+        write_encrypted_env_file(dir.path(), "dev", "app.env.age", &identity, "K=original\n");
+        let age_path = dir
+            .path()
+            .join(".gitvault/store/dev/app.env.age")
+            .to_string_lossy()
+            .into_owned();
+        let before = std::fs::read(&age_path).expect("age file should be readable before edit");
+
+        // Write an editor script that appends a line.
+        let script_path = dir.path().join("editor.sh");
+        std::fs::write(
+            &script_path,
+            "#!/bin/sh\necho 'NEW_KEY=new_value' >> \"$1\"\n",
+        )
+        .expect("editor script should be written");
+        std::fs::set_permissions(
+            &script_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("chmod should succeed");
+
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_edit(EditOptions {
+                file: age_path.clone(),
+                editor: Some(script_path.to_string_lossy().into_owned()),
+                fields: None,
+                identity: Some(identity_file.path().to_string_lossy().into_owned()),
+                env: Some("dev".to_string()),
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(
+                matches!(result, Ok(CommandOutcome::Success)),
+                "expected Success after store edit with change, got {:?}",
+                result
+            );
+        });
+
+        let after = std::fs::read(&age_path).expect("age file should still be readable after edit");
+        assert_ne!(
+            before, after,
+            "re-encrypted file should differ from original"
+        );
     }
 }

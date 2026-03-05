@@ -992,4 +992,435 @@ mod tests {
         let p = Path::new("config.yaml.age");
         assert_eq!(stem_extension(p).unwrap(), "yaml");
     }
+
+    #[test]
+    fn test_stem_extension_no_stem_ext_errors() {
+        // "config.age" has stem "config" with no extension → error
+        let p = Path::new("config.age");
+        assert!(
+            matches!(stem_extension(p), Err(GitvaultError::Usage(_))),
+            "stem without extension should yield Usage error"
+        );
+    }
+
+    // ── cmd_set: error paths (no git repo needed) ─────────────────────────
+
+    #[test]
+    fn test_cmd_set_stdin_and_value_are_mutually_exclusive() {
+        let result = cmd_set(SetOptions {
+            file: "secrets.json".to_string(),
+            key: "key".to_string(),
+            value: Some("val".to_string()),
+            stdin: true,
+            identity: None,
+            env: None,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "stdin + value should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_cmd_set_no_value_no_stdin_errors() {
+        let result = cmd_set(SetOptions {
+            file: "secrets.json".to_string(),
+            key: "key".to_string(),
+            value: None,
+            stdin: false,
+            identity: None,
+            env: None,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        });
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "neither value nor stdin should be rejected"
+        );
+    }
+
+    // ── extract_value: unsupported extension ──────────────────────────────
+
+    #[test]
+    fn test_extract_value_unsupported_ext_errors() {
+        let result = extract_value("data", "xml", "key");
+        assert!(matches!(result, Err(GitvaultError::Usage(_))));
+    }
+
+    // ── extract_value: yaml number and bool values ────────────────────────
+
+    #[test]
+    fn test_yaml_get_number_value() {
+        let content = "port: 8080\n";
+        assert_eq!(extract_value(content, "yaml", "port").unwrap(), "8080");
+    }
+
+    #[test]
+    fn test_yaml_get_bool_value() {
+        let content = "enabled: true\n";
+        assert_eq!(extract_value(content, "yaml", "enabled").unwrap(), "true");
+    }
+
+    // ── extract_value: toml integer and bool values ───────────────────────
+
+    #[test]
+    fn test_toml_get_integer_value() {
+        let content = "port = 8080\n";
+        assert_eq!(extract_value(content, "toml", "port").unwrap(), "8080");
+    }
+
+    #[test]
+    fn test_toml_get_bool_value() {
+        let content = "enabled = true\n";
+        assert_eq!(extract_value(content, "toml", "enabled").unwrap(), "true");
+    }
+
+    #[test]
+    fn test_toml_get_float_value() {
+        let content = "ratio = 1.5\n";
+        let val = extract_value(content, "toml", "ratio").unwrap();
+        assert!(val.contains("1.5"), "got: {val}");
+    }
+
+    // ── extract_value: env missing key ────────────────────────────────────
+
+    #[test]
+    fn test_env_get_missing_key_returns_not_found() {
+        let content = "FOO=bar\nBAZ=qux\n";
+        let result = extract_value(content, "env", "MISSING");
+        assert!(matches!(result, Err(GitvaultError::NotFound(_))));
+    }
+
+    // ── update_value: unsupported extension ───────────────────────────────
+
+    #[test]
+    fn test_update_value_unsupported_ext_errors() {
+        let result = update_value("data", "xml", "key", "val");
+        assert!(matches!(result, Err(GitvaultError::Usage(_))));
+    }
+
+    // ── yaml_set: upsert new key at top level ─────────────────────────────
+
+    #[test]
+    fn test_yaml_set_upsert_new_top_level_key() {
+        let content = "existing: value\n";
+        let updated = update_value(content, "yaml", "newkey", "newval").unwrap();
+        let v: serde_yaml::Value = serde_yaml::from_str(&updated).unwrap();
+        assert_eq!(v["newkey"].as_str().unwrap(), "newval");
+        assert_eq!(v["existing"].as_str().unwrap(), "value");
+    }
+
+    // ── json_set_mut: non-object root on single-segment path ─────────────
+
+    #[test]
+    fn test_json_set_non_object_root_errors() {
+        // JSON root is an array, not an object — top-level set must fail
+        let content = r#"["a","b"]"#;
+        let result = update_value(content, "json", "key", "val");
+        assert!(
+            result.is_err(),
+            "setting a key in a non-object JSON root should fail"
+        );
+    }
+
+    // ── yaml_set: nested missing parent ───────────────────────────────────
+
+    #[test]
+    fn test_yaml_set_nested_missing_parent_fails() {
+        let content = "a: 1\n";
+        let result = update_value(content, "yaml", "missing.key", "val");
+        assert!(matches!(result, Err(GitvaultError::Usage(_))));
+    }
+
+    // ── json_get: non-object at intermediate path ─────────────────────────
+
+    #[test]
+    fn test_json_get_non_object_intermediate_fails() {
+        // "a" is a string, can't descend further
+        let content = r#"{"a": "string"}"#;
+        let result = extract_value(content, "json", "a.b");
+        assert!(matches!(result, Err(GitvaultError::NotFound(_))));
+    }
+
+    // ── yaml_get: non-mapping at intermediate path ────────────────────────
+
+    #[test]
+    fn test_yaml_get_non_mapping_intermediate_fails() {
+        let content = "a: scalar\n";
+        let result = extract_value(content, "yaml", "a.b");
+        assert!(matches!(result, Err(GitvaultError::NotFound(_))));
+    }
+
+    // ── cmd_get / cmd_set sealed-file mode (full crypto round-trip) ───────
+
+    #[test]
+    fn test_cmd_get_sealed_json() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file, with_identity_env,
+        };
+        use age::x25519::Identity;
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (id_file, identity) = setup_identity_file();
+        let pub_key = {
+            let id: &Identity = &identity;
+            id.to_public().to_string()
+        };
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Write and seal a JSON file.
+        let secrets = dir.path().join("secrets.json");
+        std::fs::write(&secrets, r#"{"db":{"password":"s3cr3t"}}"#).unwrap();
+        crate::commands::seal::cmd_seal(crate::commands::seal::SealOptions {
+            file: secrets.to_string_lossy().into_owned(),
+            recipients: vec![],
+            env: None,
+            fields: None,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect("seal should succeed");
+
+        // cmd_get should return the plaintext value.
+        with_identity_env(id_file.path(), || {
+            let result = cmd_get(GetOptions {
+                file: secrets.to_string_lossy().into_owned(),
+                key: "db.password".to_string(),
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: None,
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(result.is_ok(), "cmd_get failed: {:?}", result);
+        });
+    }
+
+    #[test]
+    fn test_cmd_set_sealed_json() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file, with_identity_env,
+        };
+        use age::x25519::Identity;
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (id_file, identity) = setup_identity_file();
+        let pub_key = {
+            let id: &Identity = &identity;
+            id.to_public().to_string()
+        };
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Write and seal a JSON file.
+        let secrets = dir.path().join("secrets.json");
+        std::fs::write(&secrets, r#"{"db":{"password":"original"}}"#).unwrap();
+        crate::commands::seal::cmd_seal(crate::commands::seal::SealOptions {
+            file: secrets.to_string_lossy().into_owned(),
+            recipients: vec![],
+            env: None,
+            fields: None,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect("seal should succeed");
+
+        // cmd_set should update the value and re-seal.
+        with_identity_env(id_file.path(), || {
+            let result = cmd_set(SetOptions {
+                file: secrets.to_string_lossy().into_owned(),
+                key: "db.password".to_string(),
+                value: Some("rotated".to_string()),
+                stdin: false,
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: None,
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(result.is_ok(), "cmd_set failed: {:?}", result);
+
+            // Verify the new value can be read back.
+            let get = cmd_get(GetOptions {
+                file: secrets.to_string_lossy().into_owned(),
+                key: "db.password".to_string(),
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: None,
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(get.is_ok(), "cmd_get after set failed: {:?}", get);
+        });
+    }
+
+    #[test]
+    fn test_cmd_get_sealed_json_json_output() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file, with_identity_env,
+        };
+        use age::x25519::Identity;
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (id_file, identity) = setup_identity_file();
+        let pub_key = {
+            let id: &Identity = &identity;
+            id.to_public().to_string()
+        };
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        let secrets = dir.path().join("secrets.json");
+        std::fs::write(&secrets, r#"{"token":"mytoken"}"#).unwrap();
+        crate::commands::seal::cmd_seal(crate::commands::seal::SealOptions {
+            file: secrets.to_string_lossy().into_owned(),
+            recipients: vec![],
+            env: None,
+            fields: None,
+            json: false,
+            no_prompt: true,
+            selector: None,
+        })
+        .expect("seal should succeed");
+
+        with_identity_env(id_file.path(), || {
+            // --json flag should produce a JSON outcome (no error).
+            let result = cmd_get(GetOptions {
+                file: secrets.to_string_lossy().into_owned(),
+                key: "token".to_string(),
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: None,
+                json: true, // exercises the json output branch
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(result.is_ok(), "cmd_get --json failed: {:?}", result);
+        });
+    }
+
+    #[test]
+    fn test_cmd_get_store_file() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file, with_identity_env,
+            write_encrypted_env_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (id_file, identity) = setup_identity_file();
+
+        // Write an encrypted .env file to the store.
+        write_encrypted_env_file(
+            dir.path(),
+            "dev",
+            "app.env.age",
+            &identity,
+            "API_KEY=storevalue\n",
+        );
+
+        let age_path = dir
+            .path()
+            .join(".gitvault/store/dev/app.env.age")
+            .to_string_lossy()
+            .into_owned();
+
+        with_identity_env(id_file.path(), || {
+            let result = cmd_get(GetOptions {
+                file: age_path.clone(),
+                key: "API_KEY".to_string(),
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: Some("dev".to_string()),
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(result.is_ok(), "cmd_get store file failed: {:?}", result);
+        });
+    }
+
+    #[test]
+    fn test_cmd_set_store_file() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file, with_identity_env,
+            write_encrypted_env_file,
+        };
+        use age::x25519::Identity;
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (id_file, identity) = setup_identity_file();
+        // Add recipient so re-encrypt can find the key.
+        let pub_key = {
+            let id: &Identity = &identity;
+            id.to_public().to_string()
+        };
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("test.pub"), &pub_key).unwrap();
+
+        // Write an encrypted .env store file.
+        write_encrypted_env_file(
+            dir.path(),
+            "dev",
+            "app.env.age",
+            &identity,
+            "TOKEN=initial\n",
+        );
+
+        let age_path = dir
+            .path()
+            .join(".gitvault/store/dev/app.env.age")
+            .to_string_lossy()
+            .into_owned();
+
+        with_identity_env(id_file.path(), || {
+            let result = cmd_set(SetOptions {
+                file: age_path.clone(),
+                key: "TOKEN".to_string(),
+                value: Some("updated".to_string()),
+                stdin: false,
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: Some("dev".to_string()),
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(result.is_ok(), "cmd_set store file failed: {:?}", result);
+
+            // Verify the new value.
+            let get = cmd_get(GetOptions {
+                file: age_path.clone(),
+                key: "TOKEN".to_string(),
+                identity: Some(id_file.path().to_string_lossy().into_owned()),
+                env: Some("dev".to_string()),
+                json: false,
+                no_prompt: true,
+                selector: None,
+            });
+            assert!(get.is_ok(), "cmd_get after set_store failed: {:?}", get);
+        });
+    }
 }

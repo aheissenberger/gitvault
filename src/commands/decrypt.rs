@@ -533,4 +533,91 @@ mod tests {
         let env = parse_env_from_store_path(rel).unwrap();
         assert_eq!(env, "staging");
     }
+
+    // ── lexical_normalize ────────────────────────────────────────────────
+
+    #[test]
+    fn test_lexical_normalize_cur_dir_components_stripped() {
+        // "./foo/./bar" should normalize to "foo/bar"
+        let input = std::path::Path::new("./foo/./bar");
+        let result = lexical_normalize(input);
+        assert_eq!(result, PathBuf::from("foo/bar"));
+    }
+
+    #[test]
+    fn test_lexical_normalize_parent_dir_component() {
+        // "foo/bar/../baz" should normalize to "foo/baz"
+        let input = std::path::Path::new("foo/bar/../baz");
+        let result = lexical_normalize(input);
+        assert_eq!(result, PathBuf::from("foo/baz"));
+    }
+
+    #[test]
+    fn test_lexical_normalize_parent_at_root_kept() {
+        // ".." at root cannot pop further; it is preserved
+        let input = std::path::Path::new("../outside");
+        let result = lexical_normalize(input);
+        assert_eq!(result, PathBuf::from("../outside"));
+    }
+
+    #[test]
+    fn test_lexical_normalize_mixed() {
+        // "/repo/./sub/../file.age" → "/repo/file.age"
+        let input = std::path::Path::new("/repo/./sub/../file.age");
+        let result = lexical_normalize(input);
+        assert_eq!(result, PathBuf::from("/repo/file.age"));
+    }
+
+    #[test]
+    fn test_lexical_normalize_plain_path_unchanged() {
+        let input = std::path::Path::new("/repo/secrets/config.json");
+        let result = lexical_normalize(input);
+        assert_eq!(result, PathBuf::from("/repo/secrets/config.json"));
+    }
+
+    /// parse_env_from_store_path: error when path doesn't start with .gitvault/store
+    #[test]
+    fn test_parse_env_from_store_path_error_when_wrong_prefix() {
+        let rel = std::path::Path::new("wrong/path/app.env.age");
+        let err = parse_env_from_store_path(rel).unwrap_err();
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    /// make_repo_relative: absolute path strips repo root prefix
+    #[test]
+    fn test_make_repo_relative_absolute_path() {
+        let repo = std::path::Path::new("/repo");
+        let input = std::path::Path::new("/repo/svc/config.json");
+        let result = make_repo_relative(input, repo);
+        assert_eq!(result, PathBuf::from("svc/config.json"));
+    }
+
+    /// make_repo_relative: relative path returned as-is
+    #[test]
+    fn test_make_repo_relative_relative_path() {
+        let repo = std::path::Path::new("/repo");
+        let input = std::path::Path::new("svc/config.json");
+        let result = make_repo_relative(input, repo);
+        assert_eq!(result, PathBuf::from("svc/config.json"));
+    }
+
+    /// is_explicit_store_path: correct positive case
+    #[test]
+    fn test_is_explicit_store_path_positive() {
+        let path = std::path::Path::new(".gitvault/store/dev/app.env.age");
+        assert!(is_explicit_store_path(path));
+    }
+
+    /// is_explicit_store_path: false for source paths
+    #[test]
+    fn test_is_explicit_store_path_negative_no_age() {
+        let path = std::path::Path::new(".gitvault/store/dev/app.env");
+        assert!(!is_explicit_store_path(path));
+    }
+
+    #[test]
+    fn test_is_explicit_store_path_negative_wrong_prefix() {
+        let path = std::path::Path::new("other/store/dev/app.env.age");
+        assert!(!is_explicit_store_path(path));
+    }
 }
