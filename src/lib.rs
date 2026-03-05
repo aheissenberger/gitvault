@@ -19,6 +19,7 @@ pub mod fs_util;
 pub mod git;
 pub mod identity;
 pub mod keyring_store;
+pub mod matcher;
 pub mod materialize;
 pub mod merge;
 pub mod output;

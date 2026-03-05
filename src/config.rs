@@ -208,6 +208,33 @@ pub struct EditorConfig {
     pub command: Option<String>,
 }
 
+/// Generic rule action used by rule-based matcher sections.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleAction {
+    Allow,
+    Deny,
+}
+
+/// A structured matcher rule (`[[<section>.rule]]`).
+#[derive(Debug, Clone)]
+pub struct MatchRule {
+    pub action: RuleAction,
+    pub path: String,
+    pub keys: Vec<String>,
+}
+
+/// Configuration for `[materialize]`.
+#[derive(Debug, Default)]
+pub struct MaterializeConfig {
+    pub rules: Vec<MatchRule>,
+}
+
+/// Configuration for `[run]`.
+#[derive(Debug, Default)]
+pub struct RunConfig {
+    pub rules: Vec<MatchRule>,
+}
+
 /// Top-level gitvault project configuration.
 #[derive(Debug, Default)]
 pub struct GitvaultConfig {
@@ -223,6 +250,10 @@ pub struct GitvaultConfig {
     pub keyring: KeyringConfig,
     /// Seal configuration (REQ-112).
     pub seal: SealConfig,
+    /// Materialize matcher configuration.
+    pub materialize: MaterializeConfig,
+    /// Run matcher configuration.
+    pub run: RunConfig,
     /// Editor configuration.
     pub editor: EditorConfig,
 }
@@ -319,34 +350,43 @@ struct RawConfig {
     paths: Option<RawPathsConfig>,
     keyring: Option<RawKeyringConfig>,
     seal: Option<RawSealConfig>,
+    materialize: Option<RawMaterializeConfig>,
+    run: Option<RawRunConfig>,
     editor: Option<RawEditorConfig>,
 }
 
-/// Intermediate TOML representation for `[[seal.override]]`.
+/// Intermediate TOML representation for `[[<section>.rule]]`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawSealOverride {
-    pattern: String,
-    fields: Vec<String>,
-}
-
-/// Intermediate TOML representation for `[[seal.exclude]]`.
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawSealExclude {
-    pattern: String,
+struct RawMatchRule {
+    action: String,
+    path: String,
+    #[serde(default)]
+    keys: Vec<String>,
 }
 
 /// Intermediate TOML representation for `[seal]`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawSealConfig {
-    #[serde(default)]
-    patterns: Vec<String>,
-    #[serde(rename = "override", default)]
-    overrides: Vec<RawSealOverride>,
-    #[serde(rename = "exclude", default)]
-    excludes: Vec<RawSealExclude>,
+    #[serde(rename = "rule", default)]
+    rules: Vec<RawMatchRule>,
+}
+
+/// Intermediate TOML representation for `[materialize]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMaterializeConfig {
+    #[serde(rename = "rule", default)]
+    rules: Vec<RawMatchRule>,
+}
+
+/// Intermediate TOML representation for `[run]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRunConfig {
+    #[serde(rename = "rule", default)]
+    rules: Vec<RawMatchRule>,
 }
 
 // ---------------------------------------------------------------------------
@@ -402,22 +442,69 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
             account: r.account.filter(|s| !s.is_empty()),
         });
 
-    let seal = raw.seal.map_or_else(SealConfig::default, |r| SealConfig {
-        patterns: r.patterns,
-        overrides: r
-            .overrides
-            .into_iter()
-            .map(|o| SealOverride {
-                pattern: o.pattern,
-                fields: o.fields,
-            })
-            .collect(),
-        excludes: r
-            .excludes
-            .into_iter()
-            .map(|e| SealExclude { pattern: e.pattern })
-            .collect(),
-    });
+    let seal = match raw.seal {
+        None => SealConfig::default(),
+        Some(r) => {
+            // REQ-118: parse only [[seal.rule]] and derive runtime views.
+            let mut patterns: Vec<String> = Vec::new();
+            let mut overrides: Vec<SealOverride> = Vec::new();
+            let mut excludes: Vec<SealExclude> = Vec::new();
+
+            for rule in r.rules {
+                let action = parse_rule_action(&rule.action, "seal")?;
+                match action {
+                    RuleAction::Allow => {
+                        push_unique(&mut patterns, rule.path.clone());
+                        if !rule.keys.is_empty() {
+                            overrides.push(SealOverride {
+                                pattern: rule.path,
+                                fields: rule.keys,
+                            });
+                        }
+                    }
+                    RuleAction::Deny => {
+                        excludes.push(SealExclude { pattern: rule.path });
+                    }
+                }
+            }
+
+            SealConfig {
+                patterns,
+                overrides,
+                excludes,
+            }
+        }
+    };
+
+    let materialize = match raw.materialize {
+        None => MaterializeConfig::default(),
+        Some(r) => {
+            let mut rules = Vec::new();
+            for rule in r.rules {
+                rules.push(MatchRule {
+                    action: parse_rule_action(&rule.action, "materialize")?,
+                    path: rule.path,
+                    keys: rule.keys,
+                });
+            }
+            MaterializeConfig { rules }
+        }
+    };
+
+    let run = match raw.run {
+        None => RunConfig::default(),
+        Some(r) => {
+            let mut rules = Vec::new();
+            for rule in r.rules {
+                rules.push(MatchRule {
+                    action: parse_rule_action(&rule.action, "run")?,
+                    path: rule.path,
+                    keys: rule.keys,
+                });
+            }
+            RunConfig { rules }
+        }
+    };
 
     let editor = raw
         .editor
@@ -432,8 +519,26 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
         paths,
         keyring,
         seal,
+        materialize,
+        run,
         editor,
     })
+}
+
+fn parse_rule_action(raw: &str, section: &str) -> Result<RuleAction, GitvaultError> {
+    match raw {
+        "allow" => Ok(RuleAction::Allow),
+        "deny" => Ok(RuleAction::Deny),
+        other => Err(GitvaultError::Usage(format!(
+            "invalid action '{other}' in [{section}].rule; valid values: allow, deny"
+        ))),
+    }
+}
+
+fn push_unique(out: &mut Vec<String>, value: String) {
+    if !out.iter().any(|v| v == &value) {
+        out.push(value);
+    }
 }
 
 /// Inner implementation for [`load_global_config`] that accepts an optional
@@ -504,7 +609,7 @@ fn effective_config_impl(
         account: repo.keyring.account.or(global.keyring.account),
     };
 
-    // Seal config: repo wins (repo-level config is authoritative).
+    // Matcher config: repo wins (repo-level config is authoritative).
     let seal = if !repo.seal.patterns.is_empty()
         || !repo.seal.overrides.is_empty()
         || !repo.seal.excludes.is_empty()
@@ -512,6 +617,18 @@ fn effective_config_impl(
         repo.seal
     } else {
         global.seal
+    };
+
+    let materialize = if !repo.materialize.rules.is_empty() {
+        repo.materialize
+    } else {
+        global.materialize
+    };
+
+    let run = if !repo.run.rules.is_empty() {
+        repo.run
+    } else {
+        global.run
     };
 
     let editor = EditorConfig {
@@ -525,6 +642,8 @@ fn effective_config_impl(
         paths,
         keyring,
         seal,
+        materialize,
+        run,
         editor,
     })
 }
@@ -1087,5 +1206,58 @@ mod tests {
             crate::defaults::KEYRING_ACCOUNT,
             "account not in global → built-in default"
         );
+    }
+
+    #[test]
+    fn test_parse_seal_rule_config_derives_runtime_views() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[[seal.rule]]\naction = \"allow\"\npath = \"conf/app.json\"\nkeys = [\"db.password\"]\n\n[[seal.rule]]\naction = \"deny\"\npath = \"conf/public.json\"\n",
+        );
+
+        let config = load_config(dir.path()).expect("seal rules should parse");
+        assert!(config.seal.patterns.iter().any(|p| p == "conf/app.json"));
+        assert!(
+            config
+                .seal
+                .overrides
+                .iter()
+                .any(|o| o.pattern == "conf/app.json" && o.fields == vec!["db.password"])
+        );
+        assert!(
+            config
+                .seal
+                .excludes
+                .iter()
+                .any(|e| e.pattern == "conf/public.json")
+        );
+    }
+
+    #[test]
+    fn test_parse_seal_legacy_schema_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[seal]\npatterns = [\"app.json\"]\n");
+        let err = load_config(dir.path()).expect_err("legacy seal schema must fail");
+        assert!(err.to_string().contains("unknown field `patterns`"));
+    }
+
+    #[test]
+    fn test_parse_materialize_and_run_rules() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[[materialize.rule]]\naction = \"allow\"\npath = \".gitvault/store/dev/*.env.age\"\nkeys = [\"API_*\"]\n\n[[run.rule]]\naction = \"deny\"\npath = \".gitvault/store/dev/private.*\"\n",
+        );
+
+        let config = load_config(dir.path()).expect("materialize/run rules should parse");
+        assert_eq!(config.materialize.rules.len(), 1);
+        assert_eq!(config.run.rules.len(), 1);
+        assert_eq!(
+            config.materialize.rules[0].path,
+            ".gitvault/store/dev/*.env.age"
+        );
+        assert_eq!(config.materialize.rules[0].keys, vec!["API_*"]);
+        assert_eq!(config.run.rules[0].path, ".gitvault/store/dev/private.*");
     }
 }

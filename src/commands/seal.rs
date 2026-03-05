@@ -3,7 +3,7 @@
 //! # `seal <FILE>`
 //! Encrypts string leaf values in-place using age ASCII armor.
 //! Supports JSON, YAML, TOML, and .env files.
-//! Registers the sealed file in `.gitvault/config.toml` under `[seal].patterns`.
+//! Registers the sealed file in `.gitvault/config.toml` under `[[seal.rule]]`.
 //!
 //! # `unseal <FILE>`
 //! Decrypts all age-encrypted values in-place (or prints to stdout with `--reveal`).
@@ -92,7 +92,7 @@ pub fn cmd_seal(opts: SealOptions) -> Result<CommandOutcome, GitvaultError> {
     // Compute repo-relative path early (needed for override lookup)
     let rel_path = relative_path_to_repo(&abs_file_canon, &abs_repo);
 
-    // Parse --fields; fall back to [[seal.override]] config when no flag given
+    // Parse --fields; fall back to rule keys from config when no flag given
     let cli_fields: Option<Vec<String>> = opts
         .fields
         .as_deref()
@@ -102,7 +102,7 @@ pub fn cmd_seal(opts: SealOptions) -> Result<CommandOutcome, GitvaultError> {
             cfg.seal
                 .overrides
                 .into_iter()
-                .find(|o| pattern_matches(&o.pattern, &rel_path))
+                .find(|o| crate::matcher::path_matches_glob(&o.pattern, &rel_path))
                 .map(|o| o.fields)
         });
     let fields_opt = cli_fields.or(config_fields);
@@ -126,8 +126,9 @@ pub fn cmd_seal(opts: SealOptions) -> Result<CommandOutcome, GitvaultError> {
             eprintln!(
                 "gitvault: warning: could not update .gitvault/config.toml: {e}\n\
                  Add manually:\n\
-                 [seal]\n\
-                 patterns = [\"{rel_path}\"]"
+                 [[seal.rule]]\n\
+                 action = \"allow\"\n\
+                 path = \"{rel_path}\""
             );
         }
     }
@@ -180,7 +181,7 @@ pub fn cmd_unseal(opts: UnsealOptions) -> Result<CommandOutcome, GitvaultError> 
     )?;
     let identity = any_identity.as_identity();
 
-    // Parse --fields; fall back to [[seal.override]] config when no flag given
+    // Parse --fields; fall back to rule keys from config when no flag given
     let repo_root_for_cfg = crate::repo::find_repo_root().ok();
     let abs_file_for_cfg = if file_path.is_absolute() {
         file_path.clone()
@@ -201,7 +202,7 @@ pub fn cmd_unseal(opts: UnsealOptions) -> Result<CommandOutcome, GitvaultError> 
             cfg.seal
                 .overrides
                 .into_iter()
-                .find(|o| pattern_matches(&o.pattern, &rel))
+                .find(|o| crate::matcher::path_matches_glob(&o.pattern, &rel))
                 .map(|o| o.fields)
         })
     });
@@ -947,35 +948,24 @@ pub(crate) fn update_seal_config(
         GitvaultError::Usage("[seal] is not a TOML table in config.toml".to_string())
     })?;
 
-    // Ensure patterns array exists
-    if !seal_table.contains_key("patterns") {
-        let mut arr = toml_edit::Array::new();
-        arr.push(rel_path);
-        seal_table["patterns"] = toml_edit::value(arr);
-    } else {
-        // Check if already covered
-        let patterns_item = seal_table.get("patterns");
-        let already_covered = patterns_item
-            .and_then(|p| p.as_array())
-            .map(|arr| {
-                arr.iter().any(|v| {
-                    v.as_str()
-                        .map(|s| pattern_matches(s, rel_path))
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
-        if !already_covered && let Some(arr) = seal_table["patterns"].as_array_mut() {
-            arr.push(rel_path);
-        }
+    // Ensure rule array exists.
+    if !seal_table.contains_key("rule") {
+        seal_table.insert(
+            "rule",
+            toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()),
+        );
     }
 
-    // Handle --fields: append [[seal.override]] block if needed
+    // Add base allow rule when file is not covered by any existing allow rule.
+    if !has_matching_allow_rule(seal_table, rel_path)? {
+        append_allow_rule(seal_table, rel_path, &[])?;
+    }
+
+    // Handle --fields via allow rule keys.
     if let Some(field_list) = fields
         && !field_list.is_empty()
     {
-        update_seal_override(seal_table, rel_path, field_list)?;
+        update_seal_rule_keys(seal_table, rel_path, field_list)?;
     }
 
     // Write back
@@ -986,55 +976,84 @@ pub(crate) fn update_seal_config(
     atomic_write(&config_path, doc.to_string().as_bytes())
 }
 
-/// Check if a glob pattern matches a relative path.
-fn pattern_matches(pattern: &str, path: &str) -> bool {
-    if pattern == path {
-        return true;
+fn has_matching_allow_rule(
+    seal_table: &toml_edit::Table,
+    rel_path: &str,
+) -> Result<bool, GitvaultError> {
+    let Some(item) = seal_table.get("rule") else {
+        return Ok(false);
+    };
+    let Some(aot) = item.as_array_of_tables() else {
+        return Err(GitvaultError::Usage(
+            "[seal].rule must be an array of tables".to_string(),
+        ));
+    };
+
+    for tbl in aot {
+        let action = tbl
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let path = tbl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        if action == "allow" && crate::matcher::path_matches_glob(path, rel_path) {
+            return Ok(true);
+        }
     }
-    glob::Pattern::new(pattern)
-        .map(|p| p.matches(path))
-        .unwrap_or(false)
+    Ok(false)
 }
 
-/// Append or merge a `[[seal.override]]` entry for the given path and fields.
-fn update_seal_override(
+fn append_allow_rule(
+    seal_table: &mut toml_edit::Table,
+    rel_path: &str,
+    keys: &[String],
+) -> Result<(), GitvaultError> {
+    let Some(toml_edit::Item::ArrayOfTables(aot)) = seal_table.get_mut("rule") else {
+        return Err(GitvaultError::Usage(
+            "[seal].rule must be an array of tables".to_string(),
+        ));
+    };
+
+    let mut rule_table = toml_edit::Table::new();
+    rule_table.set_implicit(false);
+    rule_table["action"] = toml_edit::value("allow");
+    rule_table["path"] = toml_edit::value(rel_path);
+    if !keys.is_empty() {
+        let mut keys_arr = toml_edit::Array::new();
+        for key in keys {
+            keys_arr.push(key.as_str());
+        }
+        rule_table["keys"] = toml_edit::value(keys_arr);
+    }
+    aot.push(rule_table);
+    Ok(())
+}
+
+/// Append or merge `keys` into an allow rule for `rel_path`.
+fn update_seal_rule_keys(
     seal_table: &mut toml_edit::Table,
     rel_path: &str,
     new_fields: &[String],
 ) -> Result<(), GitvaultError> {
-    // Check if override array exists
-    if !seal_table.contains_key("override") {
-        // Create new override array with one entry
-        let mut override_table = toml_edit::Table::new();
-        override_table.set_implicit(false);
-        override_table["pattern"] = toml_edit::value(rel_path);
-        let mut fields_arr = toml_edit::Array::new();
-        for f in new_fields {
-            fields_arr.push(f.as_str());
-        }
-        override_table["fields"] = toml_edit::value(fields_arr);
-
-        let mut arr_of_tables = toml_edit::ArrayOfTables::new();
-        arr_of_tables.push(override_table);
-        seal_table.insert("override", toml_edit::Item::ArrayOfTables(arr_of_tables));
-        return Ok(());
-    }
-
-    // Try to find existing override for this path and union-merge fields
-    if let Some(toml_edit::Item::ArrayOfTables(aot)) = seal_table.get_mut("override") {
-        // Check if an override for rel_path already exists
-        let mut found = false;
+    // Check if a matching exact-path allow rule already exists.
+    if let Some(toml_edit::Item::ArrayOfTables(aot)) = seal_table.get_mut("rule") {
         for tbl in aot.iter_mut() {
-            let matches = tbl
-                .get("pattern")
+            let action = tbl
+                .get("action")
                 .and_then(|v| v.as_str())
-                .map(|s| s == rel_path)
-                .unwrap_or(false);
-            if matches {
-                found = true;
-                // Union-merge fields
-                if let Some(fields_item) = tbl.get_mut("fields")
-                    && let Some(arr) = fields_item.as_array_mut()
+                .unwrap_or_default();
+            let path = tbl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            if action == "allow" && path == rel_path {
+                if !tbl.contains_key("keys") {
+                    let mut keys_arr = toml_edit::Array::new();
+                    for f in new_fields {
+                        keys_arr.push(f.as_str());
+                    }
+                    tbl["keys"] = toml_edit::value(keys_arr);
+                    return Ok(());
+                }
+
+                if let Some(keys_item) = tbl.get_mut("keys")
+                    && let Some(arr) = keys_item.as_array_mut()
                 {
                     let existing: Vec<String> = arr
                         .iter()
@@ -1045,25 +1064,13 @@ fn update_seal_override(
                             arr.push(f.as_str());
                         }
                     }
+                    return Ok(());
                 }
-                break;
             }
-        }
-
-        if !found {
-            // Append new override entry
-            let mut override_table = toml_edit::Table::new();
-            override_table["pattern"] = toml_edit::value(rel_path);
-            let mut fields_arr = toml_edit::Array::new();
-            for f in new_fields {
-                fields_arr.push(f.as_str());
-            }
-            override_table["fields"] = toml_edit::value(fields_arr);
-            aot.push(override_table);
         }
     }
 
-    Ok(())
+    append_allow_rule(seal_table, rel_path, new_fields)
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,7 +1126,7 @@ pub fn check_seal_drift(repo_root: &Path, seal_config: &SealConfig) -> Vec<SealD
             let excluded = seal_config
                 .excludes
                 .iter()
-                .any(|e| pattern_matches(&e.pattern, &rel));
+                .any(|e| crate::matcher::path_matches_glob(&e.pattern, &rel));
             if excluded {
                 results.push(SealDriftEntry {
                     path: rel,
@@ -1134,7 +1141,7 @@ pub fn check_seal_drift(repo_root: &Path, seal_config: &SealConfig) -> Vec<SealD
             let override_fields: Option<Vec<String>> = seal_config
                 .overrides
                 .iter()
-                .find(|o| pattern_matches(&o.pattern, &rel))
+                .find(|o| crate::matcher::path_matches_glob(&o.pattern, &rel))
                 .map(|o| o.fields.clone());
 
             let entry = check_file_drift(&abs_path, &rel, override_fields.as_deref());
@@ -2327,18 +2334,30 @@ mod tests {
 
     #[test]
     fn test_pattern_matches_exact() {
-        assert!(pattern_matches("config/app.json", "config/app.json"));
+        assert!(crate::matcher::path_matches_glob(
+            "config/app.json",
+            "config/app.json"
+        ));
     }
 
     #[test]
     fn test_pattern_matches_glob_wildcard() {
-        assert!(pattern_matches("config/*.json", "config/app.json"));
-        assert!(!pattern_matches("config/*.json", "other/app.json"));
+        assert!(crate::matcher::path_matches_glob(
+            "config/*.json",
+            "config/app.json"
+        ));
+        assert!(!crate::matcher::path_matches_glob(
+            "config/*.json",
+            "other/app.json"
+        ));
     }
 
     #[test]
     fn test_pattern_matches_no_match() {
-        assert!(!pattern_matches("secrets/*.yaml", "config/app.json"));
+        assert!(!crate::matcher::path_matches_glob(
+            "secrets/*.yaml",
+            "config/app.json"
+        ));
     }
 
     // ── update_seal_config – different-path override ──────────────────────
@@ -2372,7 +2391,7 @@ mod tests {
         std::fs::create_dir_all(&gitvault_dir).unwrap();
 
         // Pre-create config with seal section
-        let existing = "[seal]\npatterns = [\"existing.json\"]\n";
+        let existing = "[[seal.rule]]\naction = \"allow\"\npath = \"existing.json\"\n";
         std::fs::write(gitvault_dir.join("config.toml"), existing).unwrap();
 
         update_seal_config(dir.path(), "new.json", None).unwrap();
@@ -2823,7 +2842,7 @@ mod tests {
         assert_eq!(toml_field_str(&v, &["key"]), Some("value"));
     }
 
-    // ── cmd_seal reads [[seal.override]] fields from config ────────────────
+    // ── cmd_seal reads rule keys from config ───────────────────────────────
 
     #[test]
     fn test_cmd_seal_respects_config_override_fields() {
@@ -2842,12 +2861,12 @@ mod tests {
         std::fs::create_dir_all(&recipients_dir).unwrap();
         std::fs::write(recipients_dir.join("ci.pub"), pub_key).unwrap();
 
-        // Write [[seal.override]] config that restricts sealing to "Password" only
+        // Write rule keys config that restricts sealing to "Password" only
         let gitvault_dir = dir.path().join(".gitvault");
         std::fs::create_dir_all(&gitvault_dir).unwrap();
         std::fs::write(
             gitvault_dir.join("config.toml"),
-            "[seal]\npatterns = [\"conf/dbsecrets.json\"]\n\n[[seal.override]]\npattern = \"conf/dbsecrets.json\"\nfields = [\"Password\"]\n",
+            "[[seal.rule]]\naction = \"allow\"\npath = \"conf/dbsecrets.json\"\nkeys = [\"Password\"]\n",
         )
         .unwrap();
 
@@ -2901,7 +2920,7 @@ mod tests {
         let gitvault_dir = dir.path().join(".gitvault");
         std::fs::create_dir_all(&gitvault_dir).unwrap();
         let config_file = gitvault_dir.join("config.toml");
-        std::fs::write(&config_file, "[seal]\npatterns = []\n").unwrap();
+        std::fs::write(&config_file, "[seal]\n").unwrap();
 
         let err = cmd_seal(SealOptions {
             file: config_file.to_string_lossy().to_string(),

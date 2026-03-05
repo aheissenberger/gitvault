@@ -212,7 +212,7 @@ fn set_sealed(
             cfg.seal
                 .overrides
                 .into_iter()
-                .find(|o| pattern_matches(&o.pattern, &rel_path))
+                .find(|o| crate::matcher::path_matches_glob(&o.pattern, &rel_path))
                 .map(|o| o.fields)
         });
 
@@ -775,13 +775,6 @@ fn relative_path_to_repo(abs_file: &Path, abs_repo: &Path) -> String {
         .ok()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| abs_file.to_string_lossy().into_owned())
-}
-
-/// Match a glob pattern against a repository-relative file path.
-fn pattern_matches(pattern: &str, path: &str) -> bool {
-    glob::Pattern::new(pattern)
-        .map(|p| p.matches(path))
-        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,6 @@ use std::path::Path;
 
 use crate::error::GitvaultError;
 use crate::identity::load_identity_from_source_with_selector;
-use crate::repo::decrypt_env_secrets;
 use crate::{barrier, crypto, fhsm, materialize, run};
 use zeroize::Zeroizing;
 
@@ -13,6 +12,13 @@ use zeroize::Zeroizing;
 pub enum CommandOutcome {
     Success,
     Exit(i32),
+}
+
+/// Scope used when decrypting env secrets so command-specific rule sets can be applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretRuleScope {
+    Run,
+    Materialize,
 }
 
 /// Injectable side-effect executor for [`execute_effects_with`].
@@ -53,6 +59,7 @@ pub trait EffectRunner {
         repo_root: &Path,
         env: &str,
         identity: &dyn age::Identity,
+        scope: SecretRuleScope,
     ) -> Result<Vec<(String, String)>, GitvaultError>;
 
     /// Spawn `command` with `secrets` injected as environment variables.
@@ -89,6 +96,10 @@ pub struct DefaultRunner {
     pub prod_name: String,
     /// Output filename for `gitvault materialize` (from `[paths].materialize_output`).
     pub materialize_output: String,
+    /// Rules for `gitvault materialize` secret selection.
+    pub materialize_rules: Vec<crate::config::MatchRule>,
+    /// Rules for `gitvault run` secret selection.
+    pub run_rules: Vec<crate::config::MatchRule>,
 }
 
 impl DefaultRunner {
@@ -99,6 +110,8 @@ impl DefaultRunner {
             selector: None,
             prod_name: crate::defaults::DEFAULT_PROD_ENV.to_string(),
             materialize_output: crate::defaults::MATERIALIZE_OUTPUT.to_string(),
+            materialize_rules: Vec::new(),
+            run_rules: Vec::new(),
         }
     }
 
@@ -108,11 +121,15 @@ impl DefaultRunner {
         selector: Option<String>,
         prod_name: String,
         materialize_output: String,
+        materialize_rules: Vec<crate::config::MatchRule>,
+        run_rules: Vec<crate::config::MatchRule>,
     ) -> Self {
         Self {
             selector,
             prod_name,
             materialize_output,
+            materialize_rules,
+            run_rules,
         }
     }
 }
@@ -140,8 +157,13 @@ impl EffectRunner for DefaultRunner {
         repo_root: &Path,
         env: &str,
         identity: &dyn age::Identity,
+        scope: SecretRuleScope,
     ) -> Result<Vec<(String, String)>, GitvaultError> {
-        decrypt_env_secrets(repo_root, env, identity)
+        let rules = match scope {
+            SecretRuleScope::Run => Some(self.run_rules.as_slice()),
+            SecretRuleScope::Materialize => Some(self.materialize_rules.as_slice()),
+        };
+        crate::repo::decrypt_env_secrets_with_rules(repo_root, env, identity, rules)
     }
 
     fn run_command(
@@ -195,6 +217,15 @@ pub fn execute_effects_with(
         })
         .unwrap_or(false);
 
+    let decrypt_scope = if effects
+        .iter()
+        .any(|e| matches!(e, fhsm::Effect::RunCommand { .. }))
+    {
+        SecretRuleScope::Run
+    } else {
+        SecretRuleScope::Materialize
+    };
+
     for effect in effects {
         match effect {
             fhsm::Effect::CheckProdBarrier {
@@ -221,7 +252,8 @@ pub fn execute_effects_with(
                     .as_ref()
                     .map(crate::crypto::AnyIdentity::as_identity)
                     .ok_or_else(|| GitvaultError::Usage("identity not resolved".to_string()))?;
-                secrets_opt = Some(runner.decrypt_secrets(repo_root, &env, identity)?);
+                secrets_opt =
+                    Some(runner.decrypt_secrets(repo_root, &env, identity, decrypt_scope)?);
             }
             fhsm::Effect::RunCommand {
                 command,
@@ -289,6 +321,8 @@ pub fn execute_effects(
             selector.map(str::to_owned),
             cfg.env.prod_name().to_string(),
             cfg.paths.materialize_output().to_string(),
+            cfg.materialize.rules,
+            cfg.run.rules,
         ),
     )
 }
@@ -348,6 +382,7 @@ mod tests {
             _repo_root: &Path,
             _env: &str,
             _identity: &dyn age::Identity,
+            _scope: SecretRuleScope,
         ) -> Result<Vec<(String, String)>, GitvaultError> {
             self.decrypt_secrets.clone().map_err(GitvaultError::Other)
         }

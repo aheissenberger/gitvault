@@ -271,10 +271,35 @@ pub fn decrypt_env_secrets(
     env: &str,
     identity: &dyn age::Identity,
 ) -> Result<Vec<(String, String)>, GitvaultError> {
+    decrypt_env_secrets_with_rules(repo_root, env, identity, None)
+}
+
+/// Decrypt all encrypted secrets for the given environment, applying optional
+/// rule-based path/key filtering.
+///
+/// Rules are evaluated in-order with later matches overriding earlier matches.
+/// When a matching allow rule contains `keys`, only keys matching any key glob
+/// from that rule are emitted for that file.
+pub fn decrypt_env_secrets_with_rules(
+    repo_root: &Path,
+    env: &str,
+    identity: &dyn age::Identity,
+    rules: Option<&[crate::config::MatchRule]>,
+) -> Result<Vec<(String, String)>, GitvaultError> {
     let mut secrets: Vec<(String, String)> = Vec::new();
     let encrypted_files = list_encrypted_files_for_env(repo_root, env)?;
 
     for path in encrypted_files {
+        let rel_store_path = path
+            .strip_prefix(repo_root)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+
+        let (include_file, key_filters) = evaluate_rule_filters(&rel_store_path, rules);
+        if !include_file {
+            continue;
+        }
+
         let ciphertext = std::fs::read(&path)?;
         let plaintext = match crypto::decrypt(identity, &ciphertext) {
             Ok(p) => p,
@@ -303,13 +328,16 @@ pub fn decrypt_env_secrets(
 
         match fmt.as_deref() {
             Ok("env") => {
-                secrets.extend(merge::parse_env_pairs(&text)?);
+                let parsed = merge::parse_env_pairs(&text)?;
+                secrets.extend(filter_pairs_by_key_globs(parsed, key_filters.as_deref()));
             }
             Ok("json") => {
                 let val: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
                     GitvaultError::Usage(format!("Invalid JSON in {}: {e}", path.display()))
                 })?;
-                flatten_to_env_pairs(&val, "", &mut secrets);
+                let mut pairs = Vec::new();
+                flatten_to_env_pairs(&val, "", &mut pairs);
+                secrets.extend(filter_pairs_by_key_globs(pairs, key_filters.as_deref()));
             }
             Ok("yaml") | Ok("yml") => {
                 let val: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|e| {
@@ -321,7 +349,9 @@ pub fn decrypt_env_secrets(
                         path.display()
                     ))
                 })?;
-                flatten_to_env_pairs(&json_val, "", &mut secrets);
+                let mut pairs = Vec::new();
+                flatten_to_env_pairs(&json_val, "", &mut pairs);
+                secrets.extend(filter_pairs_by_key_globs(pairs, key_filters.as_deref()));
             }
             Ok("toml") => {
                 let val: toml::Value = toml::from_str(&text).map_err(|e| {
@@ -333,7 +363,9 @@ pub fn decrypt_env_secrets(
                         path.display()
                     ))
                 })?;
-                flatten_to_env_pairs(&json_val, "", &mut secrets);
+                let mut pairs = Vec::new();
+                flatten_to_env_pairs(&json_val, "", &mut pairs);
+                secrets.extend(filter_pairs_by_key_globs(pairs, key_filters.as_deref()));
             }
             _ => {
                 eprintln!(
@@ -345,6 +377,59 @@ pub fn decrypt_env_secrets(
     }
 
     Ok(secrets)
+}
+
+fn evaluate_rule_filters(
+    rel_store_path: &str,
+    rules: Option<&[crate::config::MatchRule]>,
+) -> (bool, Option<Vec<String>>) {
+    let Some(rules) = rules else {
+        return (true, None);
+    };
+    if rules.is_empty() {
+        return (true, None);
+    }
+
+    let mut include = true;
+    let mut key_filters: Option<Vec<String>> = None;
+    for rule in rules {
+        if !crate::matcher::path_matches_glob(&rule.path, rel_store_path) {
+            continue;
+        }
+        match rule.action {
+            crate::config::RuleAction::Allow => {
+                include = true;
+                key_filters = if rule.keys.is_empty() {
+                    None
+                } else {
+                    Some(rule.keys.clone())
+                };
+            }
+            crate::config::RuleAction::Deny => {
+                include = false;
+                key_filters = None;
+            }
+        }
+    }
+
+    (include, key_filters)
+}
+
+fn filter_pairs_by_key_globs(
+    pairs: Vec<(String, String)>,
+    key_globs: Option<&[String]>,
+) -> Vec<(String, String)> {
+    let Some(globs) = key_globs else {
+        return pairs;
+    };
+    if globs.is_empty() {
+        return pairs;
+    }
+
+    pairs
+        .into_iter()
+        .filter(|(k, _)| globs.iter().any(|g| crate::matcher::key_matches_glob(g, k)))
+        .collect()
 }
 
 fn find_repo_root_from_with_runner(
@@ -889,5 +974,113 @@ mod tests {
             pairs.contains(&("B".to_string(), "2".to_string())),
             "missing B: {pairs:?}"
         );
+    }
+
+    #[test]
+    fn test_evaluate_rule_filters_defaults_without_rules() {
+        let (include_file, key_filters) =
+            evaluate_rule_filters(".gitvault/store/dev/app.env.age", None);
+        assert!(include_file);
+        assert!(key_filters.is_none());
+
+        let empty: Vec<crate::config::MatchRule> = Vec::new();
+        let (include_file, key_filters) =
+            evaluate_rule_filters(".gitvault/store/dev/app.env.age", Some(&empty));
+        assert!(include_file);
+        assert!(key_filters.is_none());
+    }
+
+    #[test]
+    fn test_evaluate_rule_filters_allow_with_keys_and_deny() {
+        let rules = vec![
+            crate::config::MatchRule {
+                action: crate::config::RuleAction::Allow,
+                path: ".gitvault/store/dev/*.env.age".to_string(),
+                keys: vec!["FOO".to_string(), "BAR_*".to_string()],
+            },
+            crate::config::MatchRule {
+                action: crate::config::RuleAction::Deny,
+                path: ".gitvault/store/dev/blocked.env.age".to_string(),
+                keys: vec!["IGNORED".to_string()],
+            },
+        ];
+
+        let (include_ok, filters_ok) =
+            evaluate_rule_filters(".gitvault/store/dev/app.env.age", Some(&rules));
+        assert!(include_ok);
+        assert_eq!(
+            filters_ok.unwrap(),
+            vec!["FOO".to_string(), "BAR_*".to_string()]
+        );
+
+        let (include_blocked, filters_blocked) =
+            evaluate_rule_filters(".gitvault/store/dev/blocked.env.age", Some(&rules));
+        assert!(!include_blocked);
+        assert!(filters_blocked.is_none());
+    }
+
+    #[test]
+    fn test_filter_pairs_by_key_globs_applies_matching() {
+        let pairs = vec![
+            ("FOO".to_string(), "1".to_string()),
+            ("BAR_VALUE".to_string(), "2".to_string()),
+            ("BAZ".to_string(), "3".to_string()),
+        ];
+
+        let passthrough_none = filter_pairs_by_key_globs(pairs.clone(), None);
+        assert_eq!(passthrough_none.len(), 3);
+
+        let empty_filters: Vec<String> = Vec::new();
+        let passthrough_empty = filter_pairs_by_key_globs(pairs.clone(), Some(&empty_filters));
+        assert_eq!(passthrough_empty.len(), 3);
+
+        let globs = vec!["FOO".to_string(), "BAR_*".to_string()];
+        let filtered = filter_pairs_by_key_globs(pairs, Some(&globs));
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|(k, v)| k == "FOO" && v == "1"));
+        assert!(filtered.iter().any(|(k, v)| k == "BAR_VALUE" && v == "2"));
+        assert!(!filtered.iter().any(|(k, _)| k == "BAZ"));
+    }
+
+    #[test]
+    fn test_decrypt_env_secrets_with_rules_key_filtering() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let ciphertext = encrypt_content(&identity, b"FOO=one\nBAR=two\n");
+        std::fs::write(secrets_dir.join("app.env.age"), &ciphertext).unwrap();
+
+        let rules = vec![crate::config::MatchRule {
+            action: crate::config::RuleAction::Allow,
+            path: ".gitvault/store/dev/app.env.age".to_string(),
+            keys: vec!["FOO".to_string()],
+        }];
+
+        let pairs =
+            decrypt_env_secrets_with_rules(dir.path(), "dev", &identity, Some(&rules)).unwrap();
+        assert_eq!(pairs, vec![("FOO".to_string(), "one".to_string())]);
+    }
+
+    #[test]
+    fn test_decrypt_env_secrets_with_rules_deny_file() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let ciphertext = encrypt_content(&identity, b"FOO=one\n");
+        std::fs::write(secrets_dir.join("blocked.env.age"), &ciphertext).unwrap();
+
+        let rules = vec![crate::config::MatchRule {
+            action: crate::config::RuleAction::Deny,
+            path: ".gitvault/store/dev/blocked.env.age".to_string(),
+            keys: vec![],
+        }];
+
+        let pairs =
+            decrypt_env_secrets_with_rules(dir.path(), "dev", &identity, Some(&rules)).unwrap();
+        assert!(pairs.is_empty());
     }
 }

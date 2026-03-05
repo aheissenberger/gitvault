@@ -96,9 +96,13 @@ This index is the canonical source for requirement-to-spec traceability.
 - `2026-03-04-engineering-nfr/req-111.md` -> REQ-111: Encrypt all string fields without explicit listing (--all-fields flag) [status: **superseded by REQ-112**]
 
 ## Breaking Change Specs
-- `2026-03-04-engineering-nfr/req-112.md` -> REQ-112: `seal` and `unseal` — In-place field-level encryption commands (supersedes REQ-111; replaces encrypt --fields, --value-only; replaces decrypt --fields, --value-only) [status: proposed]
-- `2026-03-04-engineering-nfr/req-113.md` -> REQ-113: Breaking changes to `encrypt` — path mirroring default, remove --fields / --value-only / --keep-path [status: proposed]
-- `2026-03-04-engineering-nfr/req-114.md` -> REQ-114: Breaking changes to `decrypt` — source-path resolution, remove --fields / --value-only; supersedes REQ-110 auto-discover [status: proposed]
+- `2026-03-04-engineering-nfr/req-112.md` -> REQ-112: `seal` and `unseal` — In-place field-level encryption commands (supersedes REQ-111; replaces encrypt --fields, --value-only; replaces decrypt --fields, --value-only) [status: done]
+- `2026-03-04-engineering-nfr/req-113.md` -> REQ-113: Breaking changes to `encrypt` — path mirroring default, remove --fields / --value-only / --keep-path [status: done]
+- `2026-03-04-engineering-nfr/req-114.md` -> REQ-114: Breaking changes to `decrypt` — source-path resolution, remove --fields / --value-only; supersedes REQ-110 auto-discover [status: done]
+- `2026-03-04-engineering-nfr/req-115.md` -> REQ-115: `gitvault edit` — open sealed or encrypted files in an editor [status: done]
+- `2026-03-04-engineering-nfr/req-116.md` -> REQ-116: `gitvault get` / `gitvault set` — single key-value access for sealed and encrypted files [status: done]
+- `2026-03-04-engineering-nfr/req-117.md` -> REQ-117: `decrypt_env_secrets` multi-format store injection for `gitvault run` [status: archived; superseded by REQ-118]
+- `2026-03-04-engineering-nfr/req-118.md` -> REQ-118: Unified rule engine for `seal`/`materialize`/`run`/`status` [status: done; supersedes REQ-117]
 
 ## Current Verification Status
 cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-69.

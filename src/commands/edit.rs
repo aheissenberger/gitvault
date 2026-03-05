@@ -183,7 +183,7 @@ fn cmd_edit_sealed(
             cfg.seal
                 .overrides
                 .into_iter()
-                .find(|o| pattern_matches(&o.pattern, &rel_path))
+                .find(|o| crate::matcher::path_matches_glob(&o.pattern, &rel_path))
                 .map(|o| o.fields)
         });
     let fields_opt = cli_fields.or(config_fields);
@@ -380,14 +380,6 @@ fn relative_path_to_repo(abs_file: &Path, abs_repo: &Path) -> String {
         .strip_prefix(abs_repo)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| abs_file.to_string_lossy().into_owned())
-}
-
-/// Return whether `path` matches `pattern` (same logic as seal.rs).
-fn pattern_matches(pattern: &str, path: &str) -> bool {
-    // Delegate to the same glob logic used by seal.
-    glob::Pattern::new(pattern)
-        .map(|p| p.matches(path))
-        .unwrap_or(false)
 }
 
 /// Set file permissions to 0o600 on Unix; no-op on other platforms.

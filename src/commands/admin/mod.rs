@@ -1405,7 +1405,7 @@ mod tests {
     // ── Helper ────────────────────────────────────────────────────────────────
 
     /// Write a minimal `.gitvault/config.toml` so that `cmd_status` picks up
-    /// the `[seal]` configuration we want to test.
+    /// the `[seal]` rule configuration we want to test.
     fn write_seal_config(repo_root: &Path, toml: &str) {
         let config_dir = repo_root.join(".gitvault");
         std::fs::create_dir_all(&config_dir).unwrap();
@@ -1425,7 +1425,10 @@ mod tests {
 
         // A file whose value starts with "age:" is considered sealed (Ok).
         std::fs::write(dir.path().join("config.env"), "SECRET=age:YWdl\n").unwrap();
-        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+        write_seal_config(
+            dir.path(),
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\n",
+        );
 
         cmd_status(true, false).expect("cmd_status --json should succeed with sealed file");
     }
@@ -1442,7 +1445,10 @@ mod tests {
 
         // Plaintext value — drift detected.
         std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
-        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+        write_seal_config(
+            dir.path(),
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\n",
+        );
 
         cmd_status(true, false).expect("cmd_status --json should succeed even with drift");
     }
@@ -1459,7 +1465,10 @@ mod tests {
         let _cwd = CwdGuard::enter(dir.path());
 
         std::fs::write(dir.path().join("config.env"), "SECRET=age:YWdl\n").unwrap();
-        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+        write_seal_config(
+            dir.path(),
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\n",
+        );
 
         cmd_status(false, false).expect("cmd_status should succeed with sealed file");
     }
@@ -1476,7 +1485,10 @@ mod tests {
 
         // Plaintext value — no age: prefix → drift.
         std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
-        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+        write_seal_config(
+            dir.path(),
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\n",
+        );
 
         // fail_if_dirty=false → should succeed even with drift.
         cmd_status(false, false)
@@ -1495,13 +1507,13 @@ mod tests {
         std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
         write_seal_config(
             dir.path(),
-            "[seal]\npatterns = [\"config.env\"]\n\n[[seal.exclude]]\npattern = \"config.env\"\n",
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\n\n[[seal.rule]]\naction = \"deny\"\npath = \"config.env\"\n",
         );
 
         cmd_status(false, false).expect("cmd_status should succeed with an excluded seal entry");
     }
 
-    /// `cmd_status` (plain text) with a `[[seal.override]]` entry shows the
+    /// `cmd_status` (plain text) with a rule keys entry shows the
     /// "(N/N fields sealed)" detail when `total_count > 0`.
     /// Covers the `total_count > 0` branch inside the Ok arm.
     #[test]
@@ -1515,7 +1527,7 @@ mod tests {
         std::fs::write(dir.path().join("config.env"), "SECRET=age:YWdl\n").unwrap();
         write_seal_config(
             dir.path(),
-            "[seal]\npatterns = [\"config.env\"]\n\n[[seal.override]]\npattern = \"config.env\"\nfields = [\"SECRET\"]\n",
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\nkeys = [\"SECRET\"]\n",
         );
 
         cmd_status(false, false).expect("cmd_status should succeed with override ok entry");
@@ -1533,7 +1545,10 @@ mod tests {
 
         // Plaintext value → drift.
         std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
-        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+        write_seal_config(
+            dir.path(),
+            "[[seal.rule]]\naction = \"allow\"\npath = \"config.env\"\n",
+        );
 
         let err = cmd_status(false, true).unwrap_err();
         assert!(
