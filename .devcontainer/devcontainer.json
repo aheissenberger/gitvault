@@ -16,7 +16,9 @@
   "containerEnv": {
     "CARGO_HOME": "/home/vscode/.cargo",
     "RUSTUP_HOME": "/home/vscode/.rustup",
-    "CARGO_TARGET_DIR": "/workspaces/.cargo-target"
+    "CARGO_TARGET_DIR": "/workspaces/.cargo-target",
+    "EDITOR": "code -w",
+    "VISUAL": "code -w"
   },
   "mounts": [
     "source=rust-cargo-registry,target=/home/vscode/.cargo/registry,type=volume",
