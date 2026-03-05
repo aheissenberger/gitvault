@@ -238,6 +238,7 @@ Notes:
 ### `materialize`
 
 ```bash
+gitvault materialize [OPTIONS]
 ```
 
 | Flag | Description |
@@ -245,6 +246,22 @@ Notes:
 | `-e, --env <ENV>` | Environment to use |
 | `-i, --identity <IDENTITY>` | Identity key file path |
 | `--prod` | Require production barrier for prod env |
+
+Behavior:
+- Decrypts store files for the selected environment and writes merged values to
+  `[paths].materialize_output` (default: `.env`).
+- Supports multi-format store sources (`.env.age`, `.json.age`, `.yaml/.yml.age`, `.toml.age`).
+- Fails if decryption fails or secret content is invalid for its detected format.
+
+Examples:
+
+```bash
+# Default output (.env)
+gitvault materialize --env dev
+
+# CI-style identity injection without writing key to environment
+GITVAULT_IDENTITY_FD=3 gitvault materialize --no-prompt --env prod 3<<<"$SECRET_KEY"
+```
 
 ### `status`
 
@@ -295,6 +312,21 @@ gitvault run [OPTIONS] -- <COMMAND>...
 | `--prod` | Require production barrier |
 | `--clear-env` | Start child with empty environment |
 | `--keep-vars <VARS>` | Comma-separated env vars to pass through when `--clear-env` is set |
+
+Behavior:
+- Decrypts secrets for the selected environment and injects them into the child process env.
+- Does not write plaintext files to disk.
+- Uses the same multi-format store parsing as `materialize`.
+
+Examples:
+
+```bash
+# Inject secrets into a process while keeping inherited env vars
+gitvault run --env dev -- node server.js
+
+# Strict environment with selected pass-through vars
+gitvault run --env prod --clear-env --keep-vars PATH,HOME -- ./bin/service
+```
 
 ### `allow-prod` / `revoke-prod`
 
@@ -483,48 +515,40 @@ service = "my-gitvault"
 account = "identity-key"
 ```
 
-### `[seal]`
+### Rule-based command filtering (`[[seal.rule]]`, `[[materialize.rule]]`, `[[run.rule]]`)
 
-Per-field encryption configuration for structured files (JSON/YAML/TOML/.env).
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `patterns` | array of strings | `[]` | Glob patterns of files whose string fields should be sealed |
-
-**Example:**
-```toml
-[seal]
-patterns = ["config/*.json", "secrets/*.yaml"]
-```
-
-**Field-specific overrides** (`[[seal.override]]`):
-
-Restrict sealing to specific dot-path fields for matching files.
+Matcher rules are defined as array-of-table entries with `action`, `path`, and optional `keys`.
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `pattern` | string | File glob pattern |
-| `fields` | array of strings | Dot-path field names to seal |
+| `action` | string | `allow` or `deny` |
+| `path` | string | Repo-relative glob path to match |
+| `keys` | array of strings | Optional key globs (applies to `allow` rules) |
+
+Notes:
+- Rules are evaluated in file order; later matches override earlier matches.
+- `keys` filters emitted key/value pairs for matching files.
+- Unknown keys in rule entries fail config parsing.
 
 **Example:**
 ```toml
-[[seal.override]]
-pattern = "config/db.json"
-fields = ["password", "connection.secret"]
-```
+[[seal.rule]]
+action = "allow"
+path = "conf/*.json"
+keys = ["Password", "db.*"]
 
-**Drift detection exclusions** (`[[seal.exclude]]`):
+[[seal.rule]]
+action = "deny"
+path = "conf/public.json"
 
-Exclude files from drift detection in `gitvault check`.
+[[materialize.rule]]
+action = "allow"
+path = ".gitvault/store/dev/*.env.age"
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `pattern` | string | File glob pattern to exclude |
-
-**Example:**
-```toml
-[[seal.exclude]]
-pattern = "config/generated-*.json"
+[[run.rule]]
+action = "allow"
+path = ".gitvault/store/dev/conf/*.json.age"
+keys = ["DATABASE_*", "REDIS_*"]
 ```
 
 ### `[editor]`
@@ -563,15 +587,23 @@ store_dir = ".gitvault/store"
 service = "gitvault"
 account = "age-identity"
 
-[seal]
-patterns = ["config/*.json", "secrets/*.yaml"]
+[[seal.rule]]
+action = "allow"
+path = "config/*.json"
+keys = ["password", "api_key"]
 
-[[seal.override]]
-pattern = "config/db.json"
-fields = ["password", "api_key"]
+[[seal.rule]]
+action = "deny"
+path = "config/test-*.json"
 
-[[seal.exclude]]
-pattern = "config/test-*.json"
+[[materialize.rule]]
+action = "allow"
+path = ".gitvault/store/dev/*.env.age"
+
+[[run.rule]]
+action = "allow"
+path = ".gitvault/store/dev/conf/*.json.age"
+keys = ["DATABASE_*", "REDIS_*"]
 
 [editor]
 command = "vim"

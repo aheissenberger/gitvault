@@ -178,6 +178,12 @@ Commands:
 
 ---
 
+Detailed `materialize` and `run` behavior, examples, and rule-based filtering are documented in
+[docs/reference.md](docs/reference.md#materialize) and
+[docs/reference.md](docs/reference.md#run).
+
+---
+
 ## Configuration
 
 Precedence (highest → lowest): CLI flag → `GITVAULT_*` env var → `.gitvault/config.toml` → `~/.config/gitvault/config.toml` → built-in default.
