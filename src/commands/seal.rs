@@ -246,7 +246,7 @@ pub(crate) fn validated_extension(path: &Path) -> Result<String, GitvaultError> 
         ));
     }
 
-    // .env or .env.<suffix>
+    // .env, .env.<suffix>, or <name>.env
     if name == ".env" || name.starts_with(".env.") {
         return Ok("env".to_string());
     }
@@ -259,9 +259,10 @@ pub(crate) fn validated_extension(path: &Path) -> Result<String, GitvaultError> 
 
     match ext.as_str() {
         "json" | "yaml" | "yml" | "toml" => Ok(ext),
+        "env" => Ok("env".to_string()),
         _ => Err(GitvaultError::Usage(format!(
             "unsupported file format '.{ext}'. \
-             seal/unseal supports: .json, .yaml, .yml, .toml, .env, .env.<suffix>"
+             seal/unseal supports: .json, .yaml, .yml, .toml, .env, .env.<suffix>, <name>.env"
         ))),
     }
 }
@@ -1397,6 +1398,11 @@ mod tests {
         );
         assert_eq!(
             validated_extension(std::path::Path::new(".env.prod")).unwrap(),
+            "env"
+        );
+        // <name>.env pattern (e.g. development.env)
+        assert_eq!(
+            validated_extension(std::path::Path::new("development.env")).unwrap(),
             "env"
         );
     }

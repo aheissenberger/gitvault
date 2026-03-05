@@ -727,19 +727,19 @@ fn resolve_age_path(
     }
 }
 
-/// Determine the plaintext format from the `.age` file's stem extension.
+/// Determine the plaintext format from the `.age` file's stem.
 ///
-/// E.g. `secrets.json.age` → `json`, `config.yaml.age` → `yaml`.
+/// Strips the `.age` suffix and delegates to [`validated_extension`] so that
+/// the same detection rules apply for both sealed files and store files.
 fn stem_extension(age_path: &Path) -> Result<String, GitvaultError> {
     let stem = age_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let stem_path = Path::new(stem);
-    match stem_path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => Ok(ext.to_string()),
-        None => Err(GitvaultError::Usage(format!(
-            "cannot determine file format from '{}'  — expected a name like 'config.json.age'",
+    validated_extension(Path::new(stem)).map_err(|_| {
+        GitvaultError::Usage(format!(
+            "cannot determine file format from '{}' — expected a name like 'config.json.age', \
+             'development.env.age', or '.env.staging.age'",
             age_path.display()
-        ))),
-    }
+        ))
+    })
 }
 
 /// Load the age identity for decryption.
@@ -991,6 +991,31 @@ mod tests {
     fn test_stem_extension_yaml() {
         let p = Path::new("config.yaml.age");
         assert_eq!(stem_extension(p).unwrap(), "yaml");
+    }
+
+    #[test]
+    fn test_stem_extension_dotenv_age() {
+        // .env.age → stem ".env" → env format
+        assert_eq!(stem_extension(Path::new(".env.age")).unwrap(), "env");
+    }
+
+    #[test]
+    fn test_stem_extension_dotenv_suffix_age() {
+        // .env.staging.age → stem ".env.staging" → env format
+        assert_eq!(
+            stem_extension(Path::new(".env.staging.age")).unwrap(),
+            "env"
+        );
+        assert_eq!(stem_extension(Path::new(".env.local.age")).unwrap(), "env");
+    }
+
+    #[test]
+    fn test_stem_extension_name_dotenv_age() {
+        // development.env.age → stem "development.env" → env format
+        assert_eq!(
+            stem_extension(Path::new("development.env.age")).unwrap(),
+            "env"
+        );
     }
 
     #[test]
