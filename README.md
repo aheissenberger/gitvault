@@ -1,8 +1,18 @@
 # gitvault
 
+<img src="docs/assets/logo-gitvault.svg" width="200">
+
 Git-native secrets manager for multi-developer and AI-agent workflows. Secrets are encrypted with
 [age](https://age-encryption.org) and stored in your repository — never plaintext, no external
 services required.
+
+<p align="center">
+
+![Release](https://img.shields.io/github/v/release/aheissenberger/gitvault)
+![Rust](https://img.shields.io/badge/rust-stable-orange)
+
+</p>
+
 
 ## Features
 
