@@ -110,31 +110,123 @@ pub fn cmd_seal(opts: SealOptions) -> Result<CommandOutcome, GitvaultError> {
     // Read content
     let content = std::fs::read_to_string(&file_path)
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
+    let encrypted_before = count_encrypted_values(&content, &ext, fields_opt.as_deref());
 
     // Seal content
     let new_content = seal_content(&content, &ext, fields_opt.as_deref(), &recipient_keys)?;
 
     // Write back
     atomic_write(&file_path, new_content.as_bytes())?;
+    let encrypted_after = count_encrypted_values(&new_content, &ext, fields_opt.as_deref());
+    let newly_encrypted = encrypted_after.saturating_sub(encrypted_before);
 
     // AC11: Update config.toml
     let fields_for_config = fields_opt.as_deref();
     match update_seal_config(&repo_root, &rel_path, fields_for_config) {
         Ok(()) => {}
         Err(e) => {
-            // Config update failure: warn to stderr but don't roll back
-            eprintln!(
-                "gitvault: warning: could not update .gitvault/config.toml: {e}\n\
-                 Add manually:\n\
-                 [[seal.rule]]\n\
-                 action = \"allow\"\n\
-                 path = \"{rel_path}\""
-            );
+            return Err(GitvaultError::Usage(format!(
+                "failed to update .gitvault/config.toml: {e}\n{}",
+                manual_rule_fragment(&rel_path, fields_for_config)
+            )));
         }
     }
 
-    crate::output::output_success(&format!("Sealed: {}", file_path.display()), opts.json);
+    let seal_msg = seal_success_message(
+        &file_path.display().to_string(),
+        newly_encrypted,
+        encrypted_after,
+    );
+    crate::output::output_success(&seal_msg, opts.json);
     Ok(CommandOutcome::Success)
+}
+
+fn manual_rule_fragment(rel_path: &str, fields: Option<&[String]>) -> String {
+    match fields {
+        Some(list) if !list.is_empty() => {
+            let rendered = list
+                .iter()
+                .map(|f| format!("\"{f}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Add manually:\n[[seal.rule]]\naction = \"allow\"\npath = \"{rel_path}\"\nkeys = [{rendered}]"
+            )
+        }
+        _ => {
+            format!("Add manually:\n[[seal.rule]]\naction = \"allow\"\npath = \"{rel_path}\"")
+        }
+    }
+}
+
+fn seal_success_message(file: &str, newly_encrypted: usize, total_encrypted: usize) -> String {
+    if newly_encrypted > 0 {
+        return format!("Sealed {newly_encrypted} field(s) in {file}");
+    }
+    format!("All {total_encrypted} field(s) already sealed in {file}")
+}
+
+fn count_encrypted_values(content: &str, ext: &str, fields: Option<&[String]>) -> usize {
+    match fields {
+        Some(field_list) => count_sealed_fields(content, ext, field_list),
+        None => count_all_encrypted_values(content, ext),
+    }
+}
+
+fn count_all_encrypted_values(content: &str, ext: &str) -> usize {
+    match ext {
+        "json" => {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+                return 0;
+            };
+            count_encrypted_json(&value)
+        }
+        "yaml" | "yml" => {
+            let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
+                return 0;
+            };
+            count_encrypted_yaml(&value)
+        }
+        "toml" => {
+            let Ok(value) = content.parse::<toml::Value>() else {
+                return 0;
+            };
+            count_encrypted_toml(&value)
+        }
+        "env" => content
+            .lines()
+            .filter_map(parse_env_pair)
+            .filter(|(_, value)| is_env_encrypted(value))
+            .count(),
+        _ => 0,
+    }
+}
+
+fn count_encrypted_json(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::String(s) => usize::from(is_age_armor(s)),
+        serde_json::Value::Object(map) => map.values().map(count_encrypted_json).sum(),
+        serde_json::Value::Array(_) => 0,
+        _ => 0,
+    }
+}
+
+fn count_encrypted_yaml(value: &serde_yaml::Value) -> usize {
+    match value {
+        serde_yaml::Value::String(s) => usize::from(is_age_armor(s)),
+        serde_yaml::Value::Mapping(map) => map.values().map(count_encrypted_yaml).sum(),
+        serde_yaml::Value::Sequence(_) => 0,
+        _ => 0,
+    }
+}
+
+fn count_encrypted_toml(value: &toml::Value) -> usize {
+    match value {
+        toml::Value::String(s) => usize::from(is_age_armor(s)),
+        toml::Value::Table(map) => map.values().map(count_encrypted_toml).sum(),
+        toml::Value::Array(_) => 0,
+        _ => 0,
+    }
 }
 
 /// `gitvault unseal <FILE>` — decrypt encrypted values in-place or to stdout (REQ-112 AC6–AC8).
@@ -2529,6 +2621,27 @@ mod tests {
     #[test]
     fn test_has_any_encrypted_value_unknown_ext_false() {
         assert!(!has_any_encrypted_value("data", "xml"));
+    }
+
+    #[test]
+    fn test_seal_success_message_newly_encrypted() {
+        let msg = seal_success_message("conf/dbsecrets.json", 2, 3);
+        assert_eq!(msg, "Sealed 2 field(s) in conf/dbsecrets.json");
+    }
+
+    #[test]
+    fn test_seal_success_message_all_already_sealed() {
+        let msg = seal_success_message("conf/dbsecrets.json", 0, 1);
+        assert_eq!(msg, "All 1 field(s) already sealed in conf/dbsecrets.json");
+    }
+
+    #[test]
+    fn test_count_all_encrypted_values_json_skips_arrays() {
+        let id = gen_identity();
+        let keys = recipient_keys(&id);
+        let sealed = seal_json(r#"{"a":"x","arr":["y"]}"#, None, &keys).unwrap();
+        let count = count_all_encrypted_values(&sealed, "json");
+        assert_eq!(count, 1);
     }
 
     // ── check_seal_drift – override fields ────────────────────────────────
