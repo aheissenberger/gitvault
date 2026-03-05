@@ -829,7 +829,10 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
         let enc = super::super::armor::encrypt_armor(b"secret", &keys).unwrap();
-        let json = format!(r#"{{"name":"app","api_key":{}}}"#, serde_json::to_string(&enc).unwrap());
+        let json = format!(
+            r#"{{"name":"app","api_key":{}}}"#,
+            serde_json::to_string(&enc).unwrap()
+        );
         let paths = collect_encrypted_field_paths(&json, "json").unwrap();
         assert_eq!(paths, vec!["api_key"]);
     }
@@ -859,7 +862,10 @@ mod tests {
         let identity = gen_identity();
         let keys = identity_to_recipient_keys(&identity);
         let enc = super::super::armor::encrypt_armor(b"tok", &keys).unwrap();
-        let yaml = format!("token: |\n  {}\nenv: prod\n", enc.trim().replace('\n', "\n  "));
+        let yaml = format!(
+            "token: |\n  {}\nenv: prod\n",
+            enc.trim().replace('\n', "\n  ")
+        );
         let paths = collect_encrypted_field_paths(&yaml, "yaml").unwrap();
         assert!(paths.contains(&"token".to_string()), "got: {paths:?}");
     }
@@ -921,8 +927,8 @@ mod tests {
 
         let wrong_identity = gen_identity();
         // skip_undecryptable=false → must return an error
-        let err = decrypt_fields_content(&json, "json", &["key"], &wrong_identity, false)
-            .unwrap_err();
+        let err =
+            decrypt_fields_content(&json, "json", &["key"], &wrong_identity, false).unwrap_err();
         assert!(err.to_string().contains("Decrypt"), "got: {err}");
     }
 }

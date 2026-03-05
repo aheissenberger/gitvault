@@ -322,3 +322,433 @@ pub async fn cmd_ssm_push(
     let client = aws.build_client().await?;
     cmd_ssm_push_with(repo_root, env, &RealSsmBackend(client), &app, json).await
 }
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::ssm::backend::MockSsmBackend;
+    use crate::ssm::refs::{refs_file_path, save_refs};
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// Read the refs JSON from disk and return it as a `HashMap`.
+    fn read_refs(dir: &TempDir, env: &str) -> HashMap<String, String> {
+        let path = refs_file_path(dir.path(), env);
+        let text = std::fs::read_to_string(&path).expect("refs file should exist");
+        serde_json::from_str(&text).expect("refs file should be valid JSON")
+    }
+
+    // ── cmd_ssm_pull_with ────────────────────────────────────────────────────
+
+    /// REQ-28: happy path — backend returns params, refs file is written with
+    /// correct key → SSM-path mapping.
+    #[tokio::test]
+    async fn pull_happy_path_creates_refs_file() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| {
+            Ok(vec![
+                (
+                    "/myapp/dev/DB_URL".to_string(),
+                    "postgres://localhost".to_string(),
+                ),
+                ("/myapp/dev/API_KEY".to_string(), "secret123".to_string()),
+            ])
+        });
+
+        cmd_ssm_pull_with(dir.path(), "dev", &mock, "myapp", false)
+            .await
+            .unwrap();
+
+        let refs = read_refs(&dir, "dev");
+        assert_eq!(
+            refs.get("DB_URL"),
+            Some(&"/myapp/dev/DB_URL".to_string()),
+            "DB_URL should map to its SSM path"
+        );
+        assert_eq!(
+            refs.get("API_KEY"),
+            Some(&"/myapp/dev/API_KEY".to_string()),
+            "API_KEY should map to its SSM path"
+        );
+        assert_eq!(refs.len(), 2);
+    }
+
+    /// Empty parameter list → refs file is still written but contains an empty
+    /// object, which is a valid JSON map.
+    #[tokio::test]
+    async fn pull_empty_params_creates_empty_refs_file() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| Ok(vec![]));
+
+        cmd_ssm_pull_with(dir.path(), "dev", &mock, "myapp", false)
+            .await
+            .unwrap();
+
+        let refs = read_refs(&dir, "dev");
+        assert!(refs.is_empty(), "refs map should be empty");
+    }
+
+    /// JSON output mode must not error (output goes to stdout, not captured
+    /// here, but the function must return `Ok`).
+    #[tokio::test]
+    async fn pull_json_mode_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params()
+            .returning(|_| Ok(vec![("/myapp/dev/FOO".to_string(), "bar".to_string())]));
+
+        cmd_ssm_pull_with(dir.path(), "dev", &mock, "myapp", true)
+            .await
+            .unwrap();
+    }
+
+    /// A single-param result still produces a properly populated refs file.
+    #[tokio::test]
+    async fn pull_single_param_recorded() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| {
+            Ok(vec![(
+                "/app/staging/SECRET".to_string(),
+                "value".to_string(),
+            )])
+        });
+
+        cmd_ssm_pull_with(dir.path(), "staging", &mock, "app", false)
+            .await
+            .unwrap();
+
+        let refs = read_refs(&dir, "staging");
+        assert_eq!(refs.get("SECRET"), Some(&"/app/staging/SECRET".to_string()));
+    }
+
+    /// Backend error must be propagated to the caller unchanged.
+    #[tokio::test]
+    async fn pull_backend_error_propagates() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params()
+            .returning(|_| Err(GitvaultError::Other("SSM unavailable".to_string())));
+
+        let result = cmd_ssm_pull_with(dir.path(), "dev", &mock, "myapp", false).await;
+        assert!(result.is_err(), "expected an error");
+    }
+
+    // ── cmd_ssm_diff_with ────────────────────────────────────────────────────
+
+    /// No local refs file → all SSM params appear as additions (should succeed
+    /// without panicking).
+    #[tokio::test]
+    async fn diff_no_existing_refs_shows_all_as_new() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| {
+            Ok(vec![(
+                "/myapp/dev/DB_URL".to_string(),
+                "postgres://localhost".to_string(),
+            )])
+        });
+
+        cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, false)
+            .await
+            .unwrap();
+    }
+
+    /// Both local refs and SSM contain the same key → in-sync state, no panic.
+    #[tokio::test]
+    async fn diff_in_sync_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut refs = HashMap::new();
+        refs.insert("DB_URL".to_string(), "/myapp/dev/DB_URL".to_string());
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
+
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| {
+            Ok(vec![(
+                "/myapp/dev/DB_URL".to_string(),
+                "postgres://localhost".to_string(),
+            )])
+        });
+
+        cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, false)
+            .await
+            .unwrap();
+    }
+
+    /// Key exists in local refs but not in SSM → shown as a removal.
+    #[tokio::test]
+    async fn diff_local_only_key_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut refs = HashMap::new();
+        refs.insert("ORPHAN".to_string(), "/myapp/dev/ORPHAN".to_string());
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
+
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| Ok(vec![]));
+
+        cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, false)
+            .await
+            .unwrap();
+    }
+
+    /// JSON output mode with mixed diff state must not error.
+    #[tokio::test]
+    async fn diff_json_mode_succeeds() {
+        let dir = TempDir::new().unwrap();
+        // A key only in SSM
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params()
+            .returning(|_| Ok(vec![("/myapp/dev/ONLY_SSM".to_string(), "val".to_string())]));
+
+        cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, true)
+            .await
+            .unwrap();
+    }
+
+    /// Reveal mode must not error even when values would be printed.
+    #[tokio::test]
+    async fn diff_reveal_mode_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params().returning(|_| {
+            Ok(vec![(
+                "/myapp/dev/SECRET".to_string(),
+                "actual-secret-value".to_string(),
+            )])
+        });
+
+        cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", true, false)
+            .await
+            .unwrap();
+    }
+
+    /// Backend error must propagate.
+    #[tokio::test]
+    async fn diff_backend_error_propagates() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_fetch_params()
+            .returning(|_| Err(GitvaultError::Other("SSM error".to_string())));
+
+        let result = cmd_ssm_diff_with(dir.path(), "dev", &mock, "myapp", false, false).await;
+        assert!(result.is_err());
+    }
+
+    // ── cmd_ssm_set_with ─────────────────────────────────────────────────────
+
+    /// Happy path: `put_param` is invoked with the correct SSM path and value,
+    /// and the key→path mapping is persisted in the refs file.
+    #[tokio::test]
+    async fn set_happy_path_calls_put_and_writes_refs() {
+        use mockall::predicate::eq;
+
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param()
+            .with(eq("/myapp/dev/MY_KEY"), eq("myvalue"))
+            .once()
+            .returning(|_, _| Ok(()));
+
+        cmd_ssm_set_with(
+            dir.path(),
+            "dev",
+            "MY_KEY",
+            "myvalue",
+            &mock,
+            "myapp",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let refs = read_refs(&dir, "dev");
+        assert_eq!(
+            refs.get("MY_KEY"),
+            Some(&"/myapp/dev/MY_KEY".to_string()),
+            "MY_KEY should be recorded in refs"
+        );
+    }
+
+    /// `set` with JSON output mode must not error.
+    #[tokio::test]
+    async fn set_json_mode_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param().returning(|_, _| Ok(()));
+
+        cmd_ssm_set_with(dir.path(), "dev", "KEY", "val", &mock, "myapp", true)
+            .await
+            .unwrap();
+    }
+
+    /// `set` appends to existing refs instead of overwriting them.
+    #[tokio::test]
+    async fn set_appends_to_existing_refs() {
+        let dir = TempDir::new().unwrap();
+
+        // Pre-populate refs with one key.
+        let mut existing = HashMap::new();
+        existing.insert("OLD_KEY".to_string(), "/myapp/dev/OLD_KEY".to_string());
+        save_refs(dir.path(), "dev", &existing).await.unwrap();
+
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param().returning(|_, _| Ok(()));
+
+        cmd_ssm_set_with(
+            dir.path(),
+            "dev",
+            "NEW_KEY",
+            "newval",
+            &mock,
+            "myapp",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let refs = read_refs(&dir, "dev");
+        assert!(refs.contains_key("OLD_KEY"), "OLD_KEY must be preserved");
+        assert!(refs.contains_key("NEW_KEY"), "NEW_KEY must be added");
+    }
+
+    /// Backend error from `put_param` must propagate.
+    #[tokio::test]
+    async fn set_backend_error_propagates() {
+        let dir = TempDir::new().unwrap();
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param()
+            .returning(|_, _| Err(GitvaultError::Other("SSM put error".to_string())));
+
+        let result = cmd_ssm_set_with(dir.path(), "dev", "K", "v", &mock, "myapp", false).await;
+        assert!(result.is_err());
+    }
+
+    // ── cmd_ssm_push_with ────────────────────────────────────────────────────
+
+    /// No local refs file → returns an error explaining that pull must be run
+    /// first.
+    #[tokio::test]
+    async fn push_no_refs_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let mock = MockSsmBackend::new();
+
+        let result = cmd_ssm_push_with(dir.path(), "dev", &mock, "myapp", false).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("No local SSM references"),
+            "error should mention missing references"
+        );
+    }
+
+    /// Happy path: env var is set → `put_param` is called with the correct
+    /// arguments and the command returns `Ok`.
+    #[tokio::test]
+    async fn push_happy_path_calls_put_param() {
+        use mockall::predicate::eq;
+
+        let dir = TempDir::new().unwrap();
+        let mut refs = HashMap::new();
+        // Use a sufficiently unique name to avoid clashing with parallel tests.
+        refs.insert(
+            "GITVAULT_TEST_PUSH_HAPPY_VAR".to_string(),
+            "/myapp/dev/GITVAULT_TEST_PUSH_HAPPY_VAR".to_string(),
+        );
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
+
+        // SAFETY: test-only; not parallel with anything that reads this var.
+        unsafe { std::env::set_var("GITVAULT_TEST_PUSH_HAPPY_VAR", "push_value") };
+
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param()
+            .with(
+                eq("/myapp/dev/GITVAULT_TEST_PUSH_HAPPY_VAR"),
+                eq("push_value"),
+            )
+            .once()
+            .returning(|_, _| Ok(()));
+
+        let result = cmd_ssm_push_with(dir.path(), "dev", &mock, "myapp", false).await;
+
+        // Clean up before asserting so we don't leak the var on failure.
+        unsafe { std::env::remove_var("GITVAULT_TEST_PUSH_HAPPY_VAR") };
+
+        result.unwrap();
+    }
+
+    /// Missing env var → `push` skips the parameter and returns an error
+    /// explaining that vars were not set.
+    #[tokio::test]
+    async fn push_missing_env_var_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let mut refs = HashMap::new();
+        refs.insert(
+            "GITVAULT_TEST_PUSH_MISSING_VAR_XYZ".to_string(),
+            "/myapp/dev/GITVAULT_TEST_PUSH_MISSING_VAR_XYZ".to_string(),
+        );
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
+
+        // Ensure the var is absent.
+        unsafe { std::env::remove_var("GITVAULT_TEST_PUSH_MISSING_VAR_XYZ") };
+
+        let mock = MockSsmBackend::new();
+
+        let result = cmd_ssm_push_with(dir.path(), "dev", &mock, "myapp", false).await;
+        assert!(result.is_err(), "expected an error for missing env var");
+    }
+
+    /// JSON output mode with all vars present must not error.
+    #[tokio::test]
+    async fn push_json_mode_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let mut refs = HashMap::new();
+        refs.insert(
+            "GITVAULT_TEST_PUSH_JSON_VAR".to_string(),
+            "/myapp/dev/GITVAULT_TEST_PUSH_JSON_VAR".to_string(),
+        );
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
+
+        unsafe { std::env::set_var("GITVAULT_TEST_PUSH_JSON_VAR", "hello") };
+
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param().returning(|_, _| Ok(()));
+
+        let result = cmd_ssm_push_with(dir.path(), "dev", &mock, "myapp", true).await;
+
+        unsafe { std::env::remove_var("GITVAULT_TEST_PUSH_JSON_VAR") };
+
+        result.unwrap();
+    }
+
+    /// Backend `put_param` error during push must propagate.
+    #[tokio::test]
+    async fn push_backend_error_propagates() {
+        let dir = TempDir::new().unwrap();
+        let mut refs = HashMap::new();
+        refs.insert(
+            "GITVAULT_TEST_PUSH_ERR_VAR".to_string(),
+            "/myapp/dev/GITVAULT_TEST_PUSH_ERR_VAR".to_string(),
+        );
+        save_refs(dir.path(), "dev", &refs).await.unwrap();
+
+        unsafe { std::env::set_var("GITVAULT_TEST_PUSH_ERR_VAR", "value") };
+
+        let mut mock = MockSsmBackend::new();
+        mock.expect_put_param()
+            .returning(|_, _| Err(GitvaultError::Other("SSM put failure".to_string())));
+
+        let result = cmd_ssm_push_with(dir.path(), "dev", &mock, "myapp", false).await;
+
+        unsafe { std::env::remove_var("GITVAULT_TEST_PUSH_ERR_VAR") };
+
+        assert!(result.is_err());
+    }
+}

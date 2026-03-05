@@ -100,7 +100,7 @@ fn encrypt_decrypt_and_materialize_roundtrip() {
 }
 
 #[test]
-fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
+fn encrypt_and_decrypt_materialises_to_plain_base_dir_multi_subdirs() {
     let repo = TempDir::new().unwrap();
     init_git_repo(repo.path());
     let (_identity_tmp, identity_path, pubkey) = write_identity_file();
@@ -116,7 +116,6 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
             "apps/payments/api/config/service.env",
             "--recipient",
             &pubkey,
-            "--keep-path",
         ])
         .env("GITVAULT_IDENTITY", &identity_path)
         .env("GITVAULT_ENV", "dev")
@@ -132,10 +131,7 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
     let enc_path = repo
         .path()
         .join(".gitvault/store/dev/apps/payments/api/config/service.env.age");
-    assert!(enc_path.exists(), "expected keep-path encrypted artifact");
-
-    std::fs::remove_file(&plain).unwrap();
-    std::fs::remove_dir_all(repo.path().join("apps")).unwrap();
+    assert!(enc_path.exists(), "expected mirrored encrypted artifact");
 
     let decrypt = bin()
         .args([
@@ -143,7 +139,6 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
             ".gitvault/store/dev/apps/payments/api/config/service.env.age",
             "--identity",
             &identity_path,
-            "--output",
         ])
         .current_dir(repo.path())
         .output()
@@ -154,9 +149,16 @@ fn encrypt_keep_path_and_decrypt_bare_output_roundtrip_multi_subdirs() {
         String::from_utf8_lossy(&decrypt.stderr)
     );
 
-    let restored = repo.path().join("apps/payments/api/config/service.env");
-    assert!(restored.exists(), "expected restored plaintext path");
-    let content = std::fs::read_to_string(restored).unwrap();
+    // AC10/AC6: materialised path is <PLAIN_BASE_DIR>/dev/apps/payments/api/config/service.env
+    let materialised = repo
+        .path()
+        .join(".git/gitvault/plain/dev/apps/payments/api/config/service.env");
+    assert!(
+        materialised.exists(),
+        "expected materialised file at {}",
+        materialised.display()
+    );
+    let content = std::fs::read_to_string(materialised).unwrap();
     assert!(content.contains("API_KEY=nested-123"));
 }
 

@@ -1993,4 +1993,500 @@ mod tests {
         assert_eq!(sanitize_comment_for_filename("key\0name"), None);
         assert_eq!(sanitize_comment_for_filename("\0"), None);
     }
+
+    // ─── load_identity_from_fd (Unix) ─────────────────────────────────────────
+
+    /// Helper: open a temp file as a raw FD that `load_identity_from_fd` can consume.
+    /// The NamedTempFile must remain alive for the duration of the test so the file
+    /// is not deleted before the FD is read.
+    #[cfg(unix)]
+    fn make_fd_from_content(content: &str) -> (u32, tempfile::NamedTempFile) {
+        use std::io::{Seek, SeekFrom, Write};
+        use std::os::unix::io::IntoRawFd;
+
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f.flush().unwrap();
+        // Seek the file back to the start so the clone reads from the beginning.
+        f.seek(SeekFrom::Start(0)).unwrap();
+        // Duplicate the file descriptor.  `from_raw_fd` inside `load_identity_from_fd`
+        // will take ownership of the clone FD and close it; the original NamedTempFile
+        // is unaffected.
+        let cloned = f.as_file().try_clone().unwrap();
+        let fd = cloned.into_raw_fd() as u32;
+        (fd, f)
+    }
+
+    /// `load_identity_from_fd` with a valid AGE key — should succeed (covers lines 497-521).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_identity_from_fd_valid_content_returns_ok() {
+        let (_, identity) = setup_identity_file();
+        let key = identity.to_string();
+        use age::secrecy::ExposeSecret;
+        let content = format!("{}\n", key.expose_secret());
+        let (fd, _f) = make_fd_from_content(&content);
+
+        let result = load_identity_from_fd(fd);
+        assert!(result.is_ok(), "valid FD should return Ok: {result:?}");
+        assert!(
+            result.unwrap().contains("AGE-SECRET-KEY-"),
+            "content should contain the AGE key"
+        );
+    }
+
+    /// `load_identity_from_fd` with `fd > i32::MAX` — should return Usage error (covers 503-507).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_identity_from_fd_fd_overflow_errors() {
+        let result = load_identity_from_fd(u32::MAX);
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "FD overflow should return Usage error, got: {result:?}"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("exceeds i32::MAX"),
+            "error should mention i32::MAX: {msg}"
+        );
+    }
+
+    /// `load_identity_from_fd` with an empty file — should return Usage error (covers 515-519).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_identity_from_fd_empty_file_errors() {
+        let (fd, _f) = make_fd_from_content("   \n  ");
+        let result = load_identity_from_fd(fd);
+        assert!(
+            matches!(result, Err(GitvaultError::Usage(_))),
+            "empty FD should return Usage error, got: {result:?}"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("empty content"),
+            "error should mention empty content: {msg}"
+        );
+    }
+
+    // ─── load_passphrase_from_fd (Unix) ───────────────────────────────────────
+
+    /// `load_passphrase_from_fd` with `fd > i32::MAX` — should return None (covers line 529).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_passphrase_from_fd_fd_overflow_returns_none() {
+        let result = load_passphrase_from_fd(u32::MAX);
+        assert!(result.is_none(), "FD overflow should return None");
+    }
+
+    /// `load_passphrase_from_fd` with valid content — should return Some (covers 533-539).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_passphrase_from_fd_valid_content_returns_some() {
+        let (fd, _f) = make_fd_from_content("my-test-passphrase");
+        let result = load_passphrase_from_fd(fd);
+        assert!(result.is_some(), "valid passphrase FD should return Some");
+        assert_eq!(
+            result.unwrap().as_str(),
+            "my-test-passphrase",
+            "passphrase should match content"
+        );
+    }
+
+    /// `load_passphrase_from_fd` with empty content — should return None (covers line 535-536).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_passphrase_from_fd_empty_content_returns_none() {
+        let (fd, _f) = make_fd_from_content("   ");
+        let result = load_passphrase_from_fd(fd);
+        assert!(result.is_none(), "empty passphrase FD should return None");
+    }
+
+    // ─── try_fetch_ssh_passphrase: FD path and warning path ───────────────────
+
+    /// `try_fetch_ssh_passphrase` reads passphrase from GITVAULT_IDENTITY_PASSPHRASE_FD
+    /// (covers lines 598-602 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_try_fetch_ssh_passphrase_via_fd_path() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let (fd, _f) = make_fd_from_content("passphrase-from-fd");
+        let fd_str = fd.to_string();
+
+        let result = with_env_var("GITVAULT_IDENTITY_PASSPHRASE_FD", Some(&fd_str), || {
+            with_env_var("GITVAULT_IDENTITY_PASSPHRASE", None, || {
+                try_fetch_ssh_passphrase("gitvault", "age-identity", true)
+            })
+        });
+        assert!(result.is_some(), "FD passphrase path should return Some");
+        assert_eq!(
+            result.unwrap().as_str(),
+            "passphrase-from-fd",
+            "passphrase should match FD content"
+        );
+    }
+
+    /// `try_fetch_ssh_passphrase` emits the warning when GITVAULT_NO_PASSPHRASE_WARN
+    /// is not set (covers lines 611-616 — the warning branch).
+    #[test]
+    fn test_try_fetch_ssh_passphrase_inline_warning_fires() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        // Do NOT set GITVAULT_NO_PASSPHRASE_WARN — the warning path should execute.
+        let result = with_env_var(
+            "GITVAULT_IDENTITY_PASSPHRASE",
+            Some("warn-test-secret"),
+            || {
+                with_env_var("GITVAULT_NO_PASSPHRASE_WARN", None, || {
+                    // Warning is emitted to stderr — just verify the value is returned.
+                    try_fetch_ssh_passphrase("gitvault", "age-identity", true)
+                })
+            },
+        );
+        assert!(
+            result.is_some(),
+            "inline passphrase should be returned even with warning"
+        );
+        assert_eq!(
+            result.unwrap().as_str(),
+            "warn-test-secret",
+            "returned passphrase should match env var"
+        );
+    }
+
+    // ─── load_any_identity_with_passphrase ────────────────────────────────────
+
+    /// `load_any_identity_with_passphrase` succeeds with a valid X25519 key file
+    /// (covers lines 639-651).
+    #[test]
+    fn test_load_any_identity_with_passphrase_x25519_key_succeeds() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (tmp_file, _) = setup_identity_file();
+
+        let result = with_env_var(
+            "GITVAULT_IDENTITY",
+            Some(tmp_file.path().to_str().unwrap()),
+            || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    with_env_var("GITVAULT_IDENTITY_PASSPHRASE", None, || {
+                        // no_prompt=true → skips keyring in try_fetch_ssh_passphrase
+                        load_any_identity_with_passphrase(None, true, None)
+                    })
+                })
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "load_any_identity_with_passphrase should succeed for X25519 key"
+        );
+    }
+
+    // ─── load_identity_with: GITVAULT_IDENTITY_FD branch ─────────────────────
+
+    /// Non-integer GITVAULT_IDENTITY_FD → Usage error (covers lines 689-693 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_identity_with_fd_non_integer_returns_usage_error() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let result = with_env_var("GITVAULT_IDENTITY_FD", Some("not-a-number"), || {
+            with_env_var("GITVAULT_IDENTITY", None, || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    load_identity_with(
+                        None,
+                        || Err(GitvaultError::Keyring("no key".to_string())),
+                        None,
+                    )
+                })
+            })
+        });
+
+        let err = result.expect_err("non-integer FD should fail");
+        assert!(
+            matches!(err, GitvaultError::Usage(_)),
+            "expected Usage error, got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("non-negative integer"),
+            "error message should mention 'non-negative integer': {msg}"
+        );
+    }
+
+    /// Valid GITVAULT_IDENTITY_FD → identity loaded from the FD (covers lines 688-694 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_identity_with_fd_valid_returns_identity() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let (_, identity) = setup_identity_file();
+        use age::secrecy::ExposeSecret;
+        let content = format!("{}\n", identity.to_string().expose_secret());
+        let (fd, _f) = make_fd_from_content(&content);
+        let fd_str = fd.to_string();
+
+        let result = with_env_var("GITVAULT_IDENTITY_FD", Some(&fd_str), || {
+            with_env_var("GITVAULT_IDENTITY", None, || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    load_identity_with(
+                        None,
+                        || Err(GitvaultError::Keyring("no key".to_string())),
+                        None,
+                    )
+                })
+            })
+        });
+
+        assert!(
+            result.is_ok(),
+            "valid FD should resolve identity: {result:?}"
+        );
+        assert!(
+            result.unwrap().contains("AGE-SECRET-KEY-"),
+            "loaded identity should contain AGE key"
+        );
+    }
+
+    // ─── load_identity_with: SSH agent success (line 723) ────────────────────
+
+    /// SSH agent returns one key and the private key file is found — `load_identity_with`
+    /// returns `Ok` via the SSH agent path (covers line 723 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_identity_with_ssh_agent_success_returns_key_content() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let fake_home = tempfile::TempDir::new().unwrap();
+        let ssh_dir = fake_home.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        let key_content =
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nfakekey\n-----END OPENSSH PRIVATE KEY-----\n";
+        std::fs::write(ssh_dir.join("identity"), key_content).unwrap();
+
+        let fingerprint = "SHA256:fp_load_with_ssh_success";
+        let bin_dir = setup_fake_ssh_binaries(
+            &format!("256 {fingerprint} identity (ED25519)"),
+            &format!("256 {fingerprint} test@host (ED25519)"),
+        );
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        let result = with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
+            with_env_var("GITVAULT_IDENTITY", None, || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    with_env_var("HOME", Some(fake_home.path().to_str().unwrap()), || {
+                        with_env_var("PATH", Some(&new_path), || {
+                            load_identity_with(
+                                None,
+                                || Err(GitvaultError::Keyring("no key".to_string())),
+                                None,
+                            )
+                        })
+                    })
+                })
+            })
+        });
+
+        assert!(
+            result.is_ok(),
+            "SSH agent identity should resolve: {result:?}"
+        );
+        assert!(
+            result.unwrap().contains("OPENSSH PRIVATE KEY"),
+            "loaded identity should be the SSH key file content"
+        );
+    }
+
+    // ─── load_ssh_agent_identity: key file not found (lines 281-286) ─────────
+
+    /// When the agent returns one ED25519 key but no matching private key file
+    /// can be found on disk, `load_ssh_agent_identity` returns `Err(NotAvailable)`
+    /// (covers lines 281-286 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_ssh_agent_identity_key_file_not_found_returns_not_available() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let fake_home = tempfile::TempDir::new().unwrap();
+        let ssh_dir = fake_home.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+
+        // Fake ssh-add says there's one ED25519 key with fingerprint A…
+        let agent_fp = "SHA256:agent_fp_no_file";
+        // …but fake ssh-keygen returns a completely different fingerprint B for every file.
+        // So `find_ssh_key_file` can never match → returns None → NotAvailable.
+        let keygen_fp = "SHA256:keygen_fp_different";
+        std::fs::write(ssh_dir.join("id_ed25519"), "fake-key-content").unwrap();
+
+        let bin_dir = setup_fake_ssh_binaries(
+            &format!("256 {agent_fp} id_ed25519 (ED25519)"),
+            &format!("256 {keygen_fp} test@host (ED25519)"),
+        );
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        let result = with_env_var("HOME", Some(fake_home.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || load_ssh_agent_identity(None))
+        });
+
+        assert!(
+            matches!(result, Err(SshAgentError::NotAvailable(_))),
+            "should fail with NotAvailable when no key file matches: {result:?}"
+        );
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("no corresponding private key file"),
+            "error should mention missing private key: {msg}"
+        );
+    }
+
+    // ─── probe_identity_sources: SSH selector 0-match (lines 377, 380-383) ───
+
+    /// When the agent has one ED25519 key but the selector does not match it,
+    /// `probe_identity_sources` reports `SourceNotAvailable` for ssh-agent
+    /// (covers lines 376-383 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_probe_identity_sources_ssh_selector_no_match_is_not_available() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let fingerprint = "SHA256:fp_probe_sel_nomatch";
+        let bin_dir =
+            setup_fake_ssh_binaries(&format!("256 {fingerprint} probe_key (ED25519)"), "");
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        let states = with_env_var("GITVAULT_IDENTITY", None, || {
+            with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    with_env_var("PATH", Some(&new_path), || {
+                        // selector "NOMATCH_XYZ" matches neither fingerprint nor comment
+                        probe_identity_sources(None, Some("NOMATCH_XYZ"))
+                    })
+                })
+            })
+        });
+
+        assert_eq!(states.len(), 3);
+        let ssh_state = &states[2];
+        assert!(
+            matches!(
+                ssh_state,
+                IdentitySourceState::SourceNotAvailable { source, reason }
+                if source == "ssh-agent" && reason.contains("no agent key matches selector")
+            ),
+            "expected SourceNotAvailable with 'no agent key matches selector', got: {ssh_state:?}"
+        );
+    }
+
+    // ─── probe_identity_sources: keyring resolved (lines 342-344) ────────────
+    //
+    // Note: the keyring Resolved path in probe_identity_sources requires a real OS
+    // keyring with a stored entry, which is not available in headless CI.  The mock
+    // keyring backend (keyring::mock) uses per-Entry-instance storage — values written
+    // via one Entry::new() call are not visible to a separate Entry::new() call with
+    // the same service/account — so this path cannot be exercised without a live keyring
+    // daemon.  These lines remain in the accepted-exceptions list.
+
+    // ─── load_ssh_agent_identity: file found but unreadable (lines 288-292) ──
+
+    /// When `find_ssh_key_file` returns `Some(path)` but the file is unreadable
+    /// (e.g. permissions 000), `load_ssh_agent_identity` returns `Err(NotAvailable)`
+    /// with the "failed to read SSH private key" message (covers lines 288-292 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_load_ssh_agent_identity_file_unreadable_returns_not_available() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let fake_home = tempfile::TempDir::new().unwrap();
+        let ssh_dir = fake_home.path().join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+
+        // Create a standard-name key file that the fingerprint will match, but then
+        // make it unreadable so `read_to_string` fails → lines 288-292.
+        let key_file = ssh_dir.join("id_ed25519");
+        std::fs::write(&key_file, "fake-key-content").unwrap();
+        std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let fingerprint = "SHA256:fp_unreadable_test";
+        let bin_dir = setup_fake_ssh_binaries(
+            &format!("256 {fingerprint} id_ed25519 (ED25519)"),
+            &format!("256 {fingerprint} test@host (ED25519)"),
+        );
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", bin_dir.path().display(), original_path);
+
+        let result = with_env_var("HOME", Some(fake_home.path().to_str().unwrap()), || {
+            with_env_var("PATH", Some(&new_path), || load_ssh_agent_identity(None))
+        });
+
+        // Restore permissions so TempDir can clean up.
+        std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(
+            matches!(result, Err(SshAgentError::NotAvailable(_))),
+            "unreadable key file should return NotAvailable: {result:?}"
+        );
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("failed to read SSH private key"),
+            "error should mention failed read: {msg}"
+        );
+    }
+
+    // ─── probe_identity_sources: SSH NotAvailable from list (lines 357-368) ──
+
+    /// When `list_ssh_agent_keys` returns `Err(NotAvailable)` (e.g. because
+    /// `ssh-add` cannot be spawned), `probe_identity_sources` reports
+    /// `SourceNotAvailable` for ssh-agent (covers lines 357-368 on Unix).
+    #[cfg(unix)]
+    #[test]
+    fn test_probe_identity_sources_ssh_list_not_available() {
+        let _lock = global_test_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        // Use an empty PATH so `ssh-add` cannot be found → spawn fails →
+        // list_ssh_agent_keys returns Err(NotAvailable).
+        let states = with_env_var("GITVAULT_IDENTITY", None, || {
+            with_env_var("GITVAULT_SSH_AGENT", Some("1"), || {
+                with_env_var("SSH_AUTH_SOCK", None, || {
+                    with_env_var("PATH", Some(""), || probe_identity_sources(None, None))
+                })
+            })
+        });
+
+        assert_eq!(states.len(), 3);
+        let ssh_state = &states[2];
+        assert!(
+            matches!(
+                ssh_state,
+                IdentitySourceState::SourceNotAvailable { source, .. } if source == "ssh-agent"
+            ),
+            "expected ssh-agent SourceNotAvailable when ssh-add not found, got: {ssh_state:?}"
+        );
+    }
 }

@@ -31,26 +31,17 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             file,
             recipients,
             env,
-            keep_path,
-            fields,
-            value_only,
-        } => crate::commands::encrypt::cmd_encrypt(
-            file, recipients, env, keep_path, fields, value_only, cli.json,
-        ),
+        } => crate::commands::encrypt::cmd_encrypt(file, recipients, env, cli.json),
         Commands::Decrypt {
             file,
             identity,
-            output,
-            fields,
+            env,
             reveal,
-            value_only,
         } => crate::commands::decrypt::cmd_decrypt(crate::commands::decrypt::DecryptOptions {
             file,
             identity,
-            output,
-            fields,
+            env,
             reveal,
-            value_only,
             json: cli.json,
             no_prompt: cli.no_prompt,
             selector: cli.identity_selector.clone(),
@@ -158,6 +149,34 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
         Commands::Init { env, output } => {
             crate::commands::init::cmd_init(env, output, cli.json, cli.no_prompt)
         }
+        Commands::Seal {
+            file,
+            recipients,
+            env,
+            fields,
+        } => crate::commands::seal::cmd_seal(crate::commands::seal::SealOptions {
+            file,
+            recipients,
+            env,
+            fields,
+            json: cli.json,
+            no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
+        }),
+        Commands::Unseal {
+            file,
+            identity,
+            fields,
+            reveal,
+        } => crate::commands::seal::cmd_unseal(crate::commands::seal::UnsealOptions {
+            file,
+            identity,
+            fields,
+            reveal,
+            json: cli.json,
+            no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
+        }),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
             dispatch_ssm(action, cli.aws_profile, cli.aws_role_arn, cli.json)
@@ -339,9 +358,6 @@ mod tests {
                 file: plain_file.to_string_lossy().to_string(),
                 recipients: vec![identity.to_public().to_string()],
                 env: None,
-                keep_path: false,
-                fields: None,
-                value_only: false,
             },
         );
         let encrypt_outcome = run(encrypt_cli).expect("encrypt dispatch should succeed");
@@ -356,22 +372,12 @@ mod tests {
             Commands::Decrypt {
                 file: encrypted_path.to_string_lossy().to_string(),
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
-                output: Some(
-                    dir.path()
-                        .join("dispatch.out")
-                        .to_string_lossy()
-                        .to_string(),
-                ),
-                fields: None,
-                reveal: false,
-                value_only: false,
+                env: None,
+                reveal: true,
             },
         );
         let decrypt_outcome = run(decrypt_cli).expect("decrypt dispatch should succeed");
         assert_eq!(decrypt_outcome, CommandOutcome::Success);
-
-        let decrypted = std::fs::read_to_string(dir.path().join("dispatch.out")).unwrap();
-        assert!(decrypted.contains("DISPATCH=1"));
     }
 
     #[test]
@@ -574,15 +580,18 @@ mod tests {
                     .to_string_lossy()
                     .to_string(),
                 identity: Some(identity_file.path().to_string_lossy().to_string()),
-                output: None,
-                fields: None,
+                env: Some("dev".to_string()),
                 reveal: false,
-                value_only: false,
             },
         );
         // Decrypting a nonexistent file should propagate the error.
+        // The absolute path has .age extension but is NOT under .gitvault/store/,
+        // so it is treated as a source path → NotFound when store file is absent.
         let err = run(cli).expect_err("decrypt of nonexistent file should fail");
-        assert!(matches!(err, GitvaultError::Io(_)));
+        assert!(
+            matches!(err, GitvaultError::NotFound(_)),
+            "expected NotFound error, got: {err:?}"
+        );
     }
 
     #[test]

@@ -40,6 +40,9 @@ pub enum GitvaultError {
     /// A drift between encrypted and plaintext secrets was detected.
     #[error("Drift detected: {0}")]
     Drift(String),
+    /// A requested resource was not found.
+    #[error("{0}")]
+    NotFound(String),
 }
 
 impl GitvaultError {
@@ -55,7 +58,11 @@ impl GitvaultError {
             Self::Usage(_) => EXIT_USAGE,
             Self::BarrierNotSatisfied(_) => EXIT_BARRIER,
             Self::Drift(_) => EXIT_DRIFT,
-            Self::Io(_) | Self::Encryption(_) | Self::Other(_) | Self::Keyring(_) => EXIT_ERROR,
+            Self::Io(_)
+            | Self::Encryption(_)
+            | Self::Other(_)
+            | Self::Keyring(_)
+            | Self::NotFound(_) => EXIT_ERROR,
         }
     }
 }

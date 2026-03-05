@@ -28,4 +28,5 @@ pub mod run;
 pub mod ssh;
 #[cfg(feature = "ssm")]
 pub mod ssm;
+pub mod store;
 pub mod structured;

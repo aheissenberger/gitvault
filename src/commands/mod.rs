@@ -13,6 +13,7 @@ pub mod keyring;
 pub mod materialize;
 pub mod recipients;
 pub mod run_cmd;
+pub mod seal;
 
 #[cfg(test)]
 pub mod test_helpers;

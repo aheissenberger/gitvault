@@ -1276,7 +1276,7 @@ dependencies = [
 
 [[package]]
 name = "gitvault"
-version = "0.4.11"
+version = "0.5.0"
 dependencies = [
  "age",
  "async-trait",
@@ -1302,6 +1302,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.23",
+ "toml_edit",
  "which",
  "zeroize",
 ]

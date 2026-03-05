@@ -31,31 +31,83 @@ pub fn cmd_status(json: bool, fail_if_dirty: bool) -> Result<CommandOutcome, Git
     // REQ-44: no decryption performed
     let repo_root = crate::repo::find_repo_root()?;
     repo::check_no_tracked_plaintext(&repo_root)?;
-    let env = env::resolve_env(
-        &repo_root,
-        &crate::config::effective_config(&repo_root)?.env,
-    );
+    let config = crate::config::effective_config(&repo_root)?;
+    let env = env::resolve_env(&repo_root, &config.env);
 
     // REQ-32: drift check
-    if fail_if_dirty && repo::has_secrets_drift(&repo_root)? {
+    let store_dirty = if fail_if_dirty {
+        repo::has_secrets_drift(&repo_root)?
+    } else {
+        false
+    };
+
+    // REQ-112 AC14: seal drift check
+    let seal_drift_entries = crate::commands::seal::check_seal_drift(&repo_root, &config.seal);
+    let has_seal_drift = seal_drift_entries
+        .iter()
+        .any(|e| e.status == crate::commands::seal::SealDriftStatus::Drift);
+
+    if fail_if_dirty && (store_dirty || has_seal_drift) {
         return Err(GitvaultError::Drift(
-            "secrets/ has uncommitted changes (drift detected)".to_string(),
+            "drift detected (secrets or sealed files)".to_string(),
         ));
     }
 
     if json {
+        let seal_json: Vec<serde_json::Value> = seal_drift_entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "path": e.path,
+                    "status": match e.status {
+                        crate::commands::seal::SealDriftStatus::Ok => "ok",
+                        crate::commands::seal::SealDriftStatus::Drift => "drifted",
+                        crate::commands::seal::SealDriftStatus::Excluded => "excluded",
+                    },
+                })
+            })
+            .collect();
         println!(
             "{}",
             serde_json::json!({
-                "status": "ok",
+                "status": if has_seal_drift { "drift" } else { "ok" },
                 "env": env,
-                "plaintext_leaked": false
+                "plaintext_leaked": false,
+                "seal": seal_json,
             })
         );
     } else {
-        println!("Status: OK");
+        println!("Status: {}", if has_seal_drift { "DRIFT" } else { "OK" });
         println!("Environment: {env}");
         println!("No tracked plaintext detected.");
+
+        if !seal_drift_entries.is_empty() {
+            println!("\nSealed:");
+            for entry in &seal_drift_entries {
+                let icon = match entry.status {
+                    crate::commands::seal::SealDriftStatus::Ok => "✓",
+                    crate::commands::seal::SealDriftStatus::Drift => "✗",
+                    crate::commands::seal::SealDriftStatus::Excluded => " ",
+                };
+                let detail = match entry.status {
+                    crate::commands::seal::SealDriftStatus::Ok => {
+                        if entry.total_count > 0 {
+                            format!(
+                                "({}/{} fields sealed)",
+                                entry.sealed_count, entry.total_count
+                            )
+                        } else {
+                            "(all fields sealed)".to_string()
+                        }
+                    }
+                    crate::commands::seal::SealDriftStatus::Drift => {
+                        format!("drift: run 'gitvault seal {}'", entry.path)
+                    }
+                    crate::commands::seal::SealDriftStatus::Excluded => "excluded".to_string(),
+                };
+                println!("  {icon}  {}  {detail}", entry.path);
+            }
+        }
     }
 
     Ok(CommandOutcome::Success)
@@ -1348,5 +1400,270 @@ mod tests {
                 "history scan should report PlaintextLeak, got: {err:?}"
             );
         });
+    }
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+
+    /// Write a minimal `.gitvault/config.toml` so that `cmd_status` picks up
+    /// the `[seal]` configuration we want to test.
+    fn write_seal_config(repo_root: &Path, toml: &str) {
+        let config_dir = repo_root.join(".gitvault");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join("config.toml"), toml).unwrap();
+    }
+
+    // ── cmd_status: seal drift JSON output ───────────────────────────────────
+
+    /// `cmd_status --json` with a sealed file produces JSON that includes the
+    /// `seal` array. Covers the JSON branch of the seal-drift block (lines 55–75).
+    #[test]
+    fn test_cmd_status_seal_drift_json_sealed_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // A file whose value starts with "age:" is considered sealed (Ok).
+        std::fs::write(dir.path().join("config.env"), "SECRET=age:YWdl\n").unwrap();
+        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+
+        cmd_status(true, false).expect("cmd_status --json should succeed with sealed file");
+    }
+
+    /// `cmd_status --json` with a file that has drift (no age:-prefixed values)
+    /// still succeeds when `fail_if_dirty=false`. Covers the JSON branch with
+    /// a `drifted` entry in the `seal` array.
+    #[test]
+    fn test_cmd_status_seal_drift_json_drifted_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Plaintext value — drift detected.
+        std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
+        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+
+        cmd_status(true, false).expect("cmd_status --json should succeed even with drift");
+    }
+
+    // ── cmd_status: seal drift plain-text output ──────────────────────────────
+
+    /// `cmd_status` (plain text) with a sealed file shows the ✓ icon.
+    /// Covers the plain-text seal-drift loop (lines 76–108) with Ok status.
+    #[test]
+    fn test_cmd_status_seal_drift_plain_ok_icon() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        std::fs::write(dir.path().join("config.env"), "SECRET=age:YWdl\n").unwrap();
+        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+
+        cmd_status(false, false).expect("cmd_status should succeed with sealed file");
+    }
+
+    /// `cmd_status` (plain text) with a drifted file shows the ✗ icon and the
+    /// `fail_if_dirty=false` path continues without error.
+    /// Covers the Drift branch inside the plain-text loop.
+    #[test]
+    fn test_cmd_status_seal_drift_plain_drift_icon() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Plaintext value — no age: prefix → drift.
+        std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
+        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+
+        // fail_if_dirty=false → should succeed even with drift.
+        cmd_status(false, false)
+            .expect("cmd_status should succeed when fail_if_dirty=false despite drift");
+    }
+
+    /// `cmd_status` (plain text) with an excluded file shows the excluded icon.
+    /// Covers the `SealDriftStatus::Excluded` arm in the plain-text loop.
+    #[test]
+    fn test_cmd_status_seal_drift_plain_excluded() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
+        write_seal_config(
+            dir.path(),
+            "[seal]\npatterns = [\"config.env\"]\n\n[[seal.exclude]]\npattern = \"config.env\"\n",
+        );
+
+        cmd_status(false, false).expect("cmd_status should succeed with an excluded seal entry");
+    }
+
+    /// `cmd_status` (plain text) with a `[[seal.override]]` entry shows the
+    /// "(N/N fields sealed)" detail when `total_count > 0`.
+    /// Covers the `total_count > 0` branch inside the Ok arm.
+    #[test]
+    fn test_cmd_status_seal_drift_plain_override_ok_with_count() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // SECRET is sealed; the override lists exactly that field.
+        std::fs::write(dir.path().join("config.env"), "SECRET=age:YWdl\n").unwrap();
+        write_seal_config(
+            dir.path(),
+            "[seal]\npatterns = [\"config.env\"]\n\n[[seal.override]]\npattern = \"config.env\"\nfields = [\"SECRET\"]\n",
+        );
+
+        cmd_status(false, false).expect("cmd_status should succeed with override ok entry");
+    }
+
+    /// `cmd_status` with `fail_if_dirty=true` and a drifted sealed file must
+    /// return `Err(GitvaultError::Drift(...))`. Covers the seal-drift leg of the
+    /// fail-if-dirty guard (the `has_seal_drift` branch).
+    #[test]
+    fn test_cmd_status_seal_drift_fail_if_dirty_returns_drift_err() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Plaintext value → drift.
+        std::fs::write(dir.path().join("config.env"), "SECRET=plaintext\n").unwrap();
+        write_seal_config(dir.path(), "[seal]\npatterns = [\"config.env\"]\n");
+
+        let err = cmd_status(false, true).unwrap_err();
+        assert!(
+            matches!(err, GitvaultError::Drift(_)),
+            "should return Drift error, got: {err:?}"
+        );
+    }
+
+    // ── cmd_harden_with_files: remove_source ─────────────────────────────────
+
+    /// `cmd_harden_with_files` with `remove_source=true` must delete the
+    /// plaintext source file after encrypting it.
+    /// Covers line 551 (`std::fs::remove_file`).
+    #[test]
+    fn test_harden_with_files_removes_source_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let env_file = dir.path().join("secrets.env");
+        std::fs::write(&env_file, "TOKEN=hunter2\n").unwrap();
+
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_harden_with_files(
+                vec![env_file.to_string_lossy().to_string()],
+                Some("dev".to_string()),
+                false, // dry_run
+                true,  // remove_source ← key flag
+                vec![pubkey],
+                false,
+                false,
+                None,
+            )
+            .expect("harden-with-files --remove-source should succeed");
+        });
+
+        assert!(
+            !env_file.exists(),
+            "source file should have been removed with --remove-source"
+        );
+        assert!(
+            dir.path()
+                .join(".gitvault/store/dev/secrets.env.age")
+                .exists(),
+            "encrypted artifact should still exist"
+        );
+    }
+
+    // ── cmd_harden_with_files: plain-text error output ────────────────────────
+
+    /// When a requested source file does not exist, `cmd_harden_with_files`
+    /// (with `json=false`) should still return `Ok` but record an error status
+    /// for that file (printed to stderr). This covers the `"error" =>` arm in
+    /// the plain-text result loop (lines 600–604).
+    #[test]
+    fn test_harden_with_files_plain_error_output_for_missing_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            // "ghost.env" does not exist — the per-file read will fail.
+            let result = cmd_harden_with_files(
+                vec!["ghost.env".to_string()],
+                Some("dev".to_string()),
+                false,
+                false,
+                vec![pubkey],
+                false, // json=false → plain-text error output branch
+                false,
+                None,
+            );
+            // The top-level call still succeeds; per-file errors are non-fatal.
+            assert!(
+                result.is_ok(),
+                "harden-with-files should return Ok even when a file is missing: {result:?}"
+            );
+        });
+    }
+
+    /// Same scenario with `json=true` — a missing file produces an `"error"`
+    /// entry in the JSON results array. Covers the JSON output path alongside
+    /// the plain-text test above.
+    #[test]
+    fn test_harden_with_files_json_error_output_for_missing_file() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        let (identity_file, identity) = setup_identity_file();
+        let pubkey = identity.to_public().to_string();
+
+        with_identity_env(identity_file.path(), || {
+            let result = cmd_harden_with_files(
+                vec!["ghost.env".to_string()],
+                Some("dev".to_string()),
+                false,
+                false,
+                vec![pubkey],
+                true, // json=true
+                false,
+                None,
+            );
+            assert!(result.is_ok(), "should succeed even when file is missing");
+        });
+    }
+
+    // ── local_git_config helper: absent key ──────────────────────────────────
+
+    /// `local_git_config` returns `None` when the requested key is absent from
+    /// the repository config. Covers the `return None` at line 645.
+    #[test]
+    fn test_local_git_config_returns_none_for_absent_key() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        let result = local_git_config(dir.path(), "gitvault.test.nonexistent-key-xyz");
+        assert!(
+            result.is_none(),
+            "local_git_config should return None for an absent key"
+        );
     }
 }

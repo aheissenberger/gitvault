@@ -1,29 +1,25 @@
 //! `gitvault decrypt` command implementation.
+//!
+//! REQ-114: Accepts either the original source path (e.g. `services/auth/config.json`)
+//! or an explicit `.age` store path for backward compatibility.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::{load_identity_from_source_with_selector, load_identity_with_selector};
-use crate::{crypto, fhsm, repo, structured};
+use crate::{crypto, fhsm, store};
 
 /// Options for the [`cmd_decrypt`] command.
-// Each bool field maps directly to a CLI flag; suppressing `struct_excessive_bools`
-// is intentional for CLI option structs.
-#[allow(clippy::struct_excessive_bools)]
 pub struct DecryptOptions {
-    /// Path to the encrypted `.age` file.
+    /// Path to the source file or explicit `.age` store path.
     pub file: String,
     /// Path to an age identity file.
     pub identity: Option<String>,
-    /// Output path (defaults to the input path with `.age` stripped).
-    pub output: Option<String>,
-    /// Comma-separated field paths to decrypt in structured files.
-    pub fields: Option<String>,
+    /// Environment for store path resolution.
+    pub env: Option<String>,
     /// Print decrypted value to stdout instead of writing to file.
     pub reveal: bool,
-    /// Decrypt each VALUE in a `.env` file individually (REQ-6).
-    pub value_only: bool,
     /// Emit JSON output.
     pub json: bool,
     /// Suppress interactive prompts.
@@ -32,31 +28,180 @@ pub struct DecryptOptions {
     pub selector: Option<String>,
 }
 
-/// Decrypt a .age file and write plaintext
+/// Apply the two-part explicit-store-path check (AC2).
+///
+/// Returns `true` when `repo_relative` has the `.age` extension **and** begins
+/// with `.gitvault/store/`.
+///
+/// All checks are purely lexical — no filesystem access.
+fn is_explicit_store_path(repo_relative: &Path) -> bool {
+    let has_age = repo_relative.extension().is_some_and(|e| e == "age");
+    has_age && repo_relative.starts_with(".gitvault/store/")
+}
+
+/// Compute the repo-relative form of `input` using purely lexical operations.
+///
+/// For absolute paths: strip the (lexically normalised) repo root prefix.
+/// For relative paths: use as-is.
+fn make_repo_relative(input: &Path, repo_root: &Path) -> PathBuf {
+    if input.is_absolute() {
+        // Lexically normalise both paths.
+        let norm_input = lexical_normalize(input);
+        let norm_root = lexical_normalize(repo_root);
+        norm_input
+            .strip_prefix(&norm_root)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|_| input.to_path_buf())
+    } else {
+        input.to_path_buf()
+    }
+}
+
+/// Lexically normalise a path (resolve `.` and `..` without filesystem access).
+fn lexical_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match result.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    result.pop();
+                }
+                _ => {
+                    result.push(component);
+                }
+            },
+            c => result.push(c),
+        }
+    }
+    result
+}
+
+/// Parse the environment name from an explicit store path.
+///
+/// Expects the store path (repo-relative) to begin with `.gitvault/store/<env>/`.
+/// Returns the first path component after `.gitvault/store/`.
+fn parse_env_from_store_path(repo_relative: &Path) -> Result<String, GitvaultError> {
+    // Strip ".gitvault/store/" prefix
+    let after_store = repo_relative.strip_prefix(".gitvault/store").map_err(|_| {
+        GitvaultError::Usage(format!(
+            "explicit .age store path must begin with '.gitvault/store/': {}",
+            repo_relative.display()
+        ))
+    })?;
+
+    // The first remaining component is the env.
+    let env = after_store
+        .components()
+        .next()
+        .and_then(|c| c.as_os_str().to_str())
+        .ok_or_else(|| {
+            GitvaultError::Usage(format!(
+                "cannot parse environment from store path: {}",
+                repo_relative.display()
+            ))
+        })?
+        .to_string();
+    Ok(env)
+}
+
+/// Derive the relative source path from an absolute store path.
+///
+/// Strips `<repo_root>/.gitvault/store/<env>/` and the trailing `.age` suffix.
+///
+/// Example: `/repo/.gitvault/store/prod/services/auth/config.json.age`
+/// → `services/auth/config.json`
+fn derive_relative_source(
+    abs_store_path: &Path,
+    env: &str,
+    repo_root: &Path,
+) -> Result<PathBuf, GitvaultError> {
+    // Make store path repo-relative.
+    let rel = make_repo_relative(abs_store_path, repo_root);
+
+    // Strip ".gitvault/store/<env>/" prefix.
+    let prefix = PathBuf::from(".gitvault/store").join(env);
+    let after_prefix = rel.strip_prefix(&prefix).map_err(|_| {
+        GitvaultError::Usage(format!(
+            "store path '{}' does not begin with '.gitvault/store/{env}/'",
+            rel.display()
+        ))
+    })?;
+
+    // Strip the ".age" suffix from the file name.
+    let file_name = after_prefix
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| GitvaultError::Usage("store path has no file name".to_string()))?;
+    let source_name = file_name
+        .strip_suffix(".age")
+        .unwrap_or(file_name)
+        .to_string();
+
+    let source_rel = match after_prefix.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(source_name),
+        _ => PathBuf::from(source_name),
+    };
+    Ok(source_rel)
+}
+
+/// Decrypt a file from the `.gitvault/store/<env>/` archive.
+///
+/// Accepts either the original source path (source-path resolution) or an
+/// explicit `.age` store path (backward compatibility).
 ///
 /// # Errors
 ///
-/// Returns [`GitvaultError`] if the identity cannot be loaded, the input file cannot
-/// be read, decryption fails, or the output path is outside the repository root.
+/// Returns [`GitvaultError`] if the identity cannot be loaded, the store path
+/// cannot be found or read, decryption fails, or the output path is outside
+/// the repository root.
 pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError> {
-    // Treat `-o -` (output path literally "-") as --reveal for POSIX stdout convention.
-    let reveal = opts.reveal || opts.output.as_deref() == Some("-");
-    let output = if opts.output.as_deref() == Some("-") {
-        None
+    let repo_root = crate::repo::find_repo_root()?;
+    let input_path = PathBuf::from(&opts.file);
+
+    // ── Determine whether this is an explicit store path (AC2) ───────────────
+    let repo_relative = make_repo_relative(&input_path, &repo_root);
+    let explicit = is_explicit_store_path(&repo_relative);
+
+    let (store_path, env_name): (PathBuf, String) = if explicit {
+        // Parse env from the store path itself.
+        let env_from_path = parse_env_from_store_path(&repo_relative)?;
+
+        // If the user also supplied --env, warn that it is ignored (AC6).
+        if let Some(ref user_env) = opts.env {
+            eprintln!(
+                "gitvault: warning: --env {user_env} is ignored when an explicit .age store path is given; using env '{env_from_path}' from the store path."
+            );
+        }
+
+        // Normalise to absolute path (lexical, no canonicalize).
+        let abs = if input_path.is_absolute() {
+            input_path.clone()
+        } else {
+            repo_root.join(&input_path)
+        };
+        (abs, env_from_path)
     } else {
-        opts.output.clone()
+        // Source-path resolution: need an env name.
+        let env_name = opts
+            .env
+            .clone()
+            .unwrap_or_else(|| crate::env::resolve_env(&repo_root, &Default::default()));
+
+        // Validate env name (prevents path traversal via env).
+        crate::env::validate_env_name(&env_name)?;
+
+        let resolved = store::resolve_store_path(&input_path, &env_name, &repo_root)?;
+        (resolved, env_name)
     };
-    let opts = DecryptOptions {
-        reveal,
-        output,
-        ..opts
-    };
-    // Use FHSM to resolve the identity source; file I/O remains here.
+
+    // ── Load identity ────────────────────────────────────────────────────────
     let event = fhsm::Event::Decrypt {
         file: opts.file.clone(),
-        identity: opts.identity,
+        identity: opts.identity.clone(),
         no_prompt: opts.no_prompt,
-        output: opts.output.clone(),
+        output: None,
     };
     let effects = fhsm::transition(&event)?;
     let identity_str = effects
@@ -73,7 +218,6 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         })
         .unwrap_or_else(|| load_identity_with_selector(None, opts.selector.as_deref()))?;
 
-    let input_path = PathBuf::from(&opts.file);
     let any_identity = crypto::parse_identity_any_with_passphrase(
         &identity_str,
         crate::identity::try_fetch_ssh_passphrase(
@@ -83,116 +227,24 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         ),
     )?;
     let identity = any_identity.as_identity();
-    let repo_root = crate::repo::find_repo_root()?;
 
-    // REQ-6: value-only mode: decrypt each VALUE in a .env file individually
-    if opts.value_only {
-        use crate::structured::decrypt_env_values;
-        use std::io::Write;
-        let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
-        let decrypted = decrypt_env_values(&content, identity)?;
-        if opts.reveal {
-            print!("{decrypted}");
-            return Ok(CommandOutcome::Success);
-        }
-        let out_path = resolve_output_path(&repo_root, &input_path, opts.output.as_deref())?;
-        repo::validate_write_path(&repo_root, &out_path)?;
-        if let Some(parent) = out_path.parent()
-            && !parent.exists()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut tmp = tempfile::Builder::new()
-            .prefix(".gitvault-tmp-")
-            .tempfile_in(
-                out_path
-                    .parent()
-                    .unwrap_or_else(|| std::path::Path::new(".")),
-            )?;
-        tmp.write_all(decrypted.as_bytes())?;
-        tmp.persist(&out_path)
-            .map_err(|e| GitvaultError::Io(e.error))?;
-        crate::output::output_success(
-            &format!("Decrypted values in {}", out_path.display()),
-            opts.json,
-        );
-        return Ok(CommandOutcome::Success);
-    }
-
-    // REQ-4: field-level decryption for JSON/YAML/TOML
-    if let Some(fields_str) = &opts.fields {
-        let fields: Vec<&str> = fields_str.split(',').map(str::trim).collect();
-        // REQ-42: prevent path traversal for in-place field writes
-        repo::validate_write_path(&repo_root, &input_path)?;
-        structured::decrypt_fields(&input_path, &fields, identity)
-            .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
-        crate::output::output_success(
-            &format!(
-                "Decrypted fields [{fields_str}] in {}",
-                input_path.display()
-            ),
-            opts.json,
-        );
-        return Ok(CommandOutcome::Success);
-    }
-
-    // REQ-110: auto-discover encrypted fields when --fields is omitted for structured formats
-    let ext = input_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    if matches!(ext.as_str(), "json" | "yaml" | "yml" | "toml") {
-        let content = std::fs::read_to_string(&input_path).map_err(GitvaultError::Io)?;
-        let encrypted_paths =
-            structured::collect_encrypted_field_paths(&content, &ext)
-                .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
-        if encrypted_paths.is_empty() {
-            crate::output::output_success(
-                &format!("No encrypted fields found in {}", input_path.display()),
-                opts.json,
-            );
-            return Ok(CommandOutcome::Success);
-        }
-        let field_refs: Vec<&str> = encrypted_paths.iter().map(String::as_str).collect();
-        let decrypted_content =
-            structured::decrypt_fields_content(&content, &ext, &field_refs, identity, true)
-                .map_err(|e| GitvaultError::Decryption(e.to_string()))?;
-        if opts.reveal {
-            print!("{decrypted_content}");
-            return Ok(CommandOutcome::Success);
-        }
-        let out_path = resolve_output_path(&repo_root, &input_path, opts.output.as_deref())?;
-        repo::validate_write_path(&repo_root, &out_path)?;
-        if let Some(parent) = out_path.parent()
-            && !parent.exists()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-        crate::fs_util::atomic_write(&out_path, decrypted_content.as_bytes())?;
-        crate::output::output_success(
-            &format!(
-                "Decrypted {} field(s) in {}",
-                encrypted_paths.len(),
-                out_path.display()
-            ),
-            opts.json,
-        );
-        return Ok(CommandOutcome::Success);
-    }
-
-    // REQ-41: if --reveal, print to stdout and never write to file
+    // ── Reveal mode (AC6) ────────────────────────────────────────────────────
     if opts.reveal {
-        let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let in_file = std::io::BufReader::new(std::fs::File::open(&store_path)?);
         let mut stdout = std::io::BufWriter::new(std::io::stdout());
         crypto::decrypt_stream(identity, in_file, &mut stdout)?;
         return Ok(CommandOutcome::Success);
     }
 
-    let out_path = resolve_output_path(&repo_root, &input_path, opts.output.as_deref())?;
+    // ── Materialise: write to <PLAIN_BASE_DIR>/<env>/<relative-source-path> ─
+    let rel_source = derive_relative_source(&store_path, &env_name, &repo_root)?;
+    let out_path = repo_root
+        .join(crate::defaults::PLAIN_BASE_DIR)
+        .join(&env_name)
+        .join(&rel_source);
 
-    // REQ-42: prevent path traversal
-    repo::validate_write_path(&repo_root, &out_path)?;
+    // REQ-42: prevent path traversal.
+    crate::repo::validate_write_path(&repo_root, &out_path)?;
 
     if let Some(parent) = out_path.parent()
         && !parent.exists()
@@ -200,14 +252,14 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
         std::fs::create_dir_all(parent)?;
     }
 
-    // REQ-51: streaming decryption
+    // Streaming decryption via temp file (atomic write).
     let tmp = tempfile::NamedTempFile::new_in(
         out_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new(".")),
     )?;
     {
-        let in_file = std::io::BufReader::new(std::fs::File::open(&input_path)?);
+        let in_file = std::io::BufReader::new(std::fs::File::open(&store_path)?);
         let mut out_file = std::io::BufWriter::new(tmp.as_file());
         crypto::decrypt_stream(identity, in_file, &mut out_file)?;
     }
@@ -218,538 +270,267 @@ pub fn cmd_decrypt(opts: DecryptOptions) -> Result<CommandOutcome, GitvaultError
     Ok(CommandOutcome::Success)
 }
 
-fn resolve_output_path(
-    repo_root: &std::path::Path,
-    input_path: &std::path::Path,
-    output: Option<&str>,
-) -> Result<PathBuf, GitvaultError> {
-    match output {
-        Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL) => {
-            let abs_input = if input_path.is_absolute() {
-                input_path.to_path_buf()
-            } else {
-                std::env::current_dir()?.join(input_path)
-            };
-
-            let canonical_repo_root = repo_root
-                .canonicalize()
-                .unwrap_or_else(|_| repo_root.to_path_buf());
-            let canonical_input = abs_input
-                .canonicalize()
-                .unwrap_or_else(|_| abs_input.clone());
-
-            let rel_input = canonical_input
-                .strip_prefix(&canonical_repo_root)
-                .or_else(|_| abs_input.strip_prefix(repo_root))
-                .map_err(|_| {
-                    GitvaultError::Usage(format!(
-                        "--output without value requires encrypted input under repository root: {}",
-                        input_path.display()
-                    ))
-                })?;
-
-            let secrets_dir = std::path::Path::new(crate::defaults::SECRETS_DIR);
-            let after_secrets = rel_input.strip_prefix(secrets_dir).map_err(|_| {
-                GitvaultError::Usage(format!(
-                    "--output without value expects encrypted input under {}/{{env}}/...",
-                    crate::defaults::SECRETS_DIR
-                ))
-            })?;
-
-            let mut env_components = after_secrets.components();
-            let _env = env_components
-                .next()
-                .and_then(|c| c.as_os_str().to_str())
-                .unwrap_or_default();
-
-            let rest = env_components.collect::<PathBuf>();
-            let name = rest.file_name().ok_or_else(|| {
-                GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
-            })?;
-            let name = name.to_string_lossy();
-            let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
-
-            let mut out_path = repo_root.to_path_buf();
-            if let Some(parent) = rest.parent()
-                && !parent.as_os_str().is_empty()
-            {
-                out_path = out_path.join(parent);
-            }
-            Ok(out_path.join(out_name))
-        }
-        Some(out) => Ok(PathBuf::from(out)),
-        None => {
-            let name = input_path
-                .file_name()
-                .ok_or_else(|| {
-                    GitvaultError::Usage(format!("path has no file name: {}", input_path.display()))
-                })?
-                .to_string_lossy();
-            let out_name = name.strip_suffix(".age").unwrap_or(&name).to_string();
-            Ok(input_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."))
-                .join(out_name))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::test_helpers::*;
     use tempfile::TempDir;
 
+    /// Reveal mode: explicit store path → decrypts to stdout.
     #[test]
-    fn test_cmd_decrypt_reveal_succeeds() {
+    fn test_cmd_decrypt_reveal_explicit_store_path() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        let recipients: Vec<Box<dyn age::Recipient + Send>> =
-            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
-        let ciphertext = crypto::encrypt(recipients, b"TOP_SECRET=1\n").unwrap();
-        let encrypted_file = dir.path().join("secret.env.age");
-        std::fs::write(&encrypted_file, ciphertext).unwrap();
+        // Write encrypted file directly to store path.
+        write_encrypted_env_file(
+            dir.path(),
+            "dev",
+            "secret.env.age",
+            &identity,
+            "TOP_SECRET=1\n",
+        );
+        let store_path = crate::repo::get_env_encrypted_path(dir.path(), "dev", "secret.env.age");
 
         cmd_decrypt(DecryptOptions {
-            file: encrypted_file.to_string_lossy().to_string(),
+            file: store_path.to_string_lossy().to_string(),
             identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: None,
-            fields: None,
+            env: None,
             reveal: true,
-            value_only: false,
             json: true,
             no_prompt: true,
             selector: None,
         })
-        .expect("reveal mode should decrypt to stdout without error");
+        .expect("reveal mode with explicit store path should succeed");
     }
 
+    /// Reveal mode: source path → auto-resolves store path, decrypts to stdout.
     #[test]
-    fn test_cmd_decrypt_default_output_path_writes_plaintext() {
+    fn test_cmd_decrypt_reveal_source_path() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        let recipients: Vec<Box<dyn age::Recipient + Send>> =
-            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
-        let ciphertext = crypto::encrypt(recipients, b"X=42\n").unwrap();
-        let encrypted_file = dir.path().join("app.env.age");
-        std::fs::write(&encrypted_file, ciphertext).unwrap();
+        // Create the source file before encrypting.
+        std::fs::write(dir.path().join("app.env"), "SECRET=hello\n").unwrap();
 
+        // Encrypt `app.env` into the store.
+        with_identity_env(identity_file.path(), || {
+            crate::commands::encrypt::cmd_encrypt(
+                "app.env".to_string(),
+                vec![identity.to_public().to_string()],
+                None,
+                false,
+            )
+            .expect("encrypt should succeed");
+        });
+
+        // Decrypt by source path with --reveal.
         cmd_decrypt(DecryptOptions {
-            file: encrypted_file.to_string_lossy().to_string(),
+            file: "app.env".to_string(),
             identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: None,
-            fields: None,
-            reveal: false,
-            value_only: false,
+            env: Some("dev".to_string()),
+            reveal: true,
             json: true,
             no_prompt: true,
             selector: None,
         })
-        .expect("default output decrypt should succeed");
-
-        let plain = std::fs::read_to_string(dir.path().join("app.env")).unwrap();
-        assert!(plain.contains("X=42"));
+        .expect("source-path reveal should succeed");
     }
 
+    /// Materialisation: source path → writes to <PLAIN_BASE_DIR>/<env>/<relative-source-path>.
     #[test]
-    fn test_cmd_decrypt_fields_wrong_identity_propagates_error() {
-        // Covers the `|e| GitvaultError::Decryption(e.to_string())` closure in the fields branch.
-        let _lock = global_test_lock().lock().unwrap();
-        let dir = TempDir::new().unwrap();
-        init_git_repo(dir.path());
-        let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
-        let (wrong_identity_file, _) = setup_identity_file();
-
-        // Encrypt a field to `identity`.
-        let json_file = dir.path().join("config.json");
-        std::fs::write(&json_file, r#"{"secret":"abc","name":"demo"}"#).unwrap();
-        with_identity_env(identity_file.path(), || {
-            crate::commands::encrypt::cmd_encrypt(
-                json_file.to_string_lossy().to_string(),
-                vec![identity.to_public().to_string()],
-                None,
-                false,
-                Some("secret".to_string()),
-                false,
-                false,
-            )
-            .expect("field encrypt should succeed");
-        });
-
-        // Try to decrypt with the wrong identity → map_err closure fires.
-        let err = with_identity_env(wrong_identity_file.path(), || {
-            cmd_decrypt(DecryptOptions {
-                file: json_file.to_string_lossy().to_string(),
-                identity: None,
-                output: None,
-                fields: Some("secret".to_string()),
-                reveal: false,
-                value_only: false,
-                json: false,
-                no_prompt: true,
-                selector: None,
-            })
-        })
-        .expect_err("field decrypt with wrong identity should fail");
-
-        assert!(
-            matches!(err, GitvaultError::Decryption(_)),
-            "expected Decryption error, got: {err:?}"
-        );
-    }
-
-    #[test]
-    fn test_cmd_decrypt_value_only_roundtrip() {
+    fn test_cmd_decrypt_materialise_writes_to_plain_base_dir() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        // Create a plain .env file
-        let env_file = dir.path().join("app.env");
-        std::fs::write(&env_file, "API_KEY=mysecret\nDB_HOST=localhost\n").unwrap();
-
-        // Encrypt with --value-only
-        with_identity_env(identity_file.path(), || {
-            crate::commands::encrypt::cmd_encrypt(
-                env_file.to_string_lossy().to_string(),
-                vec![identity.to_public().to_string()],
-                None,
-                false,
-                None,
-                true, // value_only
-                false,
-            )
-            .expect("value-only encrypt should succeed");
-        });
-
-        // Verify values are encrypted in-place
-        let encrypted_content = std::fs::read_to_string(&env_file).unwrap();
-        assert!(
-            encrypted_content.contains("API_KEY=age:"),
-            "API_KEY value should be encrypted"
-        );
-        assert!(
-            encrypted_content.contains("DB_HOST=age:"),
-            "DB_HOST value should be encrypted"
-        );
-
-        // Decrypt with --value-only
-        cmd_decrypt(DecryptOptions {
-            file: env_file.to_string_lossy().to_string(),
-            identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: None,
-            fields: None,
-            reveal: false,
-            value_only: true,
-            json: false,
-            no_prompt: true,
-            selector: None,
-        })
-        .expect("value-only decrypt should succeed");
-
-        // Verify values are restored
-        let decrypted_content = std::fs::read_to_string(&env_file).unwrap();
-        assert_eq!(
-            decrypted_content, "API_KEY=mysecret\nDB_HOST=localhost\n",
-            "decrypted content should match original"
-        );
-    }
-
-    /// Covers lines 51-52: `reveal=true` with `value_only=true` prints decrypted values to stdout
-    /// and returns early without writing to disk.
-    #[test]
-    fn test_cmd_decrypt_value_only_reveal_prints_to_stdout() {
-        let _lock = global_test_lock().lock().unwrap();
-        let dir = TempDir::new().unwrap();
-        init_git_repo(dir.path());
-        let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
-
-        // Create a plain .env file with one encrypted value
-        let env_file = dir.path().join("reveal.env");
-        std::fs::write(&env_file, "TOKEN=supersecret\n").unwrap();
-        with_identity_env(identity_file.path(), || {
-            crate::commands::encrypt::cmd_encrypt(
-                env_file.to_string_lossy().to_string(),
-                vec![identity.to_public().to_string()],
-                None,
-                false,
-                None,
-                true, // value_only
-                false,
-            )
-            .expect("value-only encrypt should succeed");
-        });
-
-        // --reveal + --value-only: must succeed without writing to disk
-        let outcome = cmd_decrypt(DecryptOptions {
-            file: env_file.to_string_lossy().to_string(),
-            identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: None,
-            fields: None,
-            reveal: true,
-            value_only: true,
-            json: false,
-            no_prompt: true,
-            selector: None,
-        })
-        .expect("reveal + value_only should succeed");
-        assert!(matches!(outcome, CommandOutcome::Success));
-    }
-
-    /// Covers line 55: `value_only=true` with an explicit `output` path.
-    #[test]
-    fn test_cmd_decrypt_value_only_with_explicit_output_path() {
-        let _lock = global_test_lock().lock().unwrap();
-        let dir = TempDir::new().unwrap();
-        init_git_repo(dir.path());
-        let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
-
-        // Create and value-only-encrypt the source file
-        let env_file = dir.path().join("source.env");
-        std::fs::write(&env_file, "DB_PASS=hunter2\n").unwrap();
-        with_identity_env(identity_file.path(), || {
-            crate::commands::encrypt::cmd_encrypt(
-                env_file.to_string_lossy().to_string(),
-                vec![identity.to_public().to_string()],
-                None,
-                false,
-                None,
-                true, // value_only
-                false,
-            )
-            .expect("value-only encrypt should succeed");
-        });
-
-        // Decrypt into a separate output file (explicit output path)
-        let out_file = dir.path().join("dest.env");
-        cmd_decrypt(DecryptOptions {
-            file: env_file.to_string_lossy().to_string(),
-            identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: Some(out_file.to_string_lossy().to_string()),
-            fields: None,
-            reveal: false,
-            value_only: true,
-            json: false,
-            no_prompt: true,
-            selector: None,
-        })
-        .expect("value_only decrypt to explicit output should succeed");
-
-        let content = std::fs::read_to_string(&out_file).unwrap();
-        assert_eq!(
-            content, "DB_PASS=hunter2\n",
-            "decrypted output should match original"
-        );
-    }
-
-    #[test]
-    fn test_cmd_decrypt_bare_output_restores_repo_relative_path() {
-        let _lock = global_test_lock().lock().unwrap();
-        let dir = TempDir::new().unwrap();
-        init_git_repo(dir.path());
-        let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
-
-        let nested = dir.path().join("service/api/v1/config");
+        // Create a nested source file and encrypt it.
+        let nested = dir.path().join("services/auth");
         std::fs::create_dir_all(&nested).unwrap();
-        let plain_file = nested.join("app.env");
-        std::fs::write(&plain_file, "KEY=VALUE\n").unwrap();
+        std::fs::write(nested.join("config.json"), r#"{"key":"val"}"#).unwrap();
 
         with_identity_env(identity_file.path(), || {
             crate::commands::encrypt::cmd_encrypt(
-                plain_file.to_string_lossy().to_string(),
+                "services/auth/config.json".to_string(),
                 vec![identity.to_public().to_string()],
-                None,
-                true,
-                None,
-                false,
+                Some("prod".to_string()),
                 false,
             )
-            .expect("keep-path encrypt should succeed");
+            .expect("encrypt should succeed");
         });
 
-        std::fs::remove_file(&plain_file).unwrap();
-        let encrypted = dir
-            .path()
-            .join(".gitvault/store/dev/service/api/v1/config/app.env.age");
-
+        // Decrypt by source path (no --reveal) → materialise.
         cmd_decrypt(DecryptOptions {
-            file: encrypted.to_string_lossy().to_string(),
+            file: "services/auth/config.json".to_string(),
             identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL.to_string()),
-            fields: None,
+            env: Some("prod".to_string()),
             reveal: false,
-            value_only: false,
-            json: false,
+            json: true,
             no_prompt: true,
             selector: None,
         })
-        .expect("decrypt with bare --output should succeed");
+        .expect("materialise should succeed");
 
-        let restored =
-            std::fs::read_to_string(dir.path().join("service/api/v1/config/app.env")).unwrap();
-        assert!(restored.contains("KEY=VALUE"));
-    }
-
-    /// Covers lines 170-174: `strip_prefix` error when encrypted file is outside the repo.
-    #[test]
-    fn test_resolve_output_path_sentinel_outside_repo_errors() {
-        let _lock = global_test_lock().lock().unwrap();
-        let dir = TempDir::new().unwrap();
-        init_git_repo(dir.path());
-        let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
-
-        // Encrypt a file that's outside the repo root (use absolute path of /tmp/...)
-        let outside = tempfile::NamedTempFile::new().unwrap();
-        let recipients: Vec<Box<dyn age::Recipient + Send>> =
-            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
-        let ciphertext = crate::crypto::encrypt(recipients, b"secret\n").unwrap();
-        std::fs::write(outside.path(), ciphertext).unwrap();
-
-        // --output without value (sentinel) requires input to be under repo root → error.
-        let err = cmd_decrypt(DecryptOptions {
-            file: outside.path().to_string_lossy().to_string(),
-            identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL.to_string()),
-            fields: None,
-            reveal: false,
-            value_only: false,
-            json: false,
-            no_prompt: true,
-            selector: None,
-        })
-        .expect_err("decrypt with sentinel outside repo should fail");
+        // AC10: output must be at <PLAIN_BASE_DIR>/prod/services/auth/config.json
+        let expected = dir
+            .path()
+            .join(crate::defaults::PLAIN_BASE_DIR)
+            .join("prod/services/auth/config.json");
         assert!(
-            matches!(err, GitvaultError::Usage(_)),
-            "expected Usage error for out-of-repo input, got: {err:?}"
+            expected.exists(),
+            "expected materialised file at {}",
+            expected.display()
+        );
+        let content = std::fs::read_to_string(&expected).unwrap();
+        assert!(
+            content.contains("\"key\""),
+            "content should be the decrypted JSON"
         );
     }
 
-    /// Covers lines 186-189: first component != "secrets" with sentinel output.
+    /// AC10: source-path resolution delegates to compute_store_path correctly.
     #[test]
-    fn test_resolve_output_path_sentinel_not_under_secrets_errors() {
+    fn test_resolve_store_path_via_source_computes_correct_mirrored_path() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+        let source = repo_root.join("services/auth/config.json");
+
+        // Create the store file so exists-check passes.
+        let store_dir = repo_root.join(".gitvault/store/prod/services/auth");
+        std::fs::create_dir_all(&store_dir).unwrap();
+        std::fs::write(store_dir.join("config.json.age"), b"").unwrap();
+
+        let result = store::resolve_store_path(&source, "prod", repo_root).unwrap();
+        assert_eq!(
+            result,
+            repo_root.join(".gitvault/store/prod/services/auth/config.json.age"),
+            "source path should resolve to mirrored .age store path"
+        );
+    }
+
+    /// AC10: absolute .age store path under repo root is recognised as explicit store path.
+    #[test]
+    fn test_absolute_age_store_path_is_recognised_as_explicit() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+        // Absolute path under .gitvault/store/
+        let abs_store = repo_root.join(".gitvault/store/dev/app.env.age");
+
+        let result = store::resolve_store_path(&abs_store, "dev", repo_root).unwrap();
+        assert_eq!(
+            result, abs_store,
+            "absolute store path should be returned unchanged"
+        );
+    }
+
+    /// AC10: materialisation writes to <PLAIN_BASE_DIR>/<env>/<relative-source-path>.
+    #[test]
+    fn test_materialisation_path_not_adjacent_to_input() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+        let env = "staging";
+
+        // Simulate an explicit .age store path.
+        let store_path = repo_root.join(".gitvault/store/staging/app/config.yaml.age");
+        let rel = derive_relative_source(&store_path, env, repo_root).unwrap();
+        let out = repo_root
+            .join(crate::defaults::PLAIN_BASE_DIR)
+            .join(env)
+            .join(&rel);
+
+        let expected = repo_root
+            .join(crate::defaults::PLAIN_BASE_DIR)
+            .join("staging/app/config.yaml");
+        assert_eq!(
+            out, expected,
+            "materialised path should be under PLAIN_BASE_DIR"
+        );
+    }
+
+    /// Source-path resolution fails with NotFound when no store file exists.
+    #[test]
+    fn test_cmd_decrypt_source_path_not_found_error() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
+        let (identity_file, _identity) = setup_identity_file();
 
-        // Put an encrypted file directly under the repo root (not under secrets/).
-        let enc_file = dir.path().join("myfile.age");
-        let recipients: Vec<Box<dyn age::Recipient + Send>> =
-            vec![Box::new(identity.to_public()) as Box<dyn age::Recipient + Send>];
-        let ciphertext = crate::crypto::encrypt(recipients, b"data\n").unwrap();
-        std::fs::write(&enc_file, ciphertext).unwrap();
-
-        // --output without value with input NOT under secrets/<env>/ → error
         let err = cmd_decrypt(DecryptOptions {
-            file: enc_file.to_string_lossy().to_string(),
+            file: "nonexistent.env".to_string(),
             identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: Some(crate::cli::OUTPUT_KEEP_PATH_SENTINEL.to_string()),
-            fields: None,
-            reveal: false,
-            value_only: false,
+            env: Some("dev".to_string()),
+            reveal: true,
             json: false,
             no_prompt: true,
             selector: None,
         })
-        .expect_err("decrypt with sentinel outside secrets/ should fail");
+        .expect_err("missing source file should fail");
+
         assert!(
-            matches!(err, GitvaultError::Usage(_)),
-            "expected Usage error for non-secrets input path, got: {err:?}"
+            matches!(err, GitvaultError::NotFound(_)),
+            "expected NotFound error, got: {err:?}"
         );
         let msg = err.to_string();
         assert!(
-            msg.contains(crate::defaults::SECRETS_DIR),
-            "error should mention the secrets store path: {msg}"
+            msg.contains("No encrypted archive found"),
+            "error should have AC5 message: {msg}"
         );
     }
 
-    /// Covers line 84: `create_dir_all(parent)` when `value_only` output path parent doesn't exist.
+    /// Explicit store path: env warning is emitted when --env is also given.
     #[test]
-    fn test_cmd_decrypt_value_only_output_creates_missing_parent_dir() {
+    fn test_env_warning_when_explicit_store_path_and_env_given() {
         let _lock = global_test_lock().lock().unwrap();
         let dir = TempDir::new().unwrap();
         init_git_repo(dir.path());
         let _cwd = CwdGuard::enter(dir.path());
         let (identity_file, identity) = setup_identity_file();
 
-        // Create and value-only-encrypt the source file
-        let env_file = dir.path().join("values.env");
-        std::fs::write(&env_file, "SECRET=abc\n").unwrap();
-        with_identity_env(identity_file.path(), || {
-            crate::commands::encrypt::cmd_encrypt(
-                env_file.to_string_lossy().to_string(),
-                vec![identity.to_public().to_string()],
-                None,
-                false,
-                None,
-                true, // value_only
-                false,
-            )
-            .expect("value-only encrypt should succeed");
-        });
+        write_encrypted_env_file(dir.path(), "dev", "warn.env.age", &identity, "W=1\n");
+        let store_path = crate::repo::get_env_encrypted_path(dir.path(), "dev", "warn.env.age");
 
-        // Output to a non-existent subdirectory; cmd_decrypt must create it
-        let out_file = dir.path().join("newsubdir/decrypted.env");
-        cmd_decrypt(DecryptOptions {
-            file: env_file.to_string_lossy().to_string(),
+        // Should succeed even though --env prod conflicts with path env 'dev'.
+        // (warning emitted to stderr; we just verify the command succeeds)
+        let result = cmd_decrypt(DecryptOptions {
+            file: store_path.to_string_lossy().to_string(),
             identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: Some(out_file.to_string_lossy().to_string()),
-            fields: None,
-            reveal: false,
-            value_only: true,
+            env: Some("prod".to_string()),
+            reveal: true,
             json: false,
             no_prompt: true,
             selector: None,
-        })
-        .expect("value_only decrypt to new subdir should succeed");
-
-        assert!(out_file.exists(), "output file should be created");
-        let content = std::fs::read_to_string(&out_file).unwrap();
-        assert_eq!(content, "SECRET=abc\n");
+        });
+        assert!(
+            result.is_ok(),
+            "should succeed despite env mismatch: {result:?}"
+        );
     }
 
-    /// Covers line 45: `output = Some("-")` branch — treated as `--reveal` (stdout).
+    /// derive_relative_source: correctly strips prefix and .age suffix.
     #[test]
-    fn test_cmd_decrypt_output_dash_is_stdout() {
-        let _lock = global_test_lock().lock().unwrap();
+    fn test_derive_relative_source_nested() {
         let dir = TempDir::new().unwrap();
-        init_git_repo(dir.path());
-        let _cwd = CwdGuard::enter(dir.path());
-        let (identity_file, identity) = setup_identity_file();
+        let repo_root = dir.path();
+        let store_path = repo_root.join(".gitvault/store/prod/svc/api/config.json.age");
 
-        // Write an encrypted file.
-        write_encrypted_env_file(dir.path(), "dev", "dash.env.age", &identity, "DASH=1\n");
-        let encrypted_path = crate::repo::get_env_encrypted_path(dir.path(), "dev", "dash.env.age");
+        let rel = derive_relative_source(&store_path, "prod", repo_root).unwrap();
+        assert_eq!(rel, PathBuf::from("svc/api/config.json"));
+    }
 
-        // Passing output="-" should be treated as reveal=true (POSIX -o - convention).
-        let outcome = cmd_decrypt(DecryptOptions {
-            file: encrypted_path.to_string_lossy().to_string(),
-            identity: Some(identity_file.path().to_string_lossy().to_string()),
-            output: Some("-".to_string()),
-            fields: None,
-            reveal: false,
-            value_only: false,
-            json: false,
-            no_prompt: true,
-            selector: None,
-        })
-        .expect("output='-' should be treated as reveal and succeed");
-        assert_eq!(outcome, CommandOutcome::Success);
+    /// parse_env_from_store_path: extracts environment from repo-relative store path.
+    #[test]
+    fn test_parse_env_from_store_path() {
+        let rel = std::path::Path::new(".gitvault/store/staging/app.env.age");
+        let env = parse_env_from_store_path(rel).unwrap();
+        assert_eq!(env, "staging");
     }
 }

@@ -1,7 +1,5 @@
 use clap::{Parser, Subcommand};
 
-pub const OUTPUT_KEEP_PATH_SENTINEL: &str = "__GITVAULT_KEEP_PATH__";
-
 #[derive(Parser)]
 #[command(
     name = "gitvault",
@@ -84,7 +82,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Encrypt a secret file
+    /// Encrypt a file and archive it under .gitvault/store/<env>/ mirroring its source path. For in-place field-level encryption of JSON/YAML/TOML/.env, use 'gitvault seal'.
     Encrypt {
         /// File to encrypt
         file: String,
@@ -94,40 +92,20 @@ pub enum Commands {
         /// Environment to use (overrides `GITVAULT_ENV` and .git/gitvault/env)
         #[arg(short, long)]
         env: Option<String>,
-        /// Preserve input path relative to repo root under .gitvault/store/<env>/
-        #[arg(long)]
-        keep_path: bool,
-        /// Fields to encrypt (comma-separated key paths, for JSON/YAML/TOML field-level encryption)
-        #[arg(long, value_name = "FIELDS")]
-        fields: Option<String>,
-        /// Encrypt .env values individually instead of whole-file
-        #[arg(long)]
-        value_only: bool,
     },
-    /// Decrypt a .age encrypted file
+    /// Decrypt a file from the .gitvault/store/<env>/ archive. Accepts either the original source path or the .age store path. For in-place field-level decryption of JSON/YAML/TOML/.env, use 'gitvault unseal'.
     Decrypt {
-        /// Encrypted .age file to decrypt
+        /// Original source path (e.g. services/auth/config.json) or explicit .age store path
         file: String,
         /// Identity key file path
         #[arg(short, long, env = "GITVAULT_IDENTITY")]
         identity: Option<String>,
-        /// Output file path (default: strip .age extension)
-        #[arg(
-            short,
-            long,
-            num_args = 0..=1,
-            default_missing_value = OUTPUT_KEEP_PATH_SENTINEL
-        )]
-        output: Option<String>,
-        /// Fields to decrypt (comma-separated key paths, for JSON/YAML/TOML)
-        #[arg(long, value_name = "FIELDS")]
-        fields: Option<String>,
-        /// Print decrypted content to stdout instead of writing to file (shorthand for `-o -`)
+        /// Environment for store path resolution (overrides GITVAULT_ENV and .git/gitvault/env)
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Print decrypted content to stdout instead of writing to .git/gitvault/plain/
         #[arg(long)]
         reveal: bool,
-        /// Decrypt .env values individually (reverse of `encrypt --value-only`)
-        #[arg(long)]
-        value_only: bool,
     },
     /// Materialize secrets to root .env
     Materialize {
@@ -260,6 +238,36 @@ pub enum Commands {
         action: AiAction,
     },
 
+    /// Encrypt string field values in a JSON/YAML/TOML/.env file in-place (REQ-112)
+    Seal {
+        /// File to seal (.json, .yaml, .yml, .toml, .env, .env.<suffix>)
+        file: String,
+        /// Additional recipient age public keys (repeat for multiple)
+        #[arg(short = 'r', long = "recipient", value_name = "PUBKEY")]
+        recipients: Vec<String>,
+        /// Environment to use for recipient key resolution
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Only seal the listed dot-path fields (comma-separated, e.g. "db.password,api.key")
+        #[arg(long, value_name = "FIELDS")]
+        fields: Option<String>,
+    },
+
+    /// Decrypt all encrypted field values in a JSON/YAML/TOML/.env file in-place (REQ-112)
+    Unseal {
+        /// File to unseal
+        file: String,
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
+        identity: Option<String>,
+        /// Only decrypt the listed fields (comma-separated, e.g. "db.password,api.key")
+        #[arg(long, value_name = "FIELDS")]
+        fields: Option<String>,
+        /// Print decrypted content to stdout instead of writing back to the file
+        #[arg(long)]
+        reveal: bool,
+    },
+
     /// AWS SSM Parameter Store backend
     #[cfg(feature = "ssm")]
     Ssm {
@@ -350,36 +358,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_decrypt_bare_output_sets_keep_path_sentinel() {
-        let cli =
-            Cli::try_parse_from(["gitvault", "decrypt", "secrets/dev/app.env.age", "--output"])
-                .expect("bare --output should parse");
+    fn test_decrypt_parses_source_path_with_env() {
+        let cli = Cli::try_parse_from([
+            "gitvault",
+            "decrypt",
+            "services/auth/config.json",
+            "--env",
+            "prod",
+        ])
+        .expect("decrypt with source path and env should parse");
 
         match cli.command {
-            Commands::Decrypt { output, .. } => {
-                assert_eq!(output, Some(OUTPUT_KEEP_PATH_SENTINEL.to_string()));
+            Commands::Decrypt {
+                file, env, reveal, ..
+            } => {
+                assert_eq!(file, "services/auth/config.json");
+                assert_eq!(env, Some("prod".to_string()));
+                assert!(!reveal);
             }
             _ => panic!("expected decrypt command"),
         }
     }
 
     #[test]
-    fn test_encrypt_keep_path_flag_parses() {
+    fn test_decrypt_reveal_flag() {
         let cli = Cli::try_parse_from([
             "gitvault",
-            "encrypt",
-            "app.env",
-            "--recipient",
-            "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq7f7f3",
-            "--keep-path",
+            "decrypt",
+            ".gitvault/store/dev/app.env.age",
+            "--reveal",
         ])
-        .expect("--keep-path should parse");
+        .expect("decrypt --reveal should parse");
 
         match cli.command {
-            Commands::Encrypt { keep_path, .. } => {
-                assert!(keep_path);
+            Commands::Decrypt { reveal, .. } => {
+                assert!(reveal);
             }
-            _ => panic!("expected encrypt command"),
+            _ => panic!("expected decrypt command"),
         }
     }
 

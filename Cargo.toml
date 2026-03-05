@@ -1,6 +1,6 @@
 [package]
 name = "gitvault"
-version = "0.4.11"
+version = "0.5.0"
 authors = ["Andreas Heissenberger"]
 repository = "https://github.com/aheissenberger/gitvault"
 homepage = "https://github.com/aheissenberger/gitvault"
@@ -26,6 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 toml = { version = "0.8", features = ["preserve_order"] }
+toml_edit = "0.22"
 thiserror = "1"
 tempfile = "3"
 dotenvy = "0.15"

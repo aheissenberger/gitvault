@@ -213,6 +213,36 @@ pub struct GitvaultConfig {
     pub paths: PathsConfig,
     /// OS keyring configuration.
     pub keyring: KeyringConfig,
+    /// Seal configuration (REQ-112).
+    pub seal: SealConfig,
+}
+
+// ---------------------------------------------------------------------------
+// SealConfig (REQ-112 AC18)
+// ---------------------------------------------------------------------------
+
+/// Configuration for the `[seal]` section (REQ-112).
+#[derive(Debug, Default)]
+pub struct SealConfig {
+    /// Glob patterns of files whose string fields should be sealed.
+    pub patterns: Vec<String>,
+    /// Per-file field overrides.
+    pub overrides: Vec<SealOverride>,
+    /// Files excluded from drift detection.
+    pub excludes: Vec<SealExclude>,
+}
+
+/// A `[[seal.override]]` entry restricting sealing to named dot-path fields.
+#[derive(Debug, Clone)]
+pub struct SealOverride {
+    pub pattern: String,
+    pub fields: Vec<String>,
+}
+
+/// A `[[seal.exclude]]` entry that suppresses drift detection for matching files.
+#[derive(Debug, Clone)]
+pub struct SealExclude {
+    pub pattern: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +301,34 @@ struct RawConfig {
     barrier: Option<RawBarrierConfig>,
     paths: Option<RawPathsConfig>,
     keyring: Option<RawKeyringConfig>,
+    seal: Option<RawSealConfig>,
+}
+
+/// Intermediate TOML representation for `[[seal.override]]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSealOverride {
+    pattern: String,
+    fields: Vec<String>,
+}
+
+/// Intermediate TOML representation for `[[seal.exclude]]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSealExclude {
+    pattern: String,
+}
+
+/// Intermediate TOML representation for `[seal]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSealConfig {
+    #[serde(default)]
+    patterns: Vec<String>,
+    #[serde(rename = "override", default)]
+    overrides: Vec<RawSealOverride>,
+    #[serde(rename = "exclude", default)]
+    excludes: Vec<RawSealExclude>,
 }
 
 // ---------------------------------------------------------------------------
@@ -326,12 +384,30 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
             account: r.account.filter(|s| !s.is_empty()),
         });
 
+    let seal = raw.seal.map_or_else(SealConfig::default, |r| SealConfig {
+        patterns: r.patterns,
+        overrides: r
+            .overrides
+            .into_iter()
+            .map(|o| SealOverride {
+                pattern: o.pattern,
+                fields: o.fields,
+            })
+            .collect(),
+        excludes: r
+            .excludes
+            .into_iter()
+            .map(|e| SealExclude { pattern: e.pattern })
+            .collect(),
+    });
+
     Ok(GitvaultConfig {
         hooks,
         env,
         barrier,
         paths,
         keyring,
+        seal,
     })
 }
 
@@ -403,12 +479,23 @@ fn effective_config_impl(
         account: repo.keyring.account.or(global.keyring.account),
     };
 
+    // Seal config: repo wins (repo-level config is authoritative).
+    let seal = if !repo.seal.patterns.is_empty()
+        || !repo.seal.overrides.is_empty()
+        || !repo.seal.excludes.is_empty()
+    {
+        repo.seal
+    } else {
+        global.seal
+    };
+
     Ok(GitvaultConfig {
         hooks: HooksConfig { adapter },
         env,
         barrier,
         paths,
         keyring,
+        seal,
     })
 }
 
