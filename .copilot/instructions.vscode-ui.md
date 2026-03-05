@@ -11,6 +11,8 @@ Rules:
 - Keep edits minimal and reviewable.
 - Use `cargo xtask`/aliases for spec/worktree operations.
 - Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.
+- Validate command examples against `gitvault --help` and `gitvault <command> --help`.
+- Keep AI-facing command docs aligned with `gitvault ai skill` and `gitvault ai context`.
 - For Rust changes, ensure full test coverage.
 - Use `cargo llvm-cov` for coverage and never use `cargo tarpaulin`.
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).

@@ -24,6 +24,13 @@ Minimize repeated source-code exploration by giving agents a shared map, fixed w
 4. Append findings/assumptions to task output so the next agent can reuse context.
 5. Validate with targeted checks first, then broader checks if needed.
 
+## CLI Command Reference (Mandatory)
+
+- Run `cargo xtask cli-help` before editing CLI docs.
+- Use `gitvault --help` and `gitvault <command> --help` as canonical command references.
+- Use `gitvault ai skill` and `gitvault ai context` to verify embedded AI-facing docs.
+- Treat `docs/ai/cli-help.json` as the generated source of truth for command/flag lists.
+
 ## Runtime Constraints (Mandatory)
 
 - Python is not installed in this environment.

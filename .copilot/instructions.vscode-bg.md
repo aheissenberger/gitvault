@@ -14,6 +14,8 @@ Hard rules:
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Run `cargo xtask spec-verify` (or `cargo spec-verify`) and fix failures.
 - Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.
+- Validate command examples against `gitvault --help` and `gitvault <command> --help`.
+- Keep AI-facing command docs aligned with `gitvault ai skill` and `gitvault ai context`.
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - Use `cargo xtask wt-*` for worktree operations only.
 - Never start parallel file-changing AI agent sessions in the primary worktree; create a dedicated git worktree per agent first.

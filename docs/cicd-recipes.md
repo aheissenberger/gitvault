@@ -366,7 +366,7 @@ spec:
         - -c
         - |
           GITVAULT_IDENTITY_FD=3 \
-          gitvault materialize --no-prompt --env prod --output /secrets/.env \
+          gitvault materialize --no-prompt --env prod \
           3<<<"$GITVAULT_KEY"
       env:
         - name: GITVAULT_KEY

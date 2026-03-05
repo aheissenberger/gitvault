@@ -123,8 +123,8 @@ Global options:  --json  --no-prompt  --identity-stdin  --identity-selector
 Commands:
   init          Onboard a new team member (identity, recipient, repo hardening)
   harden        Harden repo (hooks, .gitignore); or import+encrypt a file with harden <file>
-  encrypt       Encrypt a secret file (--env, --keep-path, --fields, --value-only)
-  decrypt       Decrypt a .age file or reveal encrypted fields in JSON/YAML/TOML (--output, --fields, --value-only, --reveal)
+  encrypt       Encrypt a file into .gitvault/store/<env>/ using mirrored source path
+  decrypt       Decrypt from .gitvault/store/<env>/ using source path or explicit .age path (--reveal)
   materialize   Materialize secrets to root .env
   status        Check repository safety status
   run           Inject secrets into child process env (--clear-env, --keep-vars)
@@ -136,6 +136,8 @@ Commands:
   identity      Manage identities: create [--add-recipient] | pubkey
   check         Preflight validation without side effects (-H / --skip-history-check)
   ai            Print embedded skill or context file for AI agents: ai skill | ai context
+  seal          In-place field/value encryption for JSON/YAML/TOML/.env
+  unseal        In-place field/value decryption for JSON/YAML/TOML/.env (--reveal)
   ssm           AWS SSM Parameter Store sync (--features ssm)
 ```
 
@@ -146,10 +148,10 @@ Commands:
 | Onboard new team member | `gitvault init` |
 | Import + encrypt existing file | `gitvault harden <file> --env <env>` |
 | Encrypt whole file | `gitvault encrypt <file> --env <env>` |
-| Encrypt selected fields | `gitvault encrypt <file> --fields a.b,c` |
-| Encrypt `.env` per-value | `gitvault encrypt .env --value-only` |
+| Seal selected fields in-place | `gitvault seal <file> --fields a.b,c` |
+| Seal `.env` values in-place | `gitvault seal .env` |
 | Decrypt to stdout | `gitvault decrypt <file.age> --reveal` |
-| Reveal encrypted fields (auto-discover) | `gitvault decrypt <config.json> --reveal` |
+| Unseal to stdout | `gitvault unseal <config.json> --reveal` |
 | Materialize root `.env` | `gitvault materialize` |
 | Run command with injected secrets | `gitvault run --keep-vars <VARS> -- <cmd> [args...]` |
 | Safety check (CI-friendly) | `gitvault status --fail-if-dirty --no-prompt` |
@@ -163,7 +165,7 @@ Commands:
 | OS keyring | `gitvault keyring set\|get\|delete` |
 | SSH identity passphrase (keyring) | `gitvault keyring set-passphrase\|get-passphrase\|delete-passphrase` |
 | AI skill / context for agents | `gitvault ai skill` / `gitvault ai context` |
-| Decrypt to stdout (POSIX) | `gitvault decrypt <file.age> -o -` |
+| Print command help | `gitvault <command> --help` |
 
 ---
 

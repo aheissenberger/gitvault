@@ -201,7 +201,7 @@ git worktree add ../gitvault-agent-a -b agent-a
 git worktree add ../gitvault-agent-b -b agent-b
 ```
 
-Each worktree resolves its own environment via `.secrets/env` or `GITVAULT_ENV`, enabling parallel
+Each worktree resolves its own environment via `.git/gitvault/env` or `GITVAULT_ENV`, enabling parallel
 multi-agent development without environment cross-contamination.
 
 ## Local development environment

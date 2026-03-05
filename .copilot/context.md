@@ -24,3 +24,8 @@
 
 ## Skills
 - Deploy/release workflow: `.copilot/skills/deploy-semver.md`
+
+## CLI References
+- Canonical generated index: `docs/ai/cli-help.json` (refresh with `cargo xtask cli-help`).
+- Canonical command help: `gitvault --help` and `gitvault <command> --help`.
+- Canonical AI outputs: `gitvault ai skill` and `gitvault ai context`.
