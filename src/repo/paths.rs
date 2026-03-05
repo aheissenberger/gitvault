@@ -233,16 +233,39 @@ pub fn ensure_dirs(repo_root: &Path, env: &str) -> Result<(), GitvaultError> {
     Ok(())
 }
 
+/// Recursively flatten a JSON/YAML/TOML value into KEY=value pairs.
+/// Path segments are joined with `_` and uppercased.
+/// Arrays and null values are skipped.
+fn flatten_to_env_pairs(value: &serde_json::Value, prefix: &str, out: &mut Vec<(String, String)>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let key = if prefix.is_empty() {
+                    k.to_uppercase()
+                } else {
+                    format!("{}_{}", prefix, k.to_uppercase())
+                };
+                flatten_to_env_pairs(v, &key, out);
+            }
+        }
+        serde_json::Value::String(s) => out.push((prefix.to_string(), s.clone())),
+        serde_json::Value::Number(n) => out.push((prefix.to_string(), n.to_string())),
+        serde_json::Value::Bool(b) => out.push((prefix.to_string(), b.to_string())),
+        serde_json::Value::Null | serde_json::Value::Array(_) => {}
+    }
+}
+
 /// Decrypt all encrypted secrets for the given environment.
 ///
 /// Reads all `.age` files for `env`, decrypts them with `identity`, and returns
-/// the key-value pairs parsed from the plaintext.
+/// the key-value pairs parsed from the plaintext. Format is detected from the
+/// filename stem (stripping the `.age` suffix) using `validated_extension`.
 ///
 /// # Errors
 ///
 /// Returns [`GitvaultError::Io`] if reading an encrypted file fails.
 /// Returns [`GitvaultError::Decryption`] if any file cannot be decrypted with `identity`.
-/// Returns [`GitvaultError::Usage`] if decrypted content is not valid `.env` syntax.
+/// Returns [`GitvaultError::Usage`] if decrypted content is not valid for its detected format.
 pub fn decrypt_env_secrets(
     repo_root: &Path,
     env: &str,
@@ -253,26 +276,70 @@ pub fn decrypt_env_secrets(
 
     for path in encrypted_files {
         let ciphertext = std::fs::read(&path)?;
-        match crypto::decrypt(identity, &ciphertext) {
-            Ok(plaintext) => {
-                // REQ-101: strict UTF-8 conversion — reject non-UTF-8 secret content rather
-                // than silently replacing bytes. Zeroizing<String> ensures the plaintext
-                // string is overwritten when dropped, even if parse_env_pairs errors.
-                let text = zeroize::Zeroizing::new(String::from_utf8(plaintext.to_vec()).map_err(
-                    |_| {
-                        GitvaultError::Usage(format!(
-                            "Decrypted content of {} is not valid UTF-8",
-                            path.display()
-                        ))
-                    },
-                )?);
-                secrets.extend(merge::parse_env_pairs(&text)?);
-            }
+        let plaintext = match crypto::decrypt(identity, &ciphertext) {
+            Ok(p) => p,
             Err(e) => {
                 return Err(GitvaultError::Decryption(format!(
                     "Failed to decrypt {}: {e}",
                     path.display()
                 )));
+            }
+        };
+
+        // REQ-101: strict UTF-8 conversion — reject non-UTF-8 secret content rather
+        // than silently replacing bytes. Zeroizing<String> ensures the plaintext
+        // string is overwritten when dropped, even if parsing errors.
+        let text =
+            zeroize::Zeroizing::new(String::from_utf8(plaintext.to_vec()).map_err(|_| {
+                GitvaultError::Usage(format!(
+                    "Decrypted content of {} is not valid UTF-8",
+                    path.display()
+                ))
+            })?);
+
+        // REQ-117: Detect format from stem (strip .age suffix) and route to correct parser.
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let fmt = crate::commands::seal::validated_extension(std::path::Path::new(stem));
+
+        match fmt.as_deref() {
+            Ok("env") => {
+                secrets.extend(merge::parse_env_pairs(&text)?);
+            }
+            Ok("json") => {
+                let val: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+                    GitvaultError::Usage(format!("Invalid JSON in {}: {e}", path.display()))
+                })?;
+                flatten_to_env_pairs(&val, "", &mut secrets);
+            }
+            Ok("yaml") | Ok("yml") => {
+                let val: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|e| {
+                    GitvaultError::Usage(format!("Invalid YAML in {}: {e}", path.display()))
+                })?;
+                let json_val = serde_json::to_value(val).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "Cannot convert YAML to JSON in {}: {e}",
+                        path.display()
+                    ))
+                })?;
+                flatten_to_env_pairs(&json_val, "", &mut secrets);
+            }
+            Ok("toml") => {
+                let val: toml::Value = toml::from_str(&text).map_err(|e| {
+                    GitvaultError::Usage(format!("Invalid TOML in {}: {e}", path.display()))
+                })?;
+                let json_val = serde_json::to_value(val).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "Cannot convert TOML to JSON in {}: {e}",
+                        path.display()
+                    ))
+                })?;
+                flatten_to_env_pairs(&json_val, "", &mut secrets);
+            }
+            _ => {
+                eprintln!(
+                    "gitvault: warning: skipping {}: unsupported format",
+                    path.display()
+                );
             }
         }
     }
@@ -703,5 +770,124 @@ mod tests {
         let found = find_repo_root_from_with_runner(&sub, &FailingGitRunner).unwrap();
 
         assert_paths_equivalent(&found, tmp.path());
+    }
+
+    // ── REQ-117: decrypt_env_secrets multi-format tests ───────────────────────
+
+    fn encrypt_content(identity: &x25519::Identity, content: &[u8]) -> Vec<u8> {
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![Box::new(identity.to_public())];
+        crate::crypto::encrypt(recipients, content).unwrap()
+    }
+
+    /// REQ-117 AC3: JSON store file is flattened into env pairs.
+    #[test]
+    fn test_decrypt_env_secrets_json_store_file() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let json = r#"{"api_key":"abc","db":{"host":"localhost","pass":"s3cr3t"}}"#;
+        let ciphertext = encrypt_content(&identity, json.as_bytes());
+        std::fs::write(secrets_dir.join("secrets.json.age"), &ciphertext).unwrap();
+
+        let pairs = decrypt_env_secrets(dir.path(), "dev", &identity).unwrap();
+        assert!(
+            pairs.contains(&("API_KEY".to_string(), "abc".to_string())),
+            "missing API_KEY: {pairs:?}"
+        );
+        assert!(
+            pairs.contains(&("DB_HOST".to_string(), "localhost".to_string())),
+            "missing DB_HOST: {pairs:?}"
+        );
+        assert!(
+            pairs.contains(&("DB_PASS".to_string(), "s3cr3t".to_string())),
+            "missing DB_PASS: {pairs:?}"
+        );
+    }
+
+    /// REQ-117 AC4: YAML store file is flattened into env pairs.
+    #[test]
+    fn test_decrypt_env_secrets_yaml_store_file() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let yaml = "key: value\nnested:\n  sub: data\n";
+        let ciphertext = encrypt_content(&identity, yaml.as_bytes());
+        std::fs::write(secrets_dir.join("config.yaml.age"), &ciphertext).unwrap();
+
+        let pairs = decrypt_env_secrets(dir.path(), "dev", &identity).unwrap();
+        assert!(
+            pairs.contains(&("KEY".to_string(), "value".to_string())),
+            "missing KEY: {pairs:?}"
+        );
+        assert!(
+            pairs.contains(&("NESTED_SUB".to_string(), "data".to_string())),
+            "missing NESTED_SUB: {pairs:?}"
+        );
+    }
+
+    /// REQ-117 AC5: TOML store file is flattened into env pairs.
+    #[test]
+    fn test_decrypt_env_secrets_toml_store_file() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let toml_content = "[db]\npassword = \"abc\"\n";
+        let ciphertext = encrypt_content(&identity, toml_content.as_bytes());
+        std::fs::write(secrets_dir.join("settings.toml.age"), &ciphertext).unwrap();
+
+        let pairs = decrypt_env_secrets(dir.path(), "dev", &identity).unwrap();
+        assert!(
+            pairs.contains(&("DB_PASSWORD".to_string(), "abc".to_string())),
+            "missing DB_PASSWORD: {pairs:?}"
+        );
+    }
+
+    /// REQ-117 AC6: Unknown format is skipped with a warning (no error, no pairs).
+    #[test]
+    fn test_decrypt_env_secrets_unknown_format_skipped() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let ciphertext = encrypt_content(&identity, b"<xml>data</xml>");
+        std::fs::write(secrets_dir.join("data.xml.age"), &ciphertext).unwrap();
+
+        let pairs = decrypt_env_secrets(dir.path(), "dev", &identity).unwrap();
+        assert!(
+            pairs.is_empty(),
+            "expected no pairs for unknown format, got: {pairs:?}"
+        );
+    }
+
+    /// REQ-117 AC8: Mixed store (.env.age + .json.age) → all pairs combined.
+    #[test]
+    fn test_decrypt_env_secrets_mixed_env_and_json() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let env_ct = encrypt_content(&identity, b"A=1\n");
+        std::fs::write(secrets_dir.join("app.env.age"), &env_ct).unwrap();
+
+        let json_ct = encrypt_content(&identity, br#"{"B":"2"}"#);
+        std::fs::write(secrets_dir.join("cfg.json.age"), &json_ct).unwrap();
+
+        let pairs = decrypt_env_secrets(dir.path(), "dev", &identity).unwrap();
+        assert!(
+            pairs.contains(&("A".to_string(), "1".to_string())),
+            "missing A: {pairs:?}"
+        );
+        assert!(
+            pairs.contains(&("B".to_string(), "2".to_string())),
+            "missing B: {pairs:?}"
+        );
     }
 }
