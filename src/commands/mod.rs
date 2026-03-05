@@ -11,6 +11,7 @@ pub mod encrypt;
 pub mod identity;
 pub mod init;
 pub mod keyring;
+pub mod kv;
 pub mod materialize;
 pub mod recipients;
 pub mod run_cmd;

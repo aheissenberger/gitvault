@@ -507,3 +507,112 @@ fn decrypt_reveal_prints_plaintext() {
         String::from_utf8_lossy(&dec.stdout)
     );
 }
+
+#[test]
+fn get_set_sealed_json_roundtrip() {
+    let repo = TempDir::new().unwrap();
+    init_git_repo(repo.path());
+    let (_id_tmp, identity_path, pubkey) = write_identity_file();
+
+    // Add the recipient and seal a JSON file.
+    let recipient_add = bin()
+        .args(["recipient", "add", &pubkey])
+        .current_dir(repo.path())
+        .output()
+        .expect("recipient add should run");
+    assert!(
+        recipient_add.status.success(),
+        "recipient add: {}",
+        String::from_utf8_lossy(&recipient_add.stderr)
+    );
+
+    let secrets_path = repo.path().join("secrets.json");
+    std::fs::write(
+        &secrets_path,
+        r#"{"db":{"password":"original"},"api":{"token":"tok123"}}"#,
+    )
+    .unwrap();
+
+    let seal = bin()
+        .args(["seal", "secrets.json"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("seal should run");
+    assert!(
+        seal.status.success(),
+        "seal: {}",
+        String::from_utf8_lossy(&seal.stderr)
+    );
+
+    // get the db.password field.
+    let get = bin()
+        .args(["get", "secrets.json", "db.password"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("get should run");
+    assert!(
+        get.status.success(),
+        "get: {}",
+        String::from_utf8_lossy(&get.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&get.stdout).trim(), "original");
+
+    // set the db.password to a new value.
+    let set = bin()
+        .args(["set", "secrets.json", "db.password", "rotated"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("set should run");
+    assert!(
+        set.status.success(),
+        "set: {}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    // get again to confirm update.
+    let get2 = bin()
+        .args(["get", "secrets.json", "db.password"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("get2 should run");
+    assert!(
+        get2.status.success(),
+        "get2: {}",
+        String::from_utf8_lossy(&get2.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&get2.stdout).trim(), "rotated");
+
+    // other field unchanged.
+    let get3 = bin()
+        .args(["get", "secrets.json", "api.token"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("get3 should run");
+    assert!(
+        get3.status.success(),
+        "get3: {}",
+        String::from_utf8_lossy(&get3.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&get3.stdout).trim(), "tok123");
+
+    // --json output format.
+    let get_json = bin()
+        .args(["get", "secrets.json", "api.token", "--json"])
+        .env("GITVAULT_IDENTITY", &identity_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("get --json should run");
+    assert!(
+        get_json.status.success(),
+        "get --json: {}",
+        String::from_utf8_lossy(&get_json.stderr)
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&get_json.stdout).expect("valid JSON");
+    assert_eq!(parsed["key"], "api.token");
+    assert_eq!(parsed["value"], "tok123");
+}

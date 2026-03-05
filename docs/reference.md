@@ -327,6 +327,182 @@ When compiled with `--features ssm`:
 | `AWS_PROFILE` | AWS profile (SSM feature) |
 | `AWS_ROLE_ARN` | AWS role ARN (SSM feature) |
 
+## Configuration File
+
+Configuration is loaded from `.gitvault/config.toml` (repository-level) with fallback to `~/.config/gitvault/config.toml` (user-global). All settings are optional — missing keys use built-in defaults.
+
+### `[hooks]`
+
+Hook-manager adapter configuration.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `adapter` | string | none | Hook manager to use: `husky`, `pre-commit`, or `lefthook` |
+
+**Example:**
+```toml
+[hooks]
+adapter = "pre-commit"
+```
+
+### `[env]`
+
+Environment resolution configuration.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `default` | string | `"dev"` | Default environment when `GITVAULT_ENV` and `.git/gitvault/env` are both absent |
+| `prod_name` | string | `"prod"` | Environment name that triggers production barrier checks |
+
+**Example:**
+```toml
+[env]
+default = "dev"
+prod_name = "production"
+```
+
+### `[barrier]`
+
+Production barrier configuration.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ttl_secs` | integer | `3600` | Token lifetime in seconds (1 hour) |
+
+**Example:**
+```toml
+[barrier]
+ttl_secs = 7200  # 2 hours
+```
+
+### `[paths]`
+
+Repository path layout configuration.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `recipients_dir` | string | `".gitvault/recipients"` | Directory containing recipient public keys |
+| `materialize_output` | string | `".env"` | Filename written by `gitvault materialize` |
+| `store_dir` | string | `".gitvault/store"` | Encrypted secrets store directory |
+
+**Example:**
+```toml
+[paths]
+recipients_dir = ".secrets/recipients"
+materialize_output = ".env.decrypted"
+store_dir = ".gitvault/store"
+```
+
+### `[keyring]`
+
+OS keyring configuration (macOS Keychain, Linux Secret Service, Windows Credential Manager).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `service` | string | `"gitvault"` | Keyring service name |
+| `account` | string | `"age-identity"` | Keyring account/username |
+
+**Example:**
+```toml
+[keyring]
+service = "my-gitvault"
+account = "identity-key"
+```
+
+### `[seal]`
+
+Per-field encryption configuration for structured files (JSON/YAML/TOML/.env).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `patterns` | array of strings | `[]` | Glob patterns of files whose string fields should be sealed |
+
+**Example:**
+```toml
+[seal]
+patterns = ["config/*.json", "secrets/*.yaml"]
+```
+
+**Field-specific overrides** (`[[seal.override]]`):
+
+Restrict sealing to specific dot-path fields for matching files.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `pattern` | string | File glob pattern |
+| `fields` | array of strings | Dot-path field names to seal |
+
+**Example:**
+```toml
+[[seal.override]]
+pattern = "config/db.json"
+fields = ["password", "connection.secret"]
+```
+
+**Drift detection exclusions** (`[[seal.exclude]]`):
+
+Exclude files from drift detection in `gitvault check`.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `pattern` | string | File glob pattern to exclude |
+
+**Example:**
+```toml
+[[seal.exclude]]
+pattern = "config/generated-*.json"
+```
+
+### `[editor]`
+
+Editor configuration for `gitvault edit`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `command` | string | none | Editor command (falls back to `$VISUAL`, `$EDITOR`, or platform default) |
+
+**Example:**
+```toml
+[editor]
+command = "code --wait"
+```
+
+### Complete Example
+
+```toml
+[hooks]
+adapter = "pre-commit"
+
+[env]
+default = "dev"
+prod_name = "production"
+
+[barrier]
+ttl_secs = 7200
+
+[paths]
+recipients_dir = ".gitvault/recipients"
+materialize_output = ".env"
+store_dir = ".gitvault/store"
+
+[keyring]
+service = "gitvault"
+account = "age-identity"
+
+[seal]
+patterns = ["config/*.json", "secrets/*.yaml"]
+
+[[seal.override]]
+pattern = "config/db.json"
+fields = ["password", "api_key"]
+
+[[seal.exclude]]
+pattern = "config/test-*.json"
+
+[editor]
+command = "vim"
+```
+
 ## Exit Codes
 
 | Code | Meaning |

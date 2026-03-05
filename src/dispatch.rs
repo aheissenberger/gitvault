@@ -193,6 +193,38 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             no_prompt: cli.no_prompt,
             selector: cli.identity_selector.clone(),
         }),
+        Commands::Get {
+            file,
+            key,
+            identity,
+            env,
+        } => crate::commands::kv::cmd_get(crate::commands::kv::GetOptions {
+            file,
+            key,
+            identity,
+            env,
+            json: cli.json,
+            no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
+        }),
+        Commands::Set {
+            file,
+            key,
+            value,
+            stdin,
+            identity,
+            env,
+        } => crate::commands::kv::cmd_set(crate::commands::kv::SetOptions {
+            file,
+            key,
+            value,
+            stdin,
+            identity,
+            env,
+            json: cli.json,
+            no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
+        }),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
             dispatch_ssm(action, cli.aws_profile, cli.aws_role_arn, cli.json)

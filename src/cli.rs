@@ -286,6 +286,39 @@ pub enum Commands {
         editor: Option<String>,
     },
 
+    /// Get the plaintext value of a single key from a sealed or encrypted file
+    Get {
+        /// File to read from (sealed or .age store file)
+        file: String,
+        /// Key to read (dot-path for JSON/YAML/TOML, variable name for .env)
+        key: String,
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
+        identity: Option<String>,
+        /// Environment for store-file path resolution and recipient lookup
+        #[arg(short, long)]
+        env: Option<String>,
+    },
+
+    /// Set (update or create) a single key's value in a sealed or encrypted file
+    Set {
+        /// File to update (sealed or .age store file)
+        file: String,
+        /// Key to set (dot-path for JSON/YAML/TOML, variable name for .env)
+        key: String,
+        /// New value (omit to use --stdin)
+        value: Option<String>,
+        /// Read the new value from stdin (recommended for secrets)
+        #[arg(long)]
+        stdin: bool,
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
+        identity: Option<String>,
+        /// Environment for store-file path resolution and recipient lookup
+        #[arg(short, long)]
+        env: Option<String>,
+    },
+
     /// AWS SSM Parameter Store backend
     #[cfg(feature = "ssm")]
     Ssm {
