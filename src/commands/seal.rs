@@ -89,11 +89,23 @@ pub fn cmd_seal(opts: SealOptions) -> Result<CommandOutcome, GitvaultError> {
     // Load recipients
     let recipient_keys = crate::identity::resolve_recipient_keys(&repo_root, opts.recipients)?;
 
-    // Parse --fields
-    let fields_opt: Option<Vec<String>> = opts
+    // Compute repo-relative path early (needed for override lookup)
+    let rel_path = relative_path_to_repo(&abs_file_canon, &abs_repo);
+
+    // Parse --fields; fall back to [[seal.override]] config when no flag given
+    let cli_fields: Option<Vec<String>> = opts
         .fields
         .as_deref()
         .map(|f| f.split(',').map(|s| s.trim().to_string()).collect());
+    let config_fields: Option<Vec<String>> =
+        crate::config::load_config(&repo_root).ok().and_then(|cfg| {
+            cfg.seal
+                .overrides
+                .into_iter()
+                .find(|o| pattern_matches(&o.pattern, &rel_path))
+                .map(|o| o.fields)
+        });
+    let fields_opt = cli_fields.or(config_fields);
 
     // Read content
     let content = std::fs::read_to_string(&file_path)
@@ -106,7 +118,6 @@ pub fn cmd_seal(opts: SealOptions) -> Result<CommandOutcome, GitvaultError> {
     atomic_write(&file_path, new_content.as_bytes())?;
 
     // AC11: Update config.toml
-    let rel_path = relative_path_to_repo(&abs_file_canon, &abs_repo);
     let fields_for_config = fields_opt.as_deref();
     match update_seal_config(&repo_root, &rel_path, fields_for_config) {
         Ok(()) => {}
@@ -169,11 +180,32 @@ pub fn cmd_unseal(opts: UnsealOptions) -> Result<CommandOutcome, GitvaultError> 
     )?;
     let identity = any_identity.as_identity();
 
-    // Parse --fields
-    let fields_opt: Option<Vec<String>> = opts
+    // Parse --fields; fall back to [[seal.override]] config when no flag given
+    let repo_root_for_cfg = crate::repo::find_repo_root().ok();
+    let abs_file_for_cfg = if file_path.is_absolute() {
+        file_path.clone()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(&file_path)
+    };
+    let cli_fields: Option<Vec<String>> = opts
         .fields
         .as_deref()
         .map(|f| f.split(',').map(|s| s.trim().to_string()).collect());
+    let config_fields: Option<Vec<String>> = repo_root_for_cfg.as_ref().and_then(|root| {
+        let abs_root = root.canonicalize().unwrap_or_else(|_| root.clone());
+        let abs_f = abs_file_for_cfg
+            .canonicalize()
+            .unwrap_or_else(|_| abs_file_for_cfg.clone());
+        let rel = relative_path_to_repo(&abs_f, &abs_root);
+        crate::config::load_config(root).ok().and_then(|cfg| {
+            cfg.seal
+                .overrides
+                .into_iter()
+                .find(|o| pattern_matches(&o.pattern, &rel))
+                .map(|o| o.fields)
+        })
+    });
+    let fields_opt = cli_fields.or(config_fields);
 
     // Read content
     let content = std::fs::read_to_string(&file_path)
@@ -2783,5 +2815,69 @@ mod tests {
     fn test_toml_field_str_top_level() {
         let v: toml::Value = "key = \"value\"\n".parse().unwrap();
         assert_eq!(toml_field_str(&v, &["key"]), Some("value"));
+    }
+
+    // ── cmd_seal reads [[seal.override]] fields from config ────────────────
+
+    #[test]
+    fn test_cmd_seal_respects_config_override_fields() {
+        use crate::commands::test_helpers::{
+            CwdGuard, global_test_lock, init_git_repo, setup_identity_file,
+        };
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+
+        // Write a recipient key so cmd_seal can encrypt
+        let (_id_file, identity) = setup_identity_file();
+        let pub_key = identity.to_public().to_string();
+        let recipients_dir = dir.path().join(".gitvault/recipients");
+        std::fs::create_dir_all(&recipients_dir).unwrap();
+        std::fs::write(recipients_dir.join("ci.pub"), pub_key).unwrap();
+
+        // Write [[seal.override]] config that restricts sealing to "Password" only
+        let gitvault_dir = dir.path().join(".gitvault");
+        std::fs::create_dir_all(&gitvault_dir).unwrap();
+        std::fs::write(
+            gitvault_dir.join("config.toml"),
+            "[seal]\npatterns = [\"conf/dbsecrets.json\"]\n\n[[seal.override]]\npattern = \"conf/dbsecrets.json\"\nfields = [\"Password\"]\n",
+        )
+        .unwrap();
+
+        // Write source JSON with two fields
+        let conf_dir = dir.path().join("conf");
+        std::fs::create_dir_all(&conf_dir).unwrap();
+        let src = conf_dir.join("dbsecrets.json");
+        std::fs::write(&src, r#"{"Host":"localhost","Password":"s3cr3t"}"#).unwrap();
+
+        // Seal without --fields: should encrypt only Password (from config override)
+        cmd_seal(SealOptions {
+            file: src.to_string_lossy().to_string(),
+            fields: None, // no CLI flag — must pick up from config
+            recipients: vec![],
+            env: None,
+            selector: None,
+            json: false,
+            no_prompt: true,
+        })
+        .expect("cmd_seal should succeed");
+
+        let sealed = std::fs::read_to_string(&src).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&sealed).unwrap();
+        // Host must be plaintext
+        assert_eq!(
+            v["Host"].as_str(),
+            Some("localhost"),
+            "Host should remain plaintext when override limits sealing to Password"
+        );
+        // Password must be encrypted
+        assert!(
+            v["Password"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("-----BEGIN AGE ENCRYPTED FILE-----"),
+            "Password should be encrypted"
+        );
     }
 }
