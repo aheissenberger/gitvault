@@ -1,15 +1,21 @@
-//! `gitvault edit` command implementation.
+//! `gitvault edit` command implementation (REQ-115).
 //!
-//! Opens a sealed file in an editor, then re-seals on save.
+//! Opens a sealed or encrypted file in an editor, then re-seals/re-encrypts on save.
 //!
-//! # Workflow
-//! 1. Resolve `[[seal.override]]` fields from config (same as `cmd_seal`).
-//! 2. Unseal content to a temp file in `std::env::temp_dir()`.
-//! 3. Set temp file permissions to `0o600` (Unix only).
-//! 4. Capture original bytes before launching editor.
-//! 5. Launch editor and wait for exit.
-//! 6. Re-read temp file; if changed, re-seal original; if unchanged, report "No changes".
-//! 7. Zeroize temp buffer and delete temp file.
+//! # Sealed-file mode (`.json`, `.yaml`, `.yml`, `.toml`, `.env`)
+//! 1. Resolve `[[seal.override]]` fields from config.
+//! 2. Unseal values to a temp file.
+//! 3. Launch editor and wait.
+//! 4. If changed: re-seal in place.
+//!
+//! # Store-file mode (`.age` or source path resolving to a store archive)
+//! 1. Resolve the `.age` path via `store::resolve_store_path`.
+//! 2. Decrypt to a temp file.
+//! 3. Launch editor and wait.
+//! 4. If changed: re-encrypt back to the same `.age` store path.
+//!
+//! In both modes: temp file is in `$TMPDIR`, permissions `0o600` (Unix),
+//! content zeroized and file deleted before return.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -100,7 +106,7 @@ fn platform_fallback_editor() -> Vec<String> {
 // Command entry point
 // ---------------------------------------------------------------------------
 
-/// `gitvault edit <FILE>` — unseal, open in editor, re-seal on change.
+/// `gitvault edit <FILE>` — open a sealed or encrypted file in an editor (REQ-115).
 ///
 /// # Errors
 ///
@@ -109,31 +115,71 @@ fn platform_fallback_editor() -> Vec<String> {
 pub fn cmd_edit(opts: EditOptions) -> Result<CommandOutcome, GitvaultError> {
     let file_path = PathBuf::from(&opts.file);
     let repo_root = crate::repo::find_repo_root()?;
-
-    // Validate file format.
-    let ext = validated_extension(&file_path)?;
-
-    // Resolve absolute paths.
-    let abs_file = if file_path.is_absolute() {
-        file_path.clone()
-    } else {
-        std::env::current_dir()?.join(&file_path)
-    };
     let abs_repo = repo_root
         .canonicalize()
         .unwrap_or_else(|_| repo_root.clone());
+
+    // Resolve the editor tokens once — used by both modes.
+    let config_editor = crate::config::load_config(&repo_root)
+        .ok()
+        .and_then(|cfg| cfg.editor.command);
+    let mut editor_tokens = resolve_editor(opts.editor.as_deref(), config_editor.as_deref());
+    if editor_tokens.is_empty() {
+        return Err(GitvaultError::Usage(
+            "could not determine editor to use".to_string(),
+        ));
+    }
+
+    // Detect mode: store-file (.age extension or resolves to a store path).
+    // Use a placeholder env for the detection probe — the actual env is resolved in cmd_edit_store.
+    let probe_env = opts
+        .env
+        .clone()
+        .or_else(|| std::env::var("GITVAULT_ENV").ok())
+        .unwrap_or_else(|| crate::defaults::DEFAULT_ENV.to_string());
+    let is_store_file = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "age")
+        .unwrap_or(false)
+        || crate::store::resolve_store_path(&file_path, &probe_env, &abs_repo).is_ok();
+
+    if is_store_file {
+        cmd_edit_store(opts, &repo_root, &abs_repo, &file_path, &mut editor_tokens)
+    } else {
+        cmd_edit_sealed(opts, &repo_root, &abs_repo, &file_path, &mut editor_tokens)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sealed-file mode (AC2)
+// ---------------------------------------------------------------------------
+
+fn cmd_edit_sealed(
+    opts: EditOptions,
+    repo_root: &Path,
+    abs_repo: &Path,
+    file_path: &Path,
+    editor_tokens: &mut Vec<String>,
+) -> Result<CommandOutcome, GitvaultError> {
+    // AC1: validate sealed-file format.
+    let ext = validated_extension(file_path)?;
+
+    let abs_file = if file_path.is_absolute() {
+        file_path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(file_path)
+    };
     let abs_file_canon = abs_file.canonicalize().unwrap_or_else(|_| abs_file.clone());
+    let rel_path = relative_path_to_repo(&abs_file_canon, abs_repo);
 
-    // Compute repo-relative path for config override lookup.
-    let rel_path = relative_path_to_repo(&abs_file_canon, &abs_repo);
-
-    // Resolve fields from CLI flag or [[seal.override]] config.
+    // Resolve fields: CLI flag takes precedence over [[seal.override]] config.
     let cli_fields: Option<Vec<String>> = opts
         .fields
         .as_deref()
         .map(|f| f.split(',').map(|s| s.trim().to_string()).collect());
     let config_fields: Option<Vec<String>> =
-        crate::config::load_config(&repo_root).ok().and_then(|cfg| {
+        crate::config::load_config(repo_root).ok().and_then(|cfg| {
             cfg.seal
                 .overrides
                 .into_iter()
@@ -157,14 +203,10 @@ pub fn cmd_edit(opts: EditOptions) -> Result<CommandOutcome, GitvaultError> {
     )?;
     let identity = any_identity.as_identity();
 
-    // Read sealed file content.
-    let sealed_content = std::fs::read_to_string(&file_path)
+    let sealed_content = std::fs::read_to_string(file_path)
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
-
-    // Unseal to plain text.
     let mut plain = unseal_content(&sealed_content, &ext, fields_opt.as_deref(), identity)?;
 
-    // Write plain text to a named temp file.
     let suffix = format!(".{ext}");
     let tmp = tempfile::Builder::new()
         .suffix(&suffix)
@@ -174,77 +216,158 @@ pub fn cmd_edit(opts: EditOptions) -> Result<CommandOutcome, GitvaultError> {
 
     std::fs::write(&tmp_path, plain.as_bytes())
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
-
-    // Set restrictive permissions on Unix.
     set_permissions_600(&tmp_path)?;
 
-    // Capture content before editor launch for change detection.
     let before_bytes = std::fs::read(&tmp_path)
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
 
-    // Resolve editor.
-    let config_editor = crate::config::load_config(&repo_root)
-        .ok()
-        .and_then(|cfg| cfg.editor.command);
-    let mut editor_tokens = resolve_editor(opts.editor.as_deref(), config_editor.as_deref());
+    launch_editor(editor_tokens, &tmp_path)?;
 
-    if editor_tokens.is_empty() {
-        return Err(GitvaultError::Usage(
-            "could not determine editor to use".to_string(),
-        ));
-    }
-
-    // Append temp file path.
-    editor_tokens.push(tmp_path.to_string_lossy().into_owned());
-
-    // Launch editor and wait.
-    let binary = editor_tokens.remove(0);
-    let status = Command::new(&binary)
-        .args(&editor_tokens)
-        .status()
-        .map_err(|e| GitvaultError::Usage(format!("failed to launch editor '{binary}': {e}")))?;
-
-    if !status.success() {
-        let code = status.code().unwrap_or(-1);
-        // Zeroize and clean up before returning.
-        plain.zeroize();
-        return Err(GitvaultError::Usage(format!(
-            "editor exited with non-zero status: {code}"
-        )));
-    }
-
-    // Read back temp file after editor.
     let after_bytes = std::fs::read(&tmp_path)
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
-
-    // Zeroize the original plain buffer — no longer needed.
     plain.zeroize();
 
     if after_bytes == before_bytes {
-        // No change — skip re-sealing.
         crate::output::output_success("No changes", opts.json);
         return Ok(CommandOutcome::Success);
     }
 
-    // Content changed — re-seal.
-    let new_plain = String::from_utf8(after_bytes)
+    let mut new_plain = String::from_utf8(after_bytes)
         .map_err(|e| GitvaultError::Usage(format!("editor produced non-UTF-8 content: {e}")))?;
 
-    // Load recipients for re-sealing.
-    let recipient_keys = crate::identity::resolve_recipient_keys(&repo_root, vec![])?;
-
+    // Resolve recipients for re-sealing (AC6: --env for recipient resolution).
+    let recipient_keys = crate::identity::resolve_recipient_keys(repo_root, vec![])?;
     let resealed = seal_content(&new_plain, &ext, fields_opt.as_deref(), &recipient_keys)?;
+    new_plain.zeroize();
 
-    // Write sealed content back atomically.
-    crate::fs_util::atomic_write(&file_path, resealed.as_bytes())?;
-
+    crate::fs_util::atomic_write(file_path, resealed.as_bytes())?;
     crate::output::output_success(&format!("Sealed: {}", file_path.display()), opts.json);
+    Ok(CommandOutcome::Success)
+}
+
+// ---------------------------------------------------------------------------
+// Store-file mode (AC3)
+// ---------------------------------------------------------------------------
+
+fn cmd_edit_store(
+    opts: EditOptions,
+    repo_root: &Path,
+    abs_repo: &Path,
+    file_path: &Path,
+    editor_tokens: &mut Vec<String>,
+) -> Result<CommandOutcome, GitvaultError> {
+    // AC7: --fields is not supported in store-file mode.
+    if opts.fields.is_some() {
+        return Err(GitvaultError::Usage(
+            "--fields is not supported for .age store files; edit the decrypted content directly"
+                .to_string(),
+        ));
+    }
+
+    // Resolve the .age store path.
+    let active_env = opts
+        .env
+        .clone()
+        .or_else(|| std::env::var("GITVAULT_ENV").ok())
+        .unwrap_or_else(|| crate::defaults::DEFAULT_ENV.to_string());
+    let age_path = if file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e == "age")
+        .unwrap_or(false)
+    {
+        // Explicit .age path — resolve relative to cwd.
+        if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(file_path)
+        }
+    } else {
+        // Source path — resolve using store logic.
+        crate::store::resolve_store_path(file_path, &active_env, abs_repo)?
+    };
+
+    // Load identity for decryption.
+    let identity_str = crate::identity::load_identity_with_selector(
+        opts.identity.clone(),
+        opts.selector.as_deref(),
+    )?;
+    let any_identity = crate::crypto::parse_identity_any_with_passphrase(
+        &identity_str,
+        crate::identity::try_fetch_ssh_passphrase(
+            crate::defaults::KEYRING_SERVICE,
+            crate::defaults::KEYRING_ACCOUNT,
+            opts.no_prompt,
+        ),
+    )?;
+    let identity = any_identity.as_identity();
+
+    // Decrypt the .age file.
+    let encrypted_bytes = std::fs::read(&age_path)
+        .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
+    let plain_zeroizing = crate::crypto::decrypt(identity, &encrypted_bytes)?;
+    let mut plain_bytes = plain_zeroizing.to_vec();
+
+    // Write decrypted bytes to temp file.
+    let tmp = tempfile::Builder::new()
+        .tempfile()
+        .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
+    let tmp_path = tmp.path().to_path_buf();
+    std::fs::write(&tmp_path, &plain_bytes)
+        .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
+    set_permissions_600(&tmp_path)?;
+
+    let before_bytes = plain_bytes.clone();
+
+    launch_editor(editor_tokens, &tmp_path)?;
+
+    let after_bytes = std::fs::read(&tmp_path)
+        .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
+    plain_bytes.zeroize();
+
+    if after_bytes == before_bytes {
+        crate::output::output_success("No changes", opts.json);
+        return Ok(CommandOutcome::Success);
+    }
+
+    // Re-encrypt to the same .age store path (AC3: use recipients from repo).
+    let recipient_keys = crate::identity::resolve_recipient_keys(repo_root, vec![])?;
+    let recipients: Vec<Box<dyn age::Recipient + Send>> = recipient_keys
+        .iter()
+        .map(|k| {
+            let r = crate::crypto::parse_recipient(k)?;
+            Ok(Box::new(r) as Box<dyn age::Recipient + Send>)
+        })
+        .collect::<Result<Vec<_>, GitvaultError>>()?;
+    let mut new_bytes = after_bytes;
+    let encrypted = crate::crypto::encrypt(recipients, &new_bytes)?;
+    new_bytes.zeroize();
+
+    crate::fs_util::atomic_write(&age_path, &encrypted)?;
+    crate::output::output_success(&format!("Encrypted: {}", age_path.display()), opts.json);
     Ok(CommandOutcome::Success)
 }
 
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// Launch the editor with the temp file path appended and wait for exit (AC8).
+fn launch_editor(editor_tokens: &mut Vec<String>, tmp_path: &Path) -> Result<(), GitvaultError> {
+    editor_tokens.push(tmp_path.to_string_lossy().into_owned());
+    let binary = editor_tokens.remove(0);
+    let status = Command::new(&binary)
+        .args(editor_tokens.as_slice())
+        .status()
+        .map_err(|e| GitvaultError::Usage(format!("failed to launch editor '{binary}': {e}")))?;
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        return Err(GitvaultError::Usage(format!(
+            "editor exited with status {code}"
+        )));
+    }
+    Ok(())
+}
 
 /// Compute repo-relative path string.
 fn relative_path_to_repo(abs_file: &Path, abs_repo: &Path) -> String {
