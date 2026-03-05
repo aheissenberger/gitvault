@@ -15,6 +15,7 @@ Hard rules:
 - Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - Use `cargo xtask wt-*` for worktree operations only.
+- Never start parallel file-changing AI agent sessions in the primary worktree; create a dedicated git worktree per agent first.
 
 Deliverables:
 - Commits reference spec and AC ids.

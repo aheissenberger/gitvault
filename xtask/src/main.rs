@@ -550,6 +550,8 @@ fn instruction_requirements() -> [InstructionRequirement; 4] {
     const VERIFY_RULE: &str = "Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.";
     const CLI_HELP_RULE: &str =
         "Run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` before updating README.md.";
+    const CLI_WORKTREE_ISOLATION_RULE: &str =
+        "Never start parallel file-changing AI agent sessions in the primary worktree; create a dedicated git worktree per agent first.";
 
     [
         InstructionRequirement {
@@ -574,6 +576,7 @@ fn instruction_requirements() -> [InstructionRequirement; 4] {
             required_phrases: &[
                 "Implement only the assigned Task block",
                 "Run `cargo xtask spec-verify`",
+                CLI_WORKTREE_ISOLATION_RULE,
                 VERIFY_RULE,
             ],
         },
@@ -582,6 +585,7 @@ fn instruction_requirements() -> [InstructionRequirement; 4] {
             required_phrases: &[
                 "Plan first, then patch.",
                 "Use `cargo xtask`/aliases for spec and worktree tasks.",
+                CLI_WORKTREE_ISOLATION_RULE,
                 VERIFY_RULE,
             ],
         },
@@ -1278,7 +1282,7 @@ mod tests {
 
         write_file(
             &root.join(".copilot/context.md"),
-            "Use `cargo xtask`/aliases for spec/worktree actions\nDo not add or use shell wrappers for spec/worktree flows.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
+            "Use `cargo xtask`/aliases for spec/worktree actions\nDo not add or use shell wrappers for spec/worktree flows.\nRun `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` before updating README.md.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
         write_file(
             &root.join(".copilot/instructions.vscode-ui.md"),
@@ -1286,11 +1290,11 @@ mod tests {
         );
         write_file(
             &root.join(".copilot/instructions.vscode-bg.md"),
-            "Implement only the assigned Task block\nRun `cargo xtask spec-verify`\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
+            "Implement only the assigned Task block\nRun `cargo xtask spec-verify`\nNever start parallel file-changing AI agent sessions in the primary worktree; create a dedicated git worktree per agent first.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
         write_file(
             &root.join(".copilot/instructions.cli.md"),
-            "Plan first, then patch.\nUse `cargo xtask`/aliases for spec and worktree tasks.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
+            "Plan first, then patch.\nUse `cargo xtask`/aliases for spec and worktree tasks.\nNever start parallel file-changing AI agent sessions in the primary worktree; create a dedicated git worktree per agent first.\nAlways run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.\n",
         );
 
         let result = lint_instructions(&root);
