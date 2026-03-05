@@ -38,6 +38,8 @@ Top-level commands:
 - `seal`
 - `unseal`
 - `edit`
+- `get`
+- `set`
 - `ssm` (feature-gated with `--features ssm`)
 
 ## Global Options
@@ -160,10 +162,82 @@ Notes:
 - If content is unchanged after the editor exits, no re-sealing or re-encrypting occurs.
 - The temp file is zeroized (overwritten with zeros) and deleted before the command exits.
 
+### `get`
+
+Read the plaintext value of a single key from a sealed or encrypted file.
+
+```bash
+gitvault get [OPTIONS] <FILE> <KEY>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<FILE>` | Sealed file or `.age` store file / source path |
+| `<KEY>` | Dot-path key for JSON/YAML/TOML (e.g. `db.password`), variable name for `.env` |
+| `-i, --identity <IDENTITY>` | Identity key file path (or `GITVAULT_IDENTITY`) |
+| `-e, --env <ENV>` | Environment for store-path resolution |
+| `--json` | Output `{"file":…,"key":…,"value":…}` instead of raw value |
+
+Prints the raw plaintext value to stdout followed by a newline — ideal for shell assignments:
+
+```bash
+export DB_PASS=$(gitvault get conf/secrets.json db.password)
+```
+
+**Key format** by file type:
+
+| File type | Example key |
+|-----------|-------------|
+| `.json` | `db.password` or `server.port` |
+| `.yaml` / `.yml` | `server.tls.cert` |
+| `.toml` | `database.password` |
+| `.env` | `API_KEY` (no dot-path) |
+| `.age` (store) | Same rules as the stem extension (`secrets.json.age` → JSON rules) |
+
+Notes:
+- Exits with error if `<KEY>` does not exist in the file.
+- Dot-path keys are not supported for `.env` files.
+
+### `set`
+
+Update or create a single key's value in a sealed or encrypted file.
+
+```bash
+gitvault set [OPTIONS] <FILE> <KEY> [VALUE]
+```
+
+| Flag | Description |
+|------|-------------|
+| `<FILE>` | Sealed file or `.age` store file / source path |
+| `<KEY>` | Dot-path key for JSON/YAML/TOML, variable name for `.env` |
+| `[VALUE]` | New value (omit when using `--stdin`) |
+| `--stdin` | Read new value from stdin — recommended for secrets (avoids shell history) |
+| `-i, --identity <IDENTITY>` | Identity key file path (or `GITVAULT_IDENTITY`) |
+| `-e, --env <ENV>` | Environment for store-path resolution |
+
+**Upsert semantics**: if the key exists its value is updated; if it is absent a new entry is
+created at the top level. Nested path creation (multi-segment paths to a non-existent parent)
+is not supported — create the parent key manually first.
+
+```bash
+# Positional value
+gitvault set conf/secrets.json db.password newpass
+
+# Stdin (recommended for secrets — avoids shell history)
+echo "newpass" | gitvault set conf/secrets.json db.password --stdin
+
+# Store file
+gitvault set .gitvault/store/prod/config.json.age db.password --stdin --env prod
+```
+
+Notes:
+- TOML files are updated with `toml_edit`, preserving comments and formatting.
+- `.env` files preserve all comment lines, blank lines, and variable ordering.
+- The file is re-sealed / re-encrypted atomically after the update.
+
 ### `materialize`
 
 ```bash
-gitvault materialize [OPTIONS]
 ```
 
 | Flag | Description |

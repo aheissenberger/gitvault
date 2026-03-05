@@ -25,7 +25,7 @@ services required.
 | **Onboarding** | `gitvault init` guides identity → recipient → hardening in one command |
 | **Recipient ceremony** | PR-based zero-shared-secret onboarding; `identity pubkey`, `recipient add-self` |
 | **Rekeying** | `rekey` re-encrypts all secrets to current recipient set; `--dry-run` supported |
-| **In-place editing** | `seal`/`unseal` for field-level in-place encryption; `edit` opens sealed or store files in your editor and re-seals on save |
+| **In-place editing** | `seal`/`unseal` for field-level in-place encryption; `edit` opens sealed or store files in your editor and re-seals on save; `get`/`set` read or update individual key values programmatically |
 | **Runtime injection** | `run` injects secrets into child process env; no `.env` file written |
 | **Production barrier** | HMAC-SHA256 authenticated timed allow-token; `revoke-prod` clears it immediately |
 | **Identity sources** | `--identity-stdin` → `--identity` → `GITVAULT_IDENTITY_FD` → `GITVAULT_IDENTITY` → OS keyring → SSH agent |
@@ -140,6 +140,8 @@ Commands:
   seal          In-place field/value encryption for JSON/YAML/TOML/.env
   unseal        In-place field/value decryption for JSON/YAML/TOML/.env (--reveal)
   edit          Open sealed or encrypted file in editor; re-seal/re-encrypt on save
+  get           Read a single key's plaintext value from a sealed or encrypted file
+  set           Update (or create) a single key's value in a sealed or encrypted file
   ssm           AWS SSM Parameter Store sync (--features ssm)
 ```
 
@@ -154,6 +156,9 @@ Commands:
 | Seal `.env` values in-place | `gitvault seal .env` |
 | Edit a sealed file | `gitvault edit <file>` |
 | Edit a store-encrypted file | `gitvault edit <file.age>` |
+| Read a single key value | `gitvault get <file> <key>` |
+| Update a single key value | `gitvault set <file> <key> <value>` |
+| Update a key (secret, no history) | `echo val \| gitvault set <file> <key> --stdin` |
 | Decrypt to stdout | `gitvault decrypt <file.age> --reveal` |
 | Unseal to stdout | `gitvault unseal <config.json> --reveal` |
 | Materialize root `.env` | `gitvault materialize` |
