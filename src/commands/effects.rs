@@ -126,32 +126,6 @@ impl DefaultRunner {
             run_path_prefix: false,
         }
     }
-
-    /// Create a `DefaultRunner` with an explicit selector and configured values.
-    #[must_use]
-    pub fn with_selector(
-        selector: Option<String>,
-        prod_name: String,
-        materialize_output: String,
-        materialize_rules: Vec<crate::config::MatchRule>,
-        materialize_dir_prefix: bool,
-        materialize_path_prefix: bool,
-        run_rules: Vec<crate::config::MatchRule>,
-        run_dir_prefix: bool,
-        run_path_prefix: bool,
-    ) -> Self {
-        Self {
-            selector,
-            prod_name,
-            materialize_output,
-            materialize_rules,
-            materialize_dir_prefix,
-            materialize_path_prefix,
-            run_rules,
-            run_dir_prefix,
-            run_path_prefix,
-        }
-    }
 }
 
 impl EffectRunner for DefaultRunner {
@@ -352,17 +326,17 @@ pub fn execute_effects(
     execute_effects_with(
         effects,
         &repo_root,
-        &DefaultRunner::with_selector(
-            selector.map(str::to_owned),
-            cfg.env.prod_name().to_string(),
-            cfg.paths.materialize_output().to_string(),
-            cfg.materialize.rules,
-            cfg.materialize.dir_prefix.unwrap_or(false),
-            cfg.materialize.path_prefix.unwrap_or(false),
-            cfg.run.rules,
-            cfg.run.dir_prefix.unwrap_or(false),
-            cfg.run.path_prefix.unwrap_or(false),
-        ),
+        &DefaultRunner {
+            selector: selector.map(str::to_owned),
+            prod_name: cfg.env.prod_name().to_string(),
+            materialize_output: cfg.paths.materialize_output().to_string(),
+            materialize_rules: cfg.materialize.rules,
+            materialize_dir_prefix: cfg.materialize.dir_prefix.unwrap_or(false),
+            materialize_path_prefix: cfg.materialize.path_prefix.unwrap_or(false),
+            run_rules: cfg.run.rules,
+            run_dir_prefix: cfg.run.dir_prefix.unwrap_or(false),
+            run_path_prefix: cfg.run.path_prefix.unwrap_or(false),
+        },
     )
 }
 
