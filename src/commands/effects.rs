@@ -94,7 +94,7 @@ pub struct DefaultRunner {
     pub selector: Option<String>,
     /// Environment name that activates the production barrier (from `[env].prod_name`).
     pub prod_name: String,
-    /// Output filename for `gitvault materialize` (from `[paths].materialize_output`).
+    /// Output filename for `gitvault materialize` (from `[materialize].output_filename`).
     pub materialize_output: String,
     /// Rules for `gitvault materialize` secret selection.
     pub materialize_rules: Vec<crate::config::MatchRule>,
@@ -329,7 +329,7 @@ pub fn execute_effects(
         &DefaultRunner {
             selector: selector.map(str::to_owned),
             prod_name: cfg.env.prod_name().to_string(),
-            materialize_output: cfg.paths.materialize_output().to_string(),
+            materialize_output: cfg.materialize.output_filename().to_string(),
             materialize_rules: cfg.materialize.rules,
             materialize_dir_prefix: cfg.materialize.dir_prefix.unwrap_or(false),
             materialize_path_prefix: cfg.materialize.path_prefix.unwrap_or(false),

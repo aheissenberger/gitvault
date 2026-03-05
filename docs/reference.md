@@ -249,7 +249,7 @@ gitvault materialize [OPTIONS]
 
 Behavior:
 - Decrypts store files for the selected environment and writes merged values to
-  `[paths].materialize_output` (default: `.env`).
+  `[materialize].output_filename` (default: `.env`).
 - Supports multi-format store sources (`.env.age`, `.json.age`, `.yaml/.yml.age`, `.toml.age`).
 - Fails if decryption fails or secret content is invalid for its detected format.
 
@@ -492,14 +492,12 @@ Repository path layout configuration.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `recipients_dir` | string | `".gitvault/recipients"` | Directory containing recipient public keys |
-| `materialize_output` | string | `".env"` | Filename written by `gitvault materialize` |
 | `store_dir` | string | `".gitvault/store"` | Encrypted secrets store directory |
 
 **Example:**
 ```toml
 [paths]
 recipients_dir = ".secrets/recipients"
-materialize_output = ".env.decrypted"
 store_dir = ".gitvault/store"
 ```
 
@@ -545,6 +543,7 @@ Global defaults for `gitvault materialize` runtime key prefixing.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `output_filename` | string | `".env"` | Filename written by `gitvault materialize` |
 | `dir_prefix` | bool | `false` | Prefix flattened keys with env-store subdirectory components |
 | `path_prefix` | bool | `false` | Prefix flattened keys with source filename stem |
 
@@ -553,6 +552,7 @@ Rule-level values in `[[materialize.rule]]` override these globals for matching 
 **Example:**
 ```toml
 [materialize]
+output_filename = ".env.decrypted"
 dir_prefix = true
 path_prefix = false
 ```
@@ -631,7 +631,6 @@ ttl_secs = 7200
 
 [paths]
 recipients_dir = ".gitvault/recipients"
-materialize_output = ".env"
 store_dir = ".gitvault/store"
 
 [keyring]
@@ -639,6 +638,7 @@ service = "gitvault"
 account = "age-identity"
 
 [materialize]
+output_filename = ".env"
 dir_prefix = true
 path_prefix = true
 

@@ -135,10 +135,6 @@ pub struct PathsConfig {
     /// `None` → [`defaults::RECIPIENTS_DIR`] (`".secrets/recipients"`).
     pub recipients_dir: Option<String>,
 
-    /// Filename written by `gitvault materialize`.
-    /// `None` → [`defaults::MATERIALIZE_OUTPUT`] (`".env"`).
-    pub materialize_output: Option<String>,
-
     /// Repository-relative path of the encrypted secrets store directory.
     /// `None` → [`defaults::SECRETS_DIR`] (`".gitvault/store"`).
     pub store_dir: Option<String>,
@@ -151,14 +147,6 @@ impl PathsConfig {
         self.recipients_dir
             .as_deref()
             .unwrap_or(crate::defaults::RECIPIENTS_DIR)
-    }
-
-    /// Resolve the effective materialize output filename.
-    #[must_use]
-    pub fn materialize_output(&self) -> &str {
-        self.materialize_output
-            .as_deref()
-            .unwrap_or(crate::defaults::MATERIALIZE_OUTPUT)
     }
 
     /// Resolve the effective encrypted store directory path.
@@ -229,9 +217,22 @@ pub struct MatchRule {
 /// Configuration for `[materialize]`.
 #[derive(Debug, Default)]
 pub struct MaterializeConfig {
+    /// Filename written by `gitvault materialize`.
+    /// `None` → [`defaults::MATERIALIZE_OUTPUT`] (`".env"`).
+    pub output_filename: Option<String>,
     pub rules: Vec<MatchRule>,
     pub dir_prefix: Option<bool>,
     pub path_prefix: Option<bool>,
+}
+
+impl MaterializeConfig {
+    /// Resolve the effective materialize output filename.
+    #[must_use]
+    pub fn output_filename(&self) -> &str {
+        self.output_filename
+            .as_deref()
+            .unwrap_or(crate::defaults::MATERIALIZE_OUTPUT)
+    }
 }
 
 /// Configuration for `[run]`.
@@ -326,6 +327,7 @@ struct RawBarrierConfig {
 #[serde(deny_unknown_fields)]
 struct RawPathsConfig {
     recipients_dir: Option<String>,
+    // Deprecated in favor of [materialize].output_filename.
     materialize_output: Option<String>,
     store_dir: Option<String>,
 }
@@ -397,6 +399,7 @@ struct RawSealConfig {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawMaterializeConfig {
+    output_filename: Option<String>,
     dir_prefix: Option<bool>,
     path_prefix: Option<bool>,
     #[serde(rename = "rule", default)]
@@ -451,11 +454,18 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
             ttl_secs: r.ttl_secs,
         });
 
+    // Backward compatibility: accept legacy [paths].materialize_output.
+    let legacy_materialize_output = raw.paths.as_ref().and_then(|p| {
+        p.materialize_output
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .cloned()
+    });
+
     let paths = raw
         .paths
         .map_or_else(PathsConfig::default, |r| PathsConfig {
             recipients_dir: r.recipients_dir.filter(|s| !s.is_empty()),
-            materialize_output: r.materialize_output.filter(|s| !s.is_empty()),
             store_dir: r.store_dir.filter(|s| !s.trim().is_empty()),
         });
 
@@ -501,7 +511,10 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
     };
 
     let materialize = match raw.materialize {
-        None => MaterializeConfig::default(),
+        None => MaterializeConfig {
+            output_filename: legacy_materialize_output,
+            ..MaterializeConfig::default()
+        },
         Some(r) => {
             let mut rules = Vec::new();
             for rule in r.rules {
@@ -515,6 +528,10 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
                 });
             }
             MaterializeConfig {
+                output_filename: r
+                    .output_filename
+                    .filter(|s| !s.is_empty())
+                    .or(legacy_materialize_output.clone()),
                 rules,
                 dir_prefix: r.dir_prefix,
                 path_prefix: r.path_prefix,
@@ -635,10 +652,6 @@ fn effective_config_impl(
 
     let paths = PathsConfig {
         recipients_dir: repo.paths.recipients_dir.or(global.paths.recipients_dir),
-        materialize_output: repo
-            .paths
-            .materialize_output
-            .or(global.paths.materialize_output),
         store_dir: repo.paths.store_dir.or(global.paths.store_dir),
     };
 
@@ -657,7 +670,13 @@ fn effective_config_impl(
         global.seal
     };
 
-    let materialize = if !repo.materialize.rules.is_empty()
+    let materialize_output_filename = repo
+        .materialize
+        .output_filename
+        .clone()
+        .or(global.materialize.output_filename.clone());
+
+    let mut materialize = if !repo.materialize.rules.is_empty()
         || repo.materialize.dir_prefix.is_some()
         || repo.materialize.path_prefix.is_some()
     {
@@ -665,6 +684,7 @@ fn effective_config_impl(
     } else {
         global.materialize
     };
+    materialize.output_filename = materialize_output_filename;
 
     let run = if !repo.run.rules.is_empty()
         || repo.run.dir_prefix.is_some()
@@ -1146,10 +1166,6 @@ mod tests {
     fn test_paths_config_defaults() {
         let cfg = PathsConfig::default();
         assert_eq!(cfg.recipients_dir(), crate::defaults::RECIPIENTS_DIR);
-        assert_eq!(
-            cfg.materialize_output(),
-            crate::defaults::MATERIALIZE_OUTPUT
-        );
     }
 
     #[test]
@@ -1157,11 +1173,19 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_config_file(
             &dir,
-            "[paths]\nrecipients_dir = \".keys/recipients\"\nmaterialize_output = \"env.out\"\n",
+            "[paths]\nrecipients_dir = \".keys/recipients\"\nstore_dir = \".gitvault/store-alt\"\n",
         );
         let config = load_config(dir.path()).expect("paths section should parse");
         assert_eq!(config.paths.recipients_dir(), ".keys/recipients");
-        assert_eq!(config.paths.materialize_output(), "env.out");
+        assert_eq!(config.paths.store_dir(), ".gitvault/store-alt");
+    }
+
+    #[test]
+    fn test_parse_legacy_paths_materialize_output_supported() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(&dir, "[paths]\nmaterialize_output = \"env.out\"\n");
+        let config = load_config(dir.path()).expect("legacy paths materialize_output should parse");
+        assert_eq!(config.materialize.output_filename(), "env.out");
     }
 
     #[test]
@@ -1291,12 +1315,13 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_config_file(
             &dir,
-            "[materialize]\ndir_prefix = true\npath_prefix = false\n\n[[materialize.rule]]\naction = \"allow\"\npath = \".gitvault/store/dev/*.env.age\"\nkeys = [\"API_*\"]\ndir_prefix = false\npath_prefix = true\ncustom_prefix = \"APP\"\n\n[run]\ndir_prefix = false\npath_prefix = true\n\n[[run.rule]]\naction = \"deny\"\npath = \".gitvault/store/dev/private.*\"\n",
+            "[materialize]\noutput_filename = \".env.dev\"\ndir_prefix = true\npath_prefix = false\n\n[[materialize.rule]]\naction = \"allow\"\npath = \".gitvault/store/dev/*.env.age\"\nkeys = [\"API_*\"]\ndir_prefix = false\npath_prefix = true\ncustom_prefix = \"APP\"\n\n[run]\ndir_prefix = false\npath_prefix = true\n\n[[run.rule]]\naction = \"deny\"\npath = \".gitvault/store/dev/private.*\"\n",
         );
 
         let config = load_config(dir.path()).expect("materialize/run rules should parse");
         assert_eq!(config.materialize.rules.len(), 1);
         assert_eq!(config.run.rules.len(), 1);
+        assert_eq!(config.materialize.output_filename(), ".env.dev");
         assert_eq!(config.materialize.dir_prefix, Some(true));
         assert_eq!(config.materialize.path_prefix, Some(false));
         assert_eq!(

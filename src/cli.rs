@@ -12,7 +12,8 @@ CONFIG FILES (override built-in defaults):
   Sections and keys:
     [env]     default, prod_name, env_file
     [barrier] ttl_secs
-    [paths]   recipients_dir, materialize_output
+    [paths]   recipients_dir
+    [materialize] output_filename
     [keyring] service, account
     [hooks]   adapter
 
@@ -108,6 +109,9 @@ pub enum Commands {
         reveal: bool,
     },
     /// Materialize secrets to root .env
+    #[command(
+        long_about = "Materialize secrets to root .env.\n\nThe files and keys merged into the output can be configured in `.gitvault/config.toml` via `[materialize]` and `[[materialize.rule]]`."
+    )]
     Materialize {
         /// Environment to use (overrides `GITVAULT_ENV` and .git/gitvault/env)
         #[arg(short, long)]
@@ -153,6 +157,9 @@ pub enum Commands {
         recipients: Vec<String>,
     },
     /// Run a command with secrets injected as environment variables
+    #[command(
+        long_about = "Run a command with secrets injected as environment variables.\n\nThe files and keys merged into the injected environment can be configured in `.gitvault/config.toml` via `[run]` and `[[run.rule]]`."
+    )]
     Run {
         /// Environment to use
         #[arg(short, long)]

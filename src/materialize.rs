@@ -19,7 +19,7 @@ pub const REQUIRED_GITIGNORE_ENTRIES: &[&str] = &[defaults::MATERIALIZE_OUTPUT];
 /// REQ-20: ensures output file is in .gitignore first
 ///
 /// `output_filename` is the repository-relative path to write, e.g. `".env"`.
-/// Use [`defaults::MATERIALIZE_OUTPUT`] or `cfg.paths.materialize_output()` as the value.
+/// Use [`defaults::MATERIALIZE_OUTPUT`] or `cfg.materialize.output_filename()` as the value.
 ///
 /// # Errors
 ///

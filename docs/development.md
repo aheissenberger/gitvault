@@ -183,7 +183,7 @@ implementation files.
 | `defaults::ENV_FILE` | `.git/gitvault/env` | `[env] env_file` |
 | `defaults::DEFAULT_BARRIER_TTL_SECS` | `3600` | `[barrier] ttl_secs` |
 | `defaults::RECIPIENTS_DIR` | `.gitvault/recipients` | `[paths] recipients_dir` |
-| `defaults::MATERIALIZE_OUTPUT` | `.env` | `[paths] materialize_output` |
+| `defaults::MATERIALIZE_OUTPUT` | `.env` | `[materialize] output_filename` |
 | `defaults::KEYRING_SERVICE` | `gitvault` | `[keyring] service` |
 | `defaults::KEYRING_ACCOUNT` | `age-identity` | `[keyring] account` |
 | `defaults::BARRIER_TOKEN_FILE` | `.git/gitvault/.prod-token` | *(not yet configurable)* |
