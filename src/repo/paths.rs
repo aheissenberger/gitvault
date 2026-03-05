@@ -155,7 +155,8 @@ pub fn list_encrypted_files_for_env(
     env: &str,
 ) -> Result<Vec<PathBuf>, GitvaultError> {
     let env_dir = get_env_encrypted_dir(repo_root, env);
-    let mut env_files = list_age_files_in_dir(&env_dir)?;
+    let mut env_files = Vec::new();
+    collect_age_files(&env_dir, &mut env_files)?;
     if !env_files.is_empty() {
         env_files.sort();
         return Ok(env_files);
@@ -271,7 +272,7 @@ pub fn decrypt_env_secrets(
     env: &str,
     identity: &dyn age::Identity,
 ) -> Result<Vec<(String, String)>, GitvaultError> {
-    decrypt_env_secrets_with_rules(repo_root, env, identity, None)
+    decrypt_env_secrets_with_rules(repo_root, env, identity, None, false, false)
 }
 
 /// Decrypt all encrypted secrets for the given environment, applying optional
@@ -285,9 +286,12 @@ pub fn decrypt_env_secrets_with_rules(
     env: &str,
     identity: &dyn age::Identity,
     rules: Option<&[crate::config::MatchRule]>,
+    global_dir_prefix: bool,
+    global_path_prefix: bool,
 ) -> Result<Vec<(String, String)>, GitvaultError> {
     let mut secrets: Vec<(String, String)> = Vec::new();
     let encrypted_files = list_encrypted_files_for_env(repo_root, env)?;
+    let env_store_dir = repo_root.join(SECRETS_DIR).join(env);
 
     for path in encrypted_files {
         let rel_store_path = path
@@ -295,10 +299,24 @@ pub fn decrypt_env_secrets_with_rules(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string_lossy().into_owned());
 
-        let (include_file, key_filters) = evaluate_rule_filters(&rel_store_path, rules);
+        let (include_file, key_filters, dir_prefix, path_prefix, custom_prefix) =
+            evaluate_rule_filters(
+                &rel_store_path,
+                rules,
+                global_dir_prefix,
+                global_path_prefix,
+            );
         if !include_file {
             continue;
         }
+
+        let prefix = build_key_prefix(
+            &path,
+            &env_store_dir,
+            dir_prefix,
+            path_prefix,
+            custom_prefix.as_deref(),
+        );
 
         let ciphertext = std::fs::read(&path)?;
         let plaintext = match crypto::decrypt(identity, &ciphertext) {
@@ -329,7 +347,8 @@ pub fn decrypt_env_secrets_with_rules(
         match fmt.as_deref() {
             Ok("env") => {
                 let parsed = merge::parse_env_pairs(&text)?;
-                secrets.extend(filter_pairs_by_key_globs(parsed, key_filters.as_deref()));
+                let prefixed = apply_prefix_to_pairs(parsed, prefix.as_deref());
+                secrets.extend(filter_pairs_by_key_globs(prefixed, key_filters.as_deref()));
             }
             Ok("json") => {
                 let val: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
@@ -337,7 +356,8 @@ pub fn decrypt_env_secrets_with_rules(
                 })?;
                 let mut pairs = Vec::new();
                 flatten_to_env_pairs(&val, "", &mut pairs);
-                secrets.extend(filter_pairs_by_key_globs(pairs, key_filters.as_deref()));
+                let prefixed = apply_prefix_to_pairs(pairs, prefix.as_deref());
+                secrets.extend(filter_pairs_by_key_globs(prefixed, key_filters.as_deref()));
             }
             Ok("yaml") | Ok("yml") => {
                 let val: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|e| {
@@ -351,7 +371,8 @@ pub fn decrypt_env_secrets_with_rules(
                 })?;
                 let mut pairs = Vec::new();
                 flatten_to_env_pairs(&json_val, "", &mut pairs);
-                secrets.extend(filter_pairs_by_key_globs(pairs, key_filters.as_deref()));
+                let prefixed = apply_prefix_to_pairs(pairs, prefix.as_deref());
+                secrets.extend(filter_pairs_by_key_globs(prefixed, key_filters.as_deref()));
             }
             Ok("toml") => {
                 let val: toml::Value = toml::from_str(&text).map_err(|e| {
@@ -365,7 +386,8 @@ pub fn decrypt_env_secrets_with_rules(
                 })?;
                 let mut pairs = Vec::new();
                 flatten_to_env_pairs(&json_val, "", &mut pairs);
-                secrets.extend(filter_pairs_by_key_globs(pairs, key_filters.as_deref()));
+                let prefixed = apply_prefix_to_pairs(pairs, prefix.as_deref());
+                secrets.extend(filter_pairs_by_key_globs(prefixed, key_filters.as_deref()));
             }
             _ => {
                 eprintln!(
@@ -382,19 +404,38 @@ pub fn decrypt_env_secrets_with_rules(
 fn evaluate_rule_filters(
     rel_store_path: &str,
     rules: Option<&[crate::config::MatchRule]>,
-) -> (bool, Option<Vec<String>>) {
-    let Some(rules) = rules else {
-        return (true, None);
-    };
-    if rules.is_empty() {
-        return (true, None);
+    global_dir_prefix: bool,
+    global_path_prefix: bool,
+) -> (bool, Option<Vec<String>>, bool, bool, Option<String>) {
+    fn defaults(dir: bool, path: bool) -> (bool, Option<Vec<String>>, bool, bool, Option<String>) {
+        (true, None, dir, path, None)
     }
 
     let mut include = true;
     let mut key_filters: Option<Vec<String>> = None;
+    let mut dir_prefix = global_dir_prefix;
+    let mut path_prefix = global_path_prefix;
+    let mut custom_prefix: Option<String> = None;
+
+    let Some(rules) = rules else {
+        return defaults(global_dir_prefix, global_path_prefix);
+    };
+    if rules.is_empty() {
+        return defaults(global_dir_prefix, global_path_prefix);
+    }
+
     for rule in rules {
         if !crate::matcher::path_matches_glob(&rule.path, rel_store_path) {
             continue;
+        }
+        if let Some(v) = rule.dir_prefix {
+            dir_prefix = v;
+        }
+        if let Some(v) = rule.path_prefix {
+            path_prefix = v;
+        }
+        if let Some(v) = &rule.custom_prefix {
+            custom_prefix = Some(v.clone());
         }
         match rule.action {
             crate::config::RuleAction::Allow => {
@@ -412,7 +453,104 @@ fn evaluate_rule_filters(
         }
     }
 
-    (include, key_filters)
+    (include, key_filters, dir_prefix, path_prefix, custom_prefix)
+}
+
+fn apply_prefix_to_pairs(
+    pairs: Vec<(String, String)>,
+    prefix: Option<&str>,
+) -> Vec<(String, String)> {
+    let Some(prefix) = prefix else {
+        return pairs;
+    };
+    if prefix.is_empty() {
+        return pairs;
+    }
+    pairs
+        .into_iter()
+        .map(|(k, v)| (format!("{prefix}_{k}"), v))
+        .collect()
+}
+
+fn build_key_prefix(
+    path: &Path,
+    env_store_dir: &Path,
+    dir_prefix_enabled: bool,
+    filename_prefix_enabled: bool,
+    custom_prefix: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if dir_prefix_enabled {
+        let dir_prefix = directory_prefix_from_store_file(path, env_store_dir);
+        if let Some(p) = dir_prefix {
+            parts.push(p);
+        }
+    }
+
+    if filename_prefix_enabled {
+        let file_prefix = filename_prefix_from_store_file(path);
+        if let Some(p) = file_prefix {
+            parts.push(p);
+        }
+    }
+
+    if let Some(custom) = custom_prefix {
+        let normalized = normalize_prefix_token(custom);
+        if let Some(token) = normalized {
+            parts.push(token);
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("_"))
+    }
+}
+
+fn directory_prefix_from_store_file(path: &Path, env_store_dir: &Path) -> Option<String> {
+    let rel = path.strip_prefix(env_store_dir).ok()?;
+    let parent = rel.parent()?;
+    let tokens = parent
+        .components()
+        .filter_map(|c| normalize_prefix_token(&c.as_os_str().to_string_lossy()))
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join("_"))
+    }
+}
+
+fn filename_prefix_from_store_file(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_string_lossy(); // strips .age
+    let candidate = stem
+        .trim_start_matches('.')
+        .split('.')
+        .next()
+        .unwrap_or_default();
+    normalize_prefix_token(candidate)
+}
+
+fn normalize_prefix_token(raw: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut prev_underscore = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_uppercase());
+            prev_underscore = false;
+        } else if !prev_underscore {
+            out.push('_');
+            prev_underscore = true;
+        }
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 fn filter_pairs_by_key_globs(
@@ -978,16 +1116,27 @@ mod tests {
 
     #[test]
     fn test_evaluate_rule_filters_defaults_without_rules() {
-        let (include_file, key_filters) =
-            evaluate_rule_filters(".gitvault/store/dev/app.env.age", None);
+        let (include_file, key_filters, dir_prefix, path_prefix, custom_prefix) =
+            evaluate_rule_filters(".gitvault/store/dev/app.env.age", None, false, false);
         assert!(include_file);
         assert!(key_filters.is_none());
+        assert!(!dir_prefix);
+        assert!(!path_prefix);
+        assert!(custom_prefix.is_none());
 
         let empty: Vec<crate::config::MatchRule> = Vec::new();
-        let (include_file, key_filters) =
-            evaluate_rule_filters(".gitvault/store/dev/app.env.age", Some(&empty));
+        let (include_file, key_filters, dir_prefix, path_prefix, custom_prefix) =
+            evaluate_rule_filters(
+                ".gitvault/store/dev/app.env.age",
+                Some(&empty),
+                false,
+                false,
+            );
         assert!(include_file);
         assert!(key_filters.is_none());
+        assert!(!dir_prefix);
+        assert!(!path_prefix);
+        assert!(custom_prefix.is_none());
     }
 
     #[test]
@@ -997,24 +1146,38 @@ mod tests {
                 action: crate::config::RuleAction::Allow,
                 path: ".gitvault/store/dev/*.env.age".to_string(),
                 keys: vec!["FOO".to_string(), "BAR_*".to_string()],
+                dir_prefix: None,
+                path_prefix: None,
+                custom_prefix: None,
             },
             crate::config::MatchRule {
                 action: crate::config::RuleAction::Deny,
                 path: ".gitvault/store/dev/blocked.env.age".to_string(),
                 keys: vec!["IGNORED".to_string()],
+                dir_prefix: None,
+                path_prefix: None,
+                custom_prefix: None,
             },
         ];
 
-        let (include_ok, filters_ok) =
-            evaluate_rule_filters(".gitvault/store/dev/app.env.age", Some(&rules));
+        let (include_ok, filters_ok, _, _, _) = evaluate_rule_filters(
+            ".gitvault/store/dev/app.env.age",
+            Some(&rules),
+            false,
+            false,
+        );
         assert!(include_ok);
         assert_eq!(
             filters_ok.unwrap(),
             vec!["FOO".to_string(), "BAR_*".to_string()]
         );
 
-        let (include_blocked, filters_blocked) =
-            evaluate_rule_filters(".gitvault/store/dev/blocked.env.age", Some(&rules));
+        let (include_blocked, filters_blocked, _, _, _) = evaluate_rule_filters(
+            ".gitvault/store/dev/blocked.env.age",
+            Some(&rules),
+            false,
+            false,
+        );
         assert!(!include_blocked);
         assert!(filters_blocked.is_none());
     }
@@ -1056,10 +1219,20 @@ mod tests {
             action: crate::config::RuleAction::Allow,
             path: ".gitvault/store/dev/app.env.age".to_string(),
             keys: vec!["FOO".to_string()],
+            dir_prefix: None,
+            path_prefix: None,
+            custom_prefix: None,
         }];
 
-        let pairs =
-            decrypt_env_secrets_with_rules(dir.path(), "dev", &identity, Some(&rules)).unwrap();
+        let pairs = decrypt_env_secrets_with_rules(
+            dir.path(),
+            "dev",
+            &identity,
+            Some(&rules),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(pairs, vec![("FOO".to_string(), "one".to_string())]);
     }
 
@@ -1077,10 +1250,97 @@ mod tests {
             action: crate::config::RuleAction::Deny,
             path: ".gitvault/store/dev/blocked.env.age".to_string(),
             keys: vec![],
+            dir_prefix: None,
+            path_prefix: None,
+            custom_prefix: None,
+        }];
+
+        let pairs = decrypt_env_secrets_with_rules(
+            dir.path(),
+            "dev",
+            &identity,
+            Some(&rules),
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn test_decrypt_env_secrets_with_rules_applies_prefix_order() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev/conf");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let ciphertext = encrypt_content(&identity, b"DB=one\n");
+        std::fs::write(secrets_dir.join("app.env.age"), &ciphertext).unwrap();
+
+        let rules = vec![crate::config::MatchRule {
+            action: crate::config::RuleAction::Allow,
+            path: ".gitvault/store/dev/conf/*.env.age".to_string(),
+            keys: vec![],
+            dir_prefix: Some(true),
+            path_prefix: Some(true),
+            custom_prefix: Some("svc".to_string()),
+        }];
+
+        let pairs = decrypt_env_secrets_with_rules(
+            dir.path(),
+            "dev",
+            &identity,
+            Some(&rules),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            pairs,
+            vec![("CONF_APP_SVC_DB".to_string(), "one".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_decrypt_env_secrets_with_rules_uses_global_prefix_defaults() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev/conf");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let ciphertext = encrypt_content(&identity, b"DB=one\n");
+        std::fs::write(secrets_dir.join("app.env.age"), &ciphertext).unwrap();
+
+        let pairs =
+            decrypt_env_secrets_with_rules(dir.path(), "dev", &identity, None, true, true).unwrap();
+
+        assert_eq!(pairs, vec![("CONF_APP_DB".to_string(), "one".to_string())]);
+    }
+
+    #[test]
+    fn test_decrypt_env_secrets_with_rules_rule_overrides_global_prefix_defaults() {
+        let dir = TempDir::new().unwrap();
+        let identity = gen_identity();
+        let secrets_dir = dir.path().join(".gitvault/store/dev/conf");
+        std::fs::create_dir_all(&secrets_dir).unwrap();
+
+        let ciphertext = encrypt_content(&identity, b"DB=one\n");
+        std::fs::write(secrets_dir.join("app.env.age"), &ciphertext).unwrap();
+
+        let rules = vec![crate::config::MatchRule {
+            action: crate::config::RuleAction::Allow,
+            path: ".gitvault/store/dev/conf/*.env.age".to_string(),
+            keys: vec![],
+            dir_prefix: Some(false),
+            path_prefix: Some(true),
+            custom_prefix: None,
         }];
 
         let pairs =
-            decrypt_env_secrets_with_rules(dir.path(), "dev", &identity, Some(&rules)).unwrap();
-        assert!(pairs.is_empty());
+            decrypt_env_secrets_with_rules(dir.path(), "dev", &identity, Some(&rules), true, true)
+                .unwrap();
+
+        assert_eq!(pairs, vec![("APP_DB".to_string(), "one".to_string())]);
     }
 }

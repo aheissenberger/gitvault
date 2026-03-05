@@ -221,18 +221,25 @@ pub struct MatchRule {
     pub action: RuleAction,
     pub path: String,
     pub keys: Vec<String>,
+    pub dir_prefix: Option<bool>,
+    pub path_prefix: Option<bool>,
+    pub custom_prefix: Option<String>,
 }
 
 /// Configuration for `[materialize]`.
 #[derive(Debug, Default)]
 pub struct MaterializeConfig {
     pub rules: Vec<MatchRule>,
+    pub dir_prefix: Option<bool>,
+    pub path_prefix: Option<bool>,
 }
 
 /// Configuration for `[run]`.
 #[derive(Debug, Default)]
 pub struct RunConfig {
     pub rules: Vec<MatchRule>,
+    pub dir_prefix: Option<bool>,
+    pub path_prefix: Option<bool>,
 }
 
 /// Top-level gitvault project configuration.
@@ -365,6 +372,19 @@ struct RawMatchRule {
     keys: Vec<String>,
 }
 
+/// Intermediate TOML representation for runtime rule entries.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRuntimeMatchRule {
+    action: String,
+    path: String,
+    #[serde(default)]
+    keys: Vec<String>,
+    dir_prefix: Option<bool>,
+    path_prefix: Option<bool>,
+    custom_prefix: Option<String>,
+}
+
 /// Intermediate TOML representation for `[seal]`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -377,16 +397,20 @@ struct RawSealConfig {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawMaterializeConfig {
+    dir_prefix: Option<bool>,
+    path_prefix: Option<bool>,
     #[serde(rename = "rule", default)]
-    rules: Vec<RawMatchRule>,
+    rules: Vec<RawRuntimeMatchRule>,
 }
 
 /// Intermediate TOML representation for `[run]`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRunConfig {
+    dir_prefix: Option<bool>,
+    path_prefix: Option<bool>,
     #[serde(rename = "rule", default)]
-    rules: Vec<RawMatchRule>,
+    rules: Vec<RawRuntimeMatchRule>,
 }
 
 // ---------------------------------------------------------------------------
@@ -485,9 +509,16 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
                     action: parse_rule_action(&rule.action, "materialize")?,
                     path: rule.path,
                     keys: rule.keys,
+                    dir_prefix: rule.dir_prefix,
+                    path_prefix: rule.path_prefix,
+                    custom_prefix: rule.custom_prefix.filter(|s| !s.trim().is_empty()),
                 });
             }
-            MaterializeConfig { rules }
+            MaterializeConfig {
+                rules,
+                dir_prefix: r.dir_prefix,
+                path_prefix: r.path_prefix,
+            }
         }
     };
 
@@ -500,9 +531,16 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
                     action: parse_rule_action(&rule.action, "run")?,
                     path: rule.path,
                     keys: rule.keys,
+                    dir_prefix: rule.dir_prefix,
+                    path_prefix: rule.path_prefix,
+                    custom_prefix: rule.custom_prefix.filter(|s| !s.trim().is_empty()),
                 });
             }
-            RunConfig { rules }
+            RunConfig {
+                rules,
+                dir_prefix: r.dir_prefix,
+                path_prefix: r.path_prefix,
+            }
         }
     };
 
@@ -619,13 +657,19 @@ fn effective_config_impl(
         global.seal
     };
 
-    let materialize = if !repo.materialize.rules.is_empty() {
+    let materialize = if !repo.materialize.rules.is_empty()
+        || repo.materialize.dir_prefix.is_some()
+        || repo.materialize.path_prefix.is_some()
+    {
         repo.materialize
     } else {
         global.materialize
     };
 
-    let run = if !repo.run.rules.is_empty() {
+    let run = if !repo.run.rules.is_empty()
+        || repo.run.dir_prefix.is_some()
+        || repo.run.path_prefix.is_some()
+    {
         repo.run
     } else {
         global.run
@@ -1247,17 +1291,27 @@ mod tests {
         let dir = TempDir::new().unwrap();
         make_config_file(
             &dir,
-            "[[materialize.rule]]\naction = \"allow\"\npath = \".gitvault/store/dev/*.env.age\"\nkeys = [\"API_*\"]\n\n[[run.rule]]\naction = \"deny\"\npath = \".gitvault/store/dev/private.*\"\n",
+            "[materialize]\ndir_prefix = true\npath_prefix = false\n\n[[materialize.rule]]\naction = \"allow\"\npath = \".gitvault/store/dev/*.env.age\"\nkeys = [\"API_*\"]\ndir_prefix = false\npath_prefix = true\ncustom_prefix = \"APP\"\n\n[run]\ndir_prefix = false\npath_prefix = true\n\n[[run.rule]]\naction = \"deny\"\npath = \".gitvault/store/dev/private.*\"\n",
         );
 
         let config = load_config(dir.path()).expect("materialize/run rules should parse");
         assert_eq!(config.materialize.rules.len(), 1);
         assert_eq!(config.run.rules.len(), 1);
+        assert_eq!(config.materialize.dir_prefix, Some(true));
+        assert_eq!(config.materialize.path_prefix, Some(false));
         assert_eq!(
             config.materialize.rules[0].path,
             ".gitvault/store/dev/*.env.age"
         );
         assert_eq!(config.materialize.rules[0].keys, vec!["API_*"]);
+        assert_eq!(config.materialize.rules[0].dir_prefix, Some(false));
+        assert_eq!(config.materialize.rules[0].path_prefix, Some(true));
+        assert_eq!(
+            config.materialize.rules[0].custom_prefix.as_deref(),
+            Some("APP")
+        );
         assert_eq!(config.run.rules[0].path, ".gitvault/store/dev/private.*");
+        assert_eq!(config.run.dir_prefix, Some(false));
+        assert_eq!(config.run.path_prefix, Some(true));
     }
 }

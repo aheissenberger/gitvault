@@ -98,8 +98,16 @@ pub struct DefaultRunner {
     pub materialize_output: String,
     /// Rules for `gitvault materialize` secret selection.
     pub materialize_rules: Vec<crate::config::MatchRule>,
+    /// Global directory-prefix behavior for `gitvault materialize`.
+    pub materialize_dir_prefix: bool,
+    /// Global filename-prefix behavior for `gitvault materialize`.
+    pub materialize_path_prefix: bool,
     /// Rules for `gitvault run` secret selection.
     pub run_rules: Vec<crate::config::MatchRule>,
+    /// Global directory-prefix behavior for `gitvault run`.
+    pub run_dir_prefix: bool,
+    /// Global filename-prefix behavior for `gitvault run`.
+    pub run_path_prefix: bool,
 }
 
 impl DefaultRunner {
@@ -111,7 +119,11 @@ impl DefaultRunner {
             prod_name: crate::defaults::DEFAULT_PROD_ENV.to_string(),
             materialize_output: crate::defaults::MATERIALIZE_OUTPUT.to_string(),
             materialize_rules: Vec::new(),
+            materialize_dir_prefix: false,
+            materialize_path_prefix: false,
             run_rules: Vec::new(),
+            run_dir_prefix: false,
+            run_path_prefix: false,
         }
     }
 
@@ -122,14 +134,22 @@ impl DefaultRunner {
         prod_name: String,
         materialize_output: String,
         materialize_rules: Vec<crate::config::MatchRule>,
+        materialize_dir_prefix: bool,
+        materialize_path_prefix: bool,
         run_rules: Vec<crate::config::MatchRule>,
+        run_dir_prefix: bool,
+        run_path_prefix: bool,
     ) -> Self {
         Self {
             selector,
             prod_name,
             materialize_output,
             materialize_rules,
+            materialize_dir_prefix,
+            materialize_path_prefix,
             run_rules,
+            run_dir_prefix,
+            run_path_prefix,
         }
     }
 }
@@ -159,11 +179,26 @@ impl EffectRunner for DefaultRunner {
         identity: &dyn age::Identity,
         scope: SecretRuleScope,
     ) -> Result<Vec<(String, String)>, GitvaultError> {
-        let rules = match scope {
-            SecretRuleScope::Run => Some(self.run_rules.as_slice()),
-            SecretRuleScope::Materialize => Some(self.materialize_rules.as_slice()),
+        let (rules, dir_prefix, path_prefix) = match scope {
+            SecretRuleScope::Run => (
+                Some(self.run_rules.as_slice()),
+                self.run_dir_prefix,
+                self.run_path_prefix,
+            ),
+            SecretRuleScope::Materialize => (
+                Some(self.materialize_rules.as_slice()),
+                self.materialize_dir_prefix,
+                self.materialize_path_prefix,
+            ),
         };
-        crate::repo::decrypt_env_secrets_with_rules(repo_root, env, identity, rules)
+        crate::repo::decrypt_env_secrets_with_rules(
+            repo_root,
+            env,
+            identity,
+            rules,
+            dir_prefix,
+            path_prefix,
+        )
     }
 
     fn run_command(
@@ -322,7 +357,11 @@ pub fn execute_effects(
             cfg.env.prod_name().to_string(),
             cfg.paths.materialize_output().to_string(),
             cfg.materialize.rules,
+            cfg.materialize.dir_prefix.unwrap_or(false),
+            cfg.materialize.path_prefix.unwrap_or(false),
             cfg.run.rules,
+            cfg.run.dir_prefix.unwrap_or(false),
+            cfg.run.path_prefix.unwrap_or(false),
         ),
     )
 }

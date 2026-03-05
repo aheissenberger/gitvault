@@ -284,6 +284,10 @@ gitvault init [OPTIONS]
 | `-e, --env <ENV>` | Target environment to activate (writes to `.git/gitvault/env`) |
 | `--output <PATH>` | Export new identity key to this file instead of OS keyring |
 
+Notes:
+- On first run, `init` writes `.gitvault/config.toml` with commented (deactivated) starter examples for `[[seal.rule]]`, `[[materialize.rule]]`, and `[[run.rule]]`.
+- Uncomment and adapt those rule blocks when you are ready to enforce filtering/prefix behavior.
+
 ### `harden`
 
 ```bash
@@ -517,18 +521,59 @@ account = "identity-key"
 
 ### Rule-based command filtering (`[[seal.rule]]`, `[[materialize.rule]]`, `[[run.rule]]`)
 
-Matcher rules are defined as array-of-table entries with `action`, `path`, and optional `keys`.
+Matcher rules are defined as array-of-table entries with `action`, `path`, and optional keys.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `action` | string | `allow` or `deny` |
 | `path` | string | Repo-relative glob path to match |
 | `keys` | array of strings | Optional key globs (applies to `allow` rules) |
+| `dir_prefix` | bool | Optional (`materialize`/`run` rules): include directory components as key prefix |
+| `path_prefix` | bool | Optional (`materialize`/`run` rules): include filename stem as key prefix |
+| `custom_prefix` | string | Optional (`materialize`/`run` rules): append custom token before key |
 
 Notes:
 - Rules are evaluated in file order; later matches override earlier matches.
 - `keys` filters emitted key/value pairs for matching files.
+- Runtime commands support global prefix defaults via `[materialize]` and `[run]` keys: `dir_prefix` and `path_prefix`.
+- Prefix order is deterministic: `<DIR_PREFIX>_<FILENAME_PREFIX>_<CUSTOM_PREFIX>_<KEY>` (missing parts are skipped).
 - Unknown keys in rule entries fail config parsing.
+
+### `[materialize]`
+
+Global defaults for `gitvault materialize` runtime key prefixing.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `dir_prefix` | bool | `false` | Prefix flattened keys with env-store subdirectory components |
+| `path_prefix` | bool | `false` | Prefix flattened keys with source filename stem |
+
+Rule-level values in `[[materialize.rule]]` override these globals for matching files.
+
+**Example:**
+```toml
+[materialize]
+dir_prefix = true
+path_prefix = false
+```
+
+### `[run]`
+
+Global defaults for `gitvault run` runtime key prefixing.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `dir_prefix` | bool | `false` | Prefix flattened keys with env-store subdirectory components |
+| `path_prefix` | bool | `false` | Prefix flattened keys with source filename stem |
+
+Rule-level values in `[[run.rule]]` override these globals for matching files.
+
+**Example:**
+```toml
+[run]
+dir_prefix = false
+path_prefix = true
+```
 
 **Example:**
 ```toml
@@ -544,11 +589,17 @@ path = "conf/public.json"
 [[materialize.rule]]
 action = "allow"
 path = ".gitvault/store/dev/*.env.age"
+dir_prefix = true
+path_prefix = true
+custom_prefix = "APP"
 
 [[run.rule]]
 action = "allow"
 path = ".gitvault/store/dev/conf/*.json.age"
 keys = ["DATABASE_*", "REDIS_*"]
+dir_prefix = false
+path_prefix = true
+custom_prefix = "RUNTIME"
 ```
 
 ### `[editor]`
@@ -587,6 +638,10 @@ store_dir = ".gitvault/store"
 service = "gitvault"
 account = "age-identity"
 
+[materialize]
+dir_prefix = true
+path_prefix = true
+
 [[seal.rule]]
 action = "allow"
 path = "config/*.json"
@@ -599,6 +654,11 @@ path = "config/test-*.json"
 [[materialize.rule]]
 action = "allow"
 path = ".gitvault/store/dev/*.env.age"
+custom_prefix = "MAT"
+
+[run]
+dir_prefix = false
+path_prefix = true
 
 [[run.rule]]
 action = "allow"

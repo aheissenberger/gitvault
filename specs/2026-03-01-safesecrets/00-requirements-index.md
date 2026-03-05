@@ -102,7 +102,7 @@ This index is the canonical source for requirement-to-spec traceability.
 - `2026-03-04-engineering-nfr/req-115.md` -> REQ-115: `gitvault edit` — open sealed or encrypted files in an editor [status: done]
 - `2026-03-04-engineering-nfr/req-116.md` -> REQ-116: `gitvault get` / `gitvault set` — single key-value access for sealed and encrypted files [status: done]
 - `2026-03-04-engineering-nfr/req-117.md` -> REQ-117: `decrypt_env_secrets` multi-format store injection for `gitvault run` [status: archived; superseded by REQ-118]
-- `2026-03-04-engineering-nfr/req-118.md` -> REQ-118: Unified rule engine for `seal`/`materialize`/`run`/`status` [status: done; supersedes REQ-117]
+- `2026-03-04-engineering-nfr/req-118.md` -> REQ-118: Unified rule engine for `seal`/`materialize`/`run`/`status` [status: done; supersedes REQ-117; updated 2026-03-05 with runtime prefix controls (`dir_prefix`, `path_prefix`, `custom_prefix`)]
 
 ## Current Verification Status
 cargo xtask spec-verify passes. Coverage map is complete for baseline REQ-1..REQ-60 and extension REQ-61..REQ-69.

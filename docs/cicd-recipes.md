@@ -155,6 +155,26 @@ jobs:
 
 > **Security:** The `if: always()` on the revoke step ensures the production barrier is revoked even if the deploy step fails or is cancelled.
 
+### Real-world: migration job with `materialize` then app deploy with `run`
+
+Use this pattern when one step requires a `.env` file (for example, ORM migrations), but the main app can run fileless.
+
+```yaml
+- name: DB migration (expects .env on disk)
+  run: |
+    GITVAULT_IDENTITY_FD=3 gitvault materialize --no-prompt --env prod \
+      3<<<"${{ secrets.GITVAULT_KEY }}"
+    npm run migrate
+    rm -f .env
+
+- name: Deploy API (fileless)
+  run: |
+    GITVAULT_IDENTITY_FD=3 gitvault run --no-prompt --env prod -- ./scripts/deploy-api.sh \
+      3<<<"${{ secrets.GITVAULT_KEY }}"
+```
+
+> **Operational note:** remove the materialized file immediately after the file-bound step. Keep `run` for long-lived service commands.
+
 ---
 
 ### Production deployment with barrier (explicit steps)
@@ -285,6 +305,19 @@ CMD ["node", "server.js"]
 
 > **Security:** `--clear-env --keep-vars PATH,HOME,TZ` ensures `GITVAULT_KEY` (and every other variable from the outer environment) is stripped before the child process starts. The child process inherits only the decrypted secret values that gitvault injects, plus the explicitly kept variables.
 
+### Real-world: one-off admin task in a running container (`run`)
+
+Use `run` for operational commands (schema checks, cache warmup, smoke tests) without generating files:
+
+```bash
+docker run --rm \
+  -e GITVAULT_KEY="$GITVAULT_KEY" \
+  myapp:latest \
+  sh -lc 'GITVAULT_IDENTITY_FD=3 gitvault run --no-prompt --env prod -- ./bin/smoke-test 3<<<"$GITVAULT_KEY"'
+```
+
+This keeps secrets ephemeral and avoids leaking `.env` into container layers or mounted volumes.
+
 ---
 
 ### Key lifecycle — preventing key leakage to child processes
@@ -392,6 +425,38 @@ spec:
 ```
 
 > **Security:** Using `emptyDir.medium: Memory` mounts a `tmpfs` volume. The materialized secrets exist only in RAM and are automatically cleaned up when the Pod terminates. The init container exits (and the gitvault process terminates) before the main container starts.
+
+### Real-world: sidecar-free deployment using `run` in Kubernetes
+
+If your app consumes environment variables directly, skip init-container materialization and run your process through gitvault:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myorg/payments:latest
+          command:
+            - sh
+            - -lc
+            - |
+              exec GITVAULT_IDENTITY_FD=3 \
+                gitvault run --no-prompt --env prod -- ./payments-api \
+                3<<<"$GITVAULT_KEY"
+          env:
+            - name: GITVAULT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gitvault-identity
+                  key: key
+```
+
+Use this for stateless services; use init-container + `materialize` only when the app strictly requires a config file.
 
 ---
 
