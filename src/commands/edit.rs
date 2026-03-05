@@ -208,11 +208,13 @@ fn cmd_edit_sealed(
     let mut plain = unseal_content(&sealed_content, &ext, fields_opt.as_deref(), identity)?;
 
     let suffix = format!(".{ext}");
-    let tmp = tempfile::Builder::new()
-        .suffix(&suffix)
-        .tempfile()
+    let tmp_dir = tempfile::TempDir::new()
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
-    let tmp_path = tmp.path().to_path_buf();
+    let fallback_name = format!("gitvault_edit{suffix}");
+    let original_name = file_path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new(&fallback_name));
+    let tmp_path = tmp_dir.path().join(original_name);
 
     std::fs::write(&tmp_path, plain.as_bytes())
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
@@ -309,10 +311,13 @@ fn cmd_edit_store(
     let mut plain_bytes = plain_zeroizing.to_vec();
 
     // Write decrypted bytes to temp file.
-    let tmp = tempfile::Builder::new()
-        .tempfile()
+    let tmp_dir = tempfile::TempDir::new()
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
-    let tmp_path = tmp.path().to_path_buf();
+    // Use the .age file's stem (e.g. "config.json" from "config.json.age") as temp filename.
+    let original_name = age_path
+        .file_stem()
+        .unwrap_or_else(|| std::ffi::OsStr::new("gitvault_edit"));
+    let tmp_path = tmp_dir.path().join(original_name);
     std::fs::write(&tmp_path, &plain_bytes)
         .map_err(|e| GitvaultError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
     set_permissions_600(&tmp_path)?;
