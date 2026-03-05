@@ -231,7 +231,7 @@ pub fn cmd_unseal(opts: UnsealOptions) -> Result<CommandOutcome, GitvaultError> 
 /// Return the effective extension for sealing/unsealing.
 /// `.env` (with any suffix like `.env.prod`) is treated as `"env"`.
 /// Returns error for unsupported or excluded formats.
-fn validated_extension(path: &Path) -> Result<String, GitvaultError> {
+pub(crate) fn validated_extension(path: &Path) -> Result<String, GitvaultError> {
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -273,7 +273,7 @@ fn validated_extension(path: &Path) -> Result<String, GitvaultError> {
 /// Encrypt content in-place for the given extension.
 /// If `fields` is `Some`, only those dot-path fields are encrypted.
 /// If `fields` is `None`, all string leaf values are encrypted.
-fn seal_content(
+pub(crate) fn seal_content(
     content: &str,
     ext: &str,
     fields: Option<&[String]>,
@@ -565,7 +565,7 @@ fn seal_env(
 // ---------------------------------------------------------------------------
 
 /// Decrypt encrypted values in the content for the given extension.
-fn unseal_content(
+pub(crate) fn unseal_content(
     content: &str,
     ext: &str,
     fields: Option<&[String]>,

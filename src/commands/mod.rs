@@ -5,6 +5,7 @@
 pub mod admin;
 pub mod ai;
 pub mod decrypt;
+pub mod edit;
 pub mod effects;
 pub mod encrypt;
 pub mod identity;

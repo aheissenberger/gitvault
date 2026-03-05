@@ -268,6 +268,24 @@ pub enum Commands {
         reveal: bool,
     },
 
+    /// Open a sealed file in an editor, then re-seal on save
+    Edit {
+        /// File to edit
+        file: String,
+        /// Identity key file path
+        #[arg(short, long, env = "GITVAULT_IDENTITY")]
+        identity: Option<String>,
+        /// Environment for recipient key resolution
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Only unseal/re-seal the listed dot-path fields (comma-separated)
+        #[arg(long, value_name = "FIELDS")]
+        fields: Option<String>,
+        /// Editor command to use (overrides config and env vars)
+        #[arg(long, value_name = "CMD")]
+        editor: Option<String>,
+    },
+
     /// AWS SSM Parameter Store backend
     #[cfg(feature = "ssm")]
     Ssm {

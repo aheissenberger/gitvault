@@ -200,6 +200,14 @@ impl KeyringConfig {
     }
 }
 
+/// Configuration for the `[editor]` section.
+#[derive(Debug, Default)]
+pub struct EditorConfig {
+    /// Editor command string (e.g. `"code --wait"`).
+    /// `None` → fall back to env vars or platform default.
+    pub command: Option<String>,
+}
+
 /// Top-level gitvault project configuration.
 #[derive(Debug, Default)]
 pub struct GitvaultConfig {
@@ -215,6 +223,8 @@ pub struct GitvaultConfig {
     pub keyring: KeyringConfig,
     /// Seal configuration (REQ-112).
     pub seal: SealConfig,
+    /// Editor configuration.
+    pub editor: EditorConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +300,13 @@ struct RawKeyringConfig {
     account: Option<String>,
 }
 
+/// Intermediate TOML representation for `[editor]`.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEditorConfig {
+    command: Option<String>,
+}
+
 /// Intermediate TOML representation for the whole config file.
 ///
 /// Unknown top-level sections are silently ignored; only recognised sections
@@ -302,6 +319,7 @@ struct RawConfig {
     paths: Option<RawPathsConfig>,
     keyring: Option<RawKeyringConfig>,
     seal: Option<RawSealConfig>,
+    editor: Option<RawEditorConfig>,
 }
 
 /// Intermediate TOML representation for `[[seal.override]]`.
@@ -401,6 +419,12 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
             .collect(),
     });
 
+    let editor = raw
+        .editor
+        .map_or_else(EditorConfig::default, |r| EditorConfig {
+            command: r.command.filter(|s| !s.is_empty()),
+        });
+
     Ok(GitvaultConfig {
         hooks,
         env,
@@ -408,6 +432,7 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
         paths,
         keyring,
         seal,
+        editor,
     })
 }
 
@@ -489,6 +514,10 @@ fn effective_config_impl(
         global.seal
     };
 
+    let editor = EditorConfig {
+        command: repo.editor.command.or(global.editor.command),
+    };
+
     Ok(GitvaultConfig {
         hooks: HooksConfig { adapter },
         env,
@@ -496,6 +525,7 @@ fn effective_config_impl(
         paths,
         keyring,
         seal,
+        editor,
     })
 }
 

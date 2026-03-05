@@ -177,6 +177,22 @@ pub fn run(mut cli: Cli) -> Result<CommandOutcome, GitvaultError> {
             no_prompt: cli.no_prompt,
             selector: cli.identity_selector.clone(),
         }),
+        Commands::Edit {
+            file,
+            identity,
+            env,
+            fields,
+            editor,
+        } => crate::commands::edit::cmd_edit(crate::commands::edit::EditOptions {
+            file,
+            identity,
+            env,
+            fields,
+            editor,
+            json: cli.json,
+            no_prompt: cli.no_prompt,
+            selector: cli.identity_selector.clone(),
+        }),
         #[cfg(feature = "ssm")]
         Commands::Ssm { action } => {
             dispatch_ssm(action, cli.aws_profile, cli.aws_role_arn, cli.json)
