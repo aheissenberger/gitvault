@@ -6,6 +6,7 @@
 - Add or update tests for changed behavior.
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Run required verification commands from spec frontmatter.
+- Use `cargo llvm-cov` for coverage and never use `cargo tarpaulin`.
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 
 ## Spec workflow

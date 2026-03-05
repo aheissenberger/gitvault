@@ -10,6 +10,7 @@ Hard rules:
 - Do not implement new requirements without an approved spec entry.
 - After implementing a requirement, update the corresponding requirement spec status to reflect completion.
 - Write/update tests (Rust changes require full test coverage).
+- Use `cargo llvm-cov` for coverage and never use `cargo tarpaulin`.
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Run `cargo xtask spec-verify` (or `cargo spec-verify`) and fix failures.
 - Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.

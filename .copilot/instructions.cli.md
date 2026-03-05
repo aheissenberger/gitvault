@@ -13,6 +13,7 @@ Rules:
 - Use `cargo xtask`/aliases for spec and worktree tasks.
 - Before updating README.md, run `cargo xtask cli-help` to regenerate `docs/ai/cli-help.json` and read it for accurate CLI reference.
 - For Rust changes, ensure full test coverage.
+- Use `cargo llvm-cov` for coverage and never use `cargo tarpaulin`.
 - Rust coding conventions: see [`.github/instructions/rust.instructions.md`](../.github/instructions/rust.instructions.md).
 - Always run `cargo xtask verify` (or `cargo verify`) before handoff, and fix failures.
 - If verification fails, apply the smallest viable fix.
