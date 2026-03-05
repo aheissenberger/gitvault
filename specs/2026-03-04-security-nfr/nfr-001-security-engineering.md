@@ -1,7 +1,7 @@
 ---
 id: "S-20260304-NFR001"
 title: "Global Security Engineering NFR — Memory Safety, Subprocess Isolation, Cryptographic Hygiene, and Encoding Robustness"
-status: "implemented"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 platforms: ["Linux", "macOS", "Windows"]

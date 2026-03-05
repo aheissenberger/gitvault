@@ -1,7 +1,7 @@
 ---
 id: "S-20260304-NFR002"
 title: "Global Engineering NFR — Subprocess Wrapper Extraction and Crate Selection"
-status: "implemented"
+status: "done"
 owners: ["@aheissenberger"]
 mode: ["cli"]
 platforms: ["Linux", "macOS", "Windows"]

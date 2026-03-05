@@ -9,8 +9,7 @@
   "features": {
     "ghcr.io/devcontainers/features/copilot-cli:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers-extra/features/actionlint:1": {},
-    "ghcr.io/devcontainers-extra/features/ripgrep:1": {}
+    "ghcr.io/devcontainers-extra/features/actionlint:1": {}
   },
   "remoteUser": "vscode",
   "containerEnv": {
