@@ -102,7 +102,9 @@ jobs:
       - name: Security audit
         # RUSTSEC-2023-0071: Marvin Attack in rsa 0.9.10 (transitive via age, no fix available).
         # gitvault is a local CLI; not a network RSA oracle. See audit.toml for rationale.
-        run: cargo audit --ignore RUSTSEC-2023-0071
+        # RUSTSEC-2024-0370: proc-macro-error unmaintained (transitive via age → i18n-embed-fl).
+        # No fixed version available until age updates its dependency.
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0370
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov

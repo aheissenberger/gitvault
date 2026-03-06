@@ -78,10 +78,10 @@ pub(crate) fn normalize_for_comparison(path: &Path) -> PathBuf {
     }
     // The file/dir doesn't exist yet; canonicalise the parent and re-append
     // the filename so the result is consistent with the repo root.
-    if let (Some(parent), Some(fname)) = (path.parent(), path.file_name()) {
-        if let Ok(canonical_parent) = dunce::canonicalize(parent) {
-            return canonical_parent.join(fname);
-        }
+    if let (Some(parent), Some(fname)) = (path.parent(), path.file_name())
+        && let Ok(canonical_parent) = dunce::canonicalize(parent)
+    {
+        return canonical_parent.join(fname);
     }
     lexical_normalize(path)
 }
@@ -139,7 +139,10 @@ mod tests {
     fn make_repo_relative_relative_path_unchanged() {
         let repo = Path::new("/some/repo");
         let input = Path::new("svc/config.json");
-        assert_eq!(make_repo_relative(input, repo), PathBuf::from("svc/config.json"));
+        assert_eq!(
+            make_repo_relative(input, repo),
+            PathBuf::from("svc/config.json")
+        );
     }
 
     /// Absolute path inside the repo → stripped to repo-relative form.
@@ -155,7 +158,11 @@ mod tests {
         std::fs::create_dir_all(repo.join("svc")).unwrap();
         let result = make_repo_relative(&nested, repo);
         // The result must be the 2-component relative path.
-        assert_eq!(result.components().count(), 2, "expected 2 components, got: {result:?}");
+        assert_eq!(
+            result.components().count(),
+            2,
+            "expected 2 components, got: {result:?}"
+        );
         assert_eq!(result, PathBuf::from("svc").join("config.json"));
     }
 
@@ -168,7 +175,10 @@ mod tests {
         let outside = dir2.path().join("file.txt");
         let result = make_repo_relative(&outside, repo);
         // Cannot strip → should return the original absolute path unchanged.
-        assert!(result.is_absolute(), "should return absolute fallback, got: {result:?}");
+        assert!(
+            result.is_absolute(),
+            "should return absolute fallback, got: {result:?}"
+        );
     }
 
     // ── normalize_for_comparison ──────────────────────────────────────────────
@@ -179,7 +189,10 @@ mod tests {
         // The temp dir definitely exists; normalize_for_comparison must resolve it.
         let result = normalize_for_comparison(dir.path());
         // Result must be absolute.
-        assert!(result.is_absolute(), "expected absolute path, got: {result:?}");
+        assert!(
+            result.is_absolute(),
+            "expected absolute path, got: {result:?}"
+        );
     }
 
     #[test]
@@ -188,7 +201,10 @@ mod tests {
         let file = dir.path().join("does_not_exist.txt");
         // File doesn't exist; the parent (TempDir) does.
         let result = normalize_for_comparison(&file);
-        assert!(result.is_absolute(), "expected absolute path, got: {result:?}");
+        assert!(
+            result.is_absolute(),
+            "expected absolute path, got: {result:?}"
+        );
         assert_eq!(result.file_name().unwrap(), "does_not_exist.txt");
     }
 }

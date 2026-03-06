@@ -15,4 +15,10 @@
 # operations exposed via `age` are used only for SSH RSA key *format* decoding
 # (parsing an SSH key file), not for any network-facing decryption service.
 # Revisit once age 0.11+ ships with an updated rsa dependency.
-ignore = ["RUSTSEC-2023-0071"]
+#
+# RUSTSEC-2024-0370: proc-macro-error is unmaintained
+#
+# Transitive dependency chain: age 0.10.1 → i18n-embed-fl 0.7.0 → proc-macro-error 1.0.4
+# This is a build-time proc-macro crate; it has no runtime exposure.
+# No upgrade path available until age updates i18n-embed-fl.
+ignore = ["RUSTSEC-2023-0071", "RUSTSEC-2024-0370"]

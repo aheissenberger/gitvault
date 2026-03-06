@@ -4,7 +4,7 @@
 //! to its canonical encrypted artifact path under `.gitvault/store/<env>/`,
 //! mirroring the source's directory structure relative to the repository root.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::error::GitvaultError;
 use crate::path_utils::{make_repo_relative, normalize_for_comparison};
@@ -48,21 +48,16 @@ pub fn compute_store_path(
         ))
     })?;
 
-    // Guard: after strip_prefix the relative path must not escape the root.
-    if rel.components().next() == Some(Component::ParentDir) {
-        return Err(GitvaultError::Usage(format!(
-            "source file '{}' is outside the repository root; path must be within the repo for store mirroring.",
-            source.display()
-        )));
-    }
-
     let filename = rel
         .file_name()
         .ok_or_else(|| GitvaultError::Usage("Invalid file path".to_string()))?
         .to_string_lossy();
     let out_name = format!("{filename}.age");
 
-    let store_base = normalize_for_comparison(repo_root).join(".gitvault").join("store").join(env);
+    let store_base = normalize_for_comparison(repo_root)
+        .join(".gitvault")
+        .join("store")
+        .join(env);
 
     match rel.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => {

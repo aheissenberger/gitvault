@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use crate::commands::effects::CommandOutcome;
 use crate::error::GitvaultError;
 use crate::identity::{load_identity_from_source_with_selector, load_identity_with_selector};
-use crate::{crypto, fhsm, store};
 use crate::path_utils::make_repo_relative;
+use crate::{crypto, fhsm, store};
 
 /// Options for the [`cmd_decrypt`] command.
 pub struct DecryptOptions {
@@ -39,8 +39,6 @@ fn is_explicit_store_path(repo_relative: &Path) -> bool {
     let has_age = repo_relative.extension().is_some_and(|e| e == "age");
     has_age && repo_relative.starts_with(".gitvault/store/")
 }
-
-
 
 /// Parse the environment name from an explicit store path.
 ///
@@ -524,5 +522,33 @@ mod tests {
     fn test_is_explicit_store_path_negative_wrong_prefix() {
         let path = std::path::Path::new("other/store/dev/app.env.age");
         assert!(!is_explicit_store_path(path));
+    }
+
+    /// parse_env_from_store_path: error when path ends at .gitvault/store with no env component.
+    #[test]
+    fn test_parse_env_from_store_path_error_when_no_env_component() {
+        let rel = std::path::Path::new(".gitvault/store");
+        let err = parse_env_from_store_path(rel).unwrap_err();
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    /// derive_relative_source: error when store path does not match the given env.
+    #[test]
+    fn test_derive_relative_source_error_on_prefix_mismatch() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+        let store_path = repo_root.join(".gitvault/store/prod/file.age");
+        let err = derive_relative_source(&store_path, "staging", repo_root).unwrap_err();
+        assert!(matches!(err, GitvaultError::Usage(_)));
+    }
+
+    /// derive_relative_source: flat file (no subdirectory) yields just the filename.
+    #[test]
+    fn test_derive_relative_source_flat_file() {
+        let dir = TempDir::new().unwrap();
+        let repo_root = dir.path();
+        let store_path = repo_root.join(".gitvault/store/prod/config.json.age");
+        let rel = derive_relative_source(&store_path, "prod", repo_root).unwrap();
+        assert_eq!(rel, PathBuf::from("config.json"));
     }
 }

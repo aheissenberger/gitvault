@@ -297,4 +297,13 @@ mod tests {
         let result = run_command(&secrets, "true", &[], false, &[]);
         assert!(result.is_ok(), "valid key name should not return an error");
     }
+
+    /// Covers the sensitive-key warning branch (lines 55-58): LD_PRELOAD key emits a warning
+    /// but still runs successfully.
+    #[test]
+    fn test_sensitive_key_name_warns_but_succeeds() {
+        let secrets = vec![("LD_PRELOAD".to_string(), "".to_string())];
+        let result = run_command(&secrets, "true", &[], false, &[]);
+        assert!(result.is_ok(), "LD_PRELOAD key should be allowed with a warning");
+    }
 }
