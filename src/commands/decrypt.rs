@@ -238,6 +238,12 @@ mod tests {
     use crate::commands::test_helpers::*;
     use tempfile::TempDir;
 
+    /// Normalize a [`TempDir`] path so Windows 8.3 short names (e.g. `RUNNER~1`)
+    /// are expanded to their long-name equivalents before use in assertions.
+    fn norm_root(dir: &TempDir) -> PathBuf {
+        crate::path_utils::normalize_for_comparison(dir.path())
+    }
+
     /// Reveal mode: explicit store path → decrypts to stdout.
     #[test]
     fn test_cmd_decrypt_reveal_explicit_store_path() {
@@ -362,7 +368,8 @@ mod tests {
     #[test]
     fn test_resolve_store_path_via_source_computes_correct_mirrored_path() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let source = repo_root.join("services/auth/config.json");
 
         // Create the store file so exists-check passes.
@@ -382,7 +389,8 @@ mod tests {
     #[test]
     fn test_absolute_age_store_path_is_recognised_as_explicit() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         // Absolute path under .gitvault/store/
         let abs_store = repo_root.join(".gitvault/store/dev/app.env.age");
 
@@ -397,7 +405,8 @@ mod tests {
     #[test]
     fn test_materialisation_path_not_adjacent_to_input() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let env = "staging";
 
         // Simulate an explicit .age store path.
@@ -481,11 +490,12 @@ mod tests {
     #[test]
     fn test_derive_relative_source_nested() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let store_path = repo_root.join(".gitvault/store/prod/svc/api/config.json.age");
 
         let rel = derive_relative_source(&store_path, "prod", repo_root).unwrap();
-        assert_eq!(rel, PathBuf::from("svc/api/config.json"));
+        assert_eq!(rel, PathBuf::from("svc").join("api").join("config.json"));
     }
 
     /// parse_env_from_store_path: extracts environment from repo-relative store path.
@@ -536,7 +546,8 @@ mod tests {
     #[test]
     fn test_derive_relative_source_error_on_prefix_mismatch() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let store_path = repo_root.join(".gitvault/store/prod/file.age");
         let err = derive_relative_source(&store_path, "staging", repo_root).unwrap_err();
         assert!(matches!(err, GitvaultError::Usage(_)));
@@ -546,7 +557,8 @@ mod tests {
     #[test]
     fn test_derive_relative_source_flat_file() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let store_path = repo_root.join(".gitvault/store/prod/config.json.age");
         let rel = derive_relative_source(&store_path, "prod", repo_root).unwrap();
         assert_eq!(rel, PathBuf::from("config.json"));

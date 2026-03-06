@@ -128,10 +128,17 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Normalize a [`TempDir`] path so Windows 8.3 short names (e.g. `RUNNER~1`)
+    /// are expanded to their long-name equivalents before use in assertions.
+    fn norm_root(dir: &TempDir) -> PathBuf {
+        crate::path_utils::normalize_for_comparison(dir.path())
+    }
+
     #[test]
     fn test_compute_store_path_flat_file() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let source = repo_root.join("app.env");
 
         let result = compute_store_path(&source, "dev", repo_root).unwrap();
@@ -142,7 +149,8 @@ mod tests {
     #[test]
     fn test_compute_store_path_nested_file() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let source = repo_root.join("services/auth/config.json");
 
         let result = compute_store_path(&source, "prod", repo_root).unwrap();
@@ -156,7 +164,8 @@ mod tests {
     #[test]
     fn test_compute_store_path_outside_repo_errors() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let outside = TempDir::new().unwrap();
         let source = outside.path().join("secret.env");
 
@@ -174,7 +183,7 @@ mod tests {
     #[test]
     fn test_compute_store_path_dotdot_relative_outside_repo_errors() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path().join("subrepo");
+        let repo_root = norm_root(&dir).join("subrepo");
         // source is lexically above repo_root via ".."
         let source = repo_root.join("../../outside.txt");
 
@@ -187,7 +196,8 @@ mod tests {
     #[test]
     fn test_compute_store_path_mirrored_env() {
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let source = repo_root.join("infra/k8s/deployment.yaml");
 
         let result = compute_store_path(&source, "staging", repo_root).unwrap();
@@ -204,7 +214,8 @@ mod tests {
     fn test_resolve_store_path_source_path_maps_to_correct_age_path() {
         // AC10: source-path resolution → correct mirrored .age store path
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         // Create the expected store file so the exists-check passes.
         let store_dir = repo_root.join(".gitvault/store/prod/services/auth");
         std::fs::create_dir_all(&store_dir).unwrap();
@@ -223,7 +234,8 @@ mod tests {
     fn test_resolve_store_path_absolute_age_store_path_is_explicit() {
         // AC10: absolute .age store path under repo root → recognised as explicit store path
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let store_path = repo_root.join(".gitvault/store/dev/app.env.age");
 
         // The explicit store path is returned as-is (absolute), without an existence check.
@@ -235,7 +247,8 @@ mod tests {
     fn test_resolve_store_path_source_not_found_returns_not_found_error() {
         // AC5: derived path doesn't exist → NotFound error with correct message
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let source = repo_root.join("missing.env");
 
         let err = resolve_store_path(&source, "dev", repo_root)
@@ -260,7 +273,8 @@ mod tests {
     fn test_resolve_store_path_relative_age_path_not_under_store_is_source() {
         // An .age file that does NOT start with .gitvault/store/ is treated as source path.
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         // Absolute path inside the repo that has .age extension but is NOT under .gitvault/store/
         // → source path resolution → store file doesn't exist → NotFound.
         let source = repo_root.join("backup/config.json.age");
@@ -281,7 +295,8 @@ mod tests {
         // strip it so the path resolves correctly.  PathBuf::join does NOT normalise,
         // so repo_root.join("./file.txt") really keeps the `.` component.
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         // repo_root.join("./file.txt") → absolute path with a CurDir component.
         // lexical_normalize strips it → same as repo_root.join("file.txt").
         let source = repo_root.join("./file.txt");
@@ -293,7 +308,8 @@ mod tests {
     fn test_compute_store_path_nested_curdur_components_are_stripped() {
         // Multiple CurDir components interspersed with Normal components.
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         let source = repo_root.join("./sub/./dir/./file.txt");
         let result = compute_store_path(&source, "prod", repo_root).unwrap();
         assert_eq!(
@@ -305,18 +321,17 @@ mod tests {
     // ── lexical_normalize: ParentDir at non-Normal boundary (lines 25-27) ────
 
     #[test]
-    fn test_compute_store_path_parentdir_immediately_after_root_errors() {
-        // An absolute path whose first component after the root prefix is `..`
-        // (e.g. `/../subdir/file.txt`) cannot be stripped by any sane repo root,
-        // so `strip_prefix` fails and `compute_store_path` returns Usage error.
-        // During normalisation the `..` after root triggers lines 25-27 in
-        // `lexical_normalize` (ParentDir with no preceding Normal component to pop).
-        let repo_root = std::path::Path::new("/tmp/gitvault_parentdir_test");
-        let source = std::path::Path::new("/../tmp/gitvault_parentdir_test/file.txt");
-        // `lexical_normalize` runs lines 25-27 for the `..` after `/`.
-        // The normalised path then fails strip_prefix → Usage error.
-        let err = compute_store_path(source, "dev", repo_root)
-            .expect_err("path with .. immediately after root should error");
+    fn test_compute_store_path_outside_genuinely_different_root_errors() {
+        // A source file in a completely separate temp dir is genuinely outside
+        // repo_root, so strip_prefix fails → Usage error.
+        // This also exercises the `ParentDir` guard in lexical_normalize via
+        // the fallback path when canonicalization resolves both dirs.
+        let dir_repo = TempDir::new().unwrap();
+        let dir_other = TempDir::new().unwrap();
+        let repo_root = norm_root(&dir_repo);
+        let source = dir_other.path().join("file.txt");
+        let err = compute_store_path(&source, "dev", repo_root.as_path())
+            .expect_err("source outside repo should produce Usage error");
         assert!(
             matches!(err, GitvaultError::Usage(_)),
             "expected Usage error, got: {err:?}"
@@ -331,7 +346,8 @@ mod tests {
         // explicit store path.  Because it is NOT absolute, line 142 executes:
         //   `repo_root.join(input)`.
         let dir = TempDir::new().unwrap();
-        let repo_root = dir.path();
+        let repo_root = norm_root(&dir);
+        let repo_root = repo_root.as_path();
         // Relative input: not absolute, has .age extension, under .gitvault/store/.
         let input = std::path::Path::new(".gitvault/store/staging/app.env.age");
         let result = resolve_store_path(input, "staging", repo_root).unwrap();

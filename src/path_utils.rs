@@ -63,10 +63,11 @@ pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
 /// Strategy (in order):
 /// 1. Try [`dunce::canonicalize`] on `path` itself (succeeds when the full
 ///    path exists on disk — covers both file and directory targets).
-/// 2. If the path does not exist, try [`dunce::canonicalize`] on the parent
-///    directory and re-join the filename component.  This handles the common
-///    case where the *leaf* file does not exist yet (e.g. an encrypted
-///    artifact that is about to be created) while the *directory* does.
+/// 2. Walk up the path tree until an existing ancestor is found, canonicalize
+///    that ancestor, then reattach the non-existing suffix.  This handles
+///    deeply nested paths that don't exist yet (e.g. an encrypted artifact
+///    several directories deep that hasn't been created yet), resolving any
+///    short names (`RUNNER~1` → `runneradmin`) in the existing portion.
 /// 3. Last resort: fall back to [`lexical_normalize`].
 ///
 /// On Unix the function is essentially a thin wrapper around
@@ -76,12 +77,28 @@ pub(crate) fn normalize_for_comparison(path: &Path) -> PathBuf {
     if let Ok(canonical) = dunce::canonicalize(path) {
         return canonical;
     }
-    // The file/dir doesn't exist yet; canonicalise the parent and re-append
-    // the filename so the result is consistent with the repo root.
-    if let (Some(parent), Some(fname)) = (path.parent(), path.file_name())
-        && let Ok(canonical_parent) = dunce::canonicalize(parent)
-    {
-        return canonical_parent.join(fname);
+    // Walk up the directory tree to find the deepest existing ancestor, then
+    // reattach the non-existing suffix so short-name components in the
+    // existing part are resolved (e.g. RUNNER~1 → runneradmin on Windows CI).
+    let mut current = path.to_path_buf();
+    let mut suffix = PathBuf::new();
+    loop {
+        let Some(parent) = current.parent().filter(|p| *p != current) else {
+            break;
+        };
+        let file_name = match current.file_name() {
+            Some(n) => PathBuf::from(n),
+            None => break,
+        };
+        suffix = if suffix.as_os_str().is_empty() {
+            file_name
+        } else {
+            file_name.join(&suffix)
+        };
+        current = parent.to_path_buf();
+        if let Ok(canonical) = dunce::canonicalize(&current) {
+            return canonical.join(&suffix);
+        }
     }
     lexical_normalize(path)
 }
