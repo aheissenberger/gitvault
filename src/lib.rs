@@ -21,6 +21,7 @@ pub mod identity;
 pub mod keyring_store;
 pub mod matcher;
 pub mod materialize;
+pub(crate) mod path_utils;
 pub mod merge;
 pub mod output;
 pub mod permissions;

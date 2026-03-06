@@ -7,31 +7,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::error::GitvaultError;
-
-/// Lexically normalize a path by resolving `.` and `..` components without
-/// any filesystem access (no `canonicalize`, no symlink resolution).
-fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                // Don't pop past a root or prefix; for relative paths that
-                // have already accumulated a Normal component, pop it.
-                match result.components().next_back() {
-                    Some(Component::Normal(_)) => {
-                        result.pop();
-                    }
-                    _ => {
-                        result.push(component);
-                    }
-                }
-            }
-            c => result.push(c),
-        }
-    }
-    result
-}
+use crate::path_utils::{make_repo_relative, normalize_for_comparison};
 
 /// Compute the store path for `source` under `.gitvault/store/<env>/`.
 ///
@@ -60,8 +36,10 @@ pub fn compute_store_path(
         std::env::current_dir()?.join(source)
     };
 
-    let norm_source = lexical_normalize(&abs_source);
-    let norm_root = lexical_normalize(repo_root);
+    // Use normalize_for_comparison so that Windows short names (RUNNER~1 ↔
+    // runneradmin) and mixed path separators are resolved before comparison.
+    let norm_source = normalize_for_comparison(&abs_source);
+    let norm_root = normalize_for_comparison(repo_root);
 
     let rel = norm_source.strip_prefix(&norm_root).map_err(|_| {
         GitvaultError::Usage(format!(
@@ -84,7 +62,7 @@ pub fn compute_store_path(
         .to_string_lossy();
     let out_name = format!("{filename}.age");
 
-    let store_base = norm_root.join(".gitvault").join("store").join(env);
+    let store_base = normalize_for_comparison(repo_root).join(".gitvault").join("store").join(env);
 
     match rel.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => {
@@ -104,7 +82,8 @@ pub fn compute_store_path(
 ///   called to derive the mirrored store path, and the result is verified to
 ///   exist on disk.
 ///
-/// All path operations are **lexical** — [`std::fs::canonicalize`] is not used.
+/// All path operations use canonicalisation for comparisons and lexical
+/// normalisation for output path construction.
 ///
 /// # Errors
 ///
@@ -118,18 +97,9 @@ pub fn resolve_store_path(
     repo_root: &Path,
 ) -> Result<PathBuf, GitvaultError> {
     // Compute the repo-relative form of `input` for the two-part check.
-    // For absolute paths: strip the repo root prefix lexically.
+    // For absolute paths: strip the repo root prefix (canonicalised).
     // For relative paths: use as-is.
-    let repo_relative: PathBuf = if input.is_absolute() {
-        let norm_input = lexical_normalize(input);
-        let norm_root = lexical_normalize(repo_root);
-        norm_input
-            .strip_prefix(&norm_root)
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|_| input.to_path_buf())
-    } else {
-        input.to_path_buf()
-    };
+    let repo_relative: PathBuf = make_repo_relative(input, repo_root);
 
     let has_age_ext = repo_relative.extension().is_some_and(|e| e == "age");
     let under_store = repo_relative.starts_with(".gitvault/store/");
