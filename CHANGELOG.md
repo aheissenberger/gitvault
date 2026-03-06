@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.4] - 2026-03-05
+
+### Changed
+- Move `materialize.output` configuration key into the dedicated `[materialize]` section
+
+## [v0.5.3] - 2026-03-05
+
+### Added
+- Add runtime prefix configuration and align `init` defaults/docs with the new prefix model
+
+### Fixed
+- Resolve clippy issue by simplifying `DefaultRunner` construction
+
+## [v0.5.2] - 2026-03-05
+
+### Added
+- Implement unified rule engine and multi-format store-file injection for `gitvault run` (REQ-117)
+
+### Fixed
+- Unify env file format detection via validated extension handling
+- Improve seal config failure handling and counted success output
+
+## [v0.5.1] - 2026-03-05
+
+### Added
+- Add `gitvault edit` command (store-file mode)
+- Add `gitvault get`/`set` commands for single key-value access (REQ-116)
+
+### Fixed
+- Preserve original filename in temp subdirectory for `edit`
+- Respect `[[seal.override]]` field configuration during sealing
+
+## [v0.5.0] - 2026-03-05
+
+### Added
+- Implement REQ-112: `seal`/`unseal` commands for structured secret management
+- Implement REQ-106 env key name validation
+
+### Changed
+- Implement REQ-113/114 path mirroring and decrypt source-path resolution
+
+### Breaking
+- Remove deprecated structured-file flags from `encrypt`/`decrypt` and replace those workflows with `seal`/`unseal`
+
 ## [v0.4.11] - 2026-03-04
 
 ### Fixed
@@ -35,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Regenerated AI docs, fixed stale CLI help paths
 - Expanded and restructured documentation (recipient guide, Quick Start, CLI reference, macOS app-signing guide)
+
+## [v0.4.6] - 2026-03-04
+
+### Changed
+- Regenerated AI docs and fixed stale CLI help paths
 
 ## [v0.4.5] - 2025-01-01
 
@@ -112,7 +161,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Streamlined release verification flow
 
-[Unreleased]: https://github.com/aheissenberger/gitvault/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/aheissenberger/gitvault/compare/v0.5.4...HEAD
+[v0.5.4]: https://github.com/aheissenberger/gitvault/compare/v0.5.3...v0.5.4
+[v0.5.3]: https://github.com/aheissenberger/gitvault/compare/v0.5.2...v0.5.3
+[v0.5.2]: https://github.com/aheissenberger/gitvault/compare/v0.5.1...v0.5.2
+[v0.5.1]: https://github.com/aheissenberger/gitvault/compare/v0.5.0...v0.5.1
+[v0.5.0]: https://github.com/aheissenberger/gitvault/compare/v0.4.11...v0.5.0
+[v0.4.11]: https://github.com/aheissenberger/gitvault/compare/v0.4.10...v0.4.11
+[v0.4.10]: https://github.com/aheissenberger/gitvault/compare/v0.4.9...v0.4.10
+[v0.4.9]: https://github.com/aheissenberger/gitvault/compare/v0.4.8...v0.4.9
+[v0.4.8]: https://github.com/aheissenberger/gitvault/compare/v0.4.7...v0.4.8
+[v0.4.7]: https://github.com/aheissenberger/gitvault/compare/v0.4.6...v0.4.7
 [v0.4.6]: https://github.com/aheissenberger/gitvault/compare/v0.4.5...v0.4.6
 [v0.4.5]: https://github.com/aheissenberger/gitvault/compare/v0.4.4...v0.4.5
 [v0.4.4]: https://github.com/aheissenberger/gitvault/compare/v0.4.3...v0.4.4

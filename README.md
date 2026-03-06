@@ -34,6 +34,36 @@ services required.
 | **CI friendly** | `--json`, `--no-prompt`; `CI=1` auto-enables non-interactive mode; stable exit codes |
 | **AWS SSM** | `gitvault ssm pull/push/diff/set`; `--features ssm` |
 
+## `seal` vs `encrypt` (Quick Intro)
+
+gitvault provides two complementary file-secret workflows:
+
+| Command | Best for | Output |
+|---|---|---|
+| `seal` | Keep file structure readable while encrypting only secret values | In-place updates to `.env` / JSON / YAML / TOML |
+| `encrypt` | Treat the entire file as secret | `.age` artifact in `.gitvault/store/<env>/...` |
+
+Rule of thumb:
+- Use `seal` for mixed config (public + secret values).
+- Use `encrypt` when the whole file should be opaque.
+
+See the full decision guide and format recipes: [docs/seal-vs-encrypt.md](docs/seal-vs-encrypt.md)
+
+## `materialize` vs `run` for CI (Quick Intro)
+
+For CI/CD workflows, gitvault provides two runtime patterns:
+
+| Command | Best for | Plaintext footprint |
+|---|---|---|
+| `run` | Most CI jobs and long-running service commands | No `.env` file written |
+| `materialize` | Tools that strictly require file-based config | Writes `.env` (or configured output) |
+
+Rule of thumb:
+- Prefer `run` by default in CI.
+- Use `materialize` only for file-bound steps (for example, migrations expecting `.env`).
+
+See full CI/CD recipes (GitHub Actions, Docker, Kubernetes): [docs/cicd-recipes.md](docs/cicd-recipes.md)
+
 ## Installation
 
 ```bash
@@ -113,37 +143,12 @@ GITVAULT_IDENTITY="$SECRET_KEY" gitvault run --no-prompt -- node server.js
 
 ---
 
-## CLI reference
+## CLI quick map
 
-```
-gitvault [OPTIONS] <COMMAND>
+`gitvault [OPTIONS] <COMMAND>`
 
-Global options:  --json  --no-prompt  --identity-stdin  --identity-selector
-                 (--aws-profile  --aws-role-arn  only with --features ssm)
-
-Commands:
-  init          Onboard a new team member (identity, recipient, repo hardening)
-  harden        Harden repo (hooks, .gitignore); or import+encrypt a file with harden <file>
-  encrypt       Encrypt a file into .gitvault/store/<env>/ using mirrored source path
-  decrypt       Decrypt from .gitvault/store/<env>/ using source path or explicit .age path (--reveal)
-  materialize   Materialize secrets to root .env
-  status        Check repository safety status
-  run           Inject secrets into child process env (--clear-env, --keep-vars)
-  allow-prod    Write a timed production allow token
-  revoke-prod   Revoke the production allow token immediately
-  recipient     Manage recipients: add | remove | list | add-self
-  rekey         Re-encrypt all secrets for current recipients (--dry-run, --env, --json)
-  keyring       Manage identity key in OS keyring: set | get | delete | set-passphrase | get-passphrase | delete-passphrase
-  identity      Manage identities: create [--add-recipient] | pubkey
-  check         Preflight validation without side effects (-H / --skip-history-check)
-  ai            Print embedded skill or context file for AI agents: ai skill | ai context
-  seal          In-place field/value encryption for JSON/YAML/TOML/.env
-  unseal        In-place field/value decryption for JSON/YAML/TOML/.env (--reveal)
-  edit          Open sealed or encrypted file in editor; re-seal/re-encrypt on save
-  get           Read a single key's plaintext value from a sealed or encrypted file
-  set           Update (or create) a single key's value in a sealed or encrypted file
-  ssm           AWS SSM Parameter Store sync (--features ssm)
-```
+For complete command/flag/env-var facts, use the canonical reference:
+[docs/reference.md](docs/reference.md)
 
 ### Operator quick map
 
@@ -178,9 +183,9 @@ Commands:
 
 ---
 
-Detailed `materialize` and `run` behavior, examples, and rule-based filtering are documented in
-[docs/reference.md](docs/reference.md#materialize) and
-[docs/reference.md](docs/reference.md#run).
+Detailed command behavior and all flags are documented in:
+- [docs/reference.md](docs/reference.md#commands)
+- [docs/reference.md](docs/reference.md#command-details)
 
 ---
 
@@ -195,21 +200,14 @@ Two optional TOML config files — missing files are silently ignored:
 | `.gitvault/config.toml` | Repository-level (commit with project) |
 | `~/.config/gitvault/config.toml` | User-global personal defaults |
 
-→ Full configuration reference, all `GITVAULT_*` env vars, and TOML examples: [docs/reference.md § Configuration](docs/reference.md#configuration-files)
+→ Full configuration reference, all `GITVAULT_*` env vars, and TOML examples: [docs/reference.md § Configuration](docs/reference.md#configuration-file)
 
 ---
 
 ## Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | General error (I/O, encryption failure) |
-| `2` | Usage / argument error |
-| `3` | Plaintext secret detected in tracked files or committed history |
-| `4` | Decryption error (wrong key, corrupt file) |
-| `5` | Production barrier not satisfied |
-| `6` | Secrets drift detected (uncommitted changes in encrypted files) |
+For the authoritative exit-code list and semantics, see:
+[docs/reference.md#exit-codes](docs/reference.md#exit-codes)
 
 ---
 
@@ -252,7 +250,7 @@ Priority order (highest → lowest): `--identity-stdin` → `--identity` / `GITV
 | [docs/identity-setup.md](docs/identity-setup.md) | Set up your identity key (keyring, age file, SSH, FD-based) |
 | [docs/recipient-management.md](docs/recipient-management.md) | Add/remove team members, PR ceremony, rekey workflow |
 | [docs/cicd-recipes.md](docs/cicd-recipes.md) | GitHub Actions, Docker, Kubernetes recipes |
-| [docs/secret-formats.md](docs/secret-formats.md) | Encrypt .env, JSON, YAML, TOML files |
+| [docs/seal-vs-encrypt.md](docs/seal-vs-encrypt.md) | Choose between in-place field sealing and whole-file encryption, with format recipes |
 
 **Reference** — complete technical specification:
 | Reference | Description |
@@ -280,6 +278,29 @@ Priority order (highest → lowest): `--identity-stdin` → `--identity` / `GITV
 | [transcrypt](https://github.com/elasticdog/transcrypt) | Lightweight transparent encryption for selected paths |
 
 GitVault differentiators: age-native, deterministic per-field re-encryption for minimal diffs, structured leak prevention, and runtime injection for AI-agent workflows.
+
+### Concept and Feature Comparison
+
+| Dimension | `gitvault` | `SOPS` | `git-crypt` |
+|---|---|---|---|
+| Core concept | Git-native secret lifecycle for teams and automation (repo workflows + runtime delivery) | Structured config encryption tool with external key-service integrations | Transparent repository encryption using Git clean/smudge filters |
+| Structured document encryption | Yes: native in-place field/value protection for `.env`, JSON, YAML, TOML | Yes: core strength for structured config files | Limited: whole-file path encryption, not field-level workflows |
+| Whole-file encryption | Yes: first-class archive-style encryption into a dedicated repository store | Supported for file-level encryption use cases | Yes: primary mode via path-based filter rules |
+| Git diff readability | High when only sensitive fields are encrypted and structure remains plaintext | Medium to high for structured files with encrypted payload metadata | Low for encrypted paths (ciphertext blobs in diffs) |
+| Git process protection (hooks blocking commits) | Built-in hook setup plus leak/drift checks that can gate commits/CI | No built-in hook manager; typically combined with external hook frameworks | No built-in hook manager; typically combined with external hook frameworks |
+| Runtime secret injection | Built-in runtime env injection without requiring plaintext files | Not built-in as a first-class runtime command | Not built-in |
+| CI-focused controls | Built-in non-interactive mode, stable exit codes, and production-barrier controls | Common in CI; controls depend on surrounding policy/tooling | CI behavior depends mainly on Git filter setup and key distribution |
+| Team onboarding/offboarding lifecycle | Built-in recipient workflow and rekey lifecycle for team changes | Possible, but typically assembled from external scripts/processes | Possible via key management changes, typically without a guided lifecycle workflow |
+| Deterministic update behavior (merge-noise control) | High: deterministic field-level re-encryption minimizes unnecessary ciphertext churn | Medium: structured updates are workable, but encrypted payload churn can still create noisy diffs | Low: whole-file ciphertext updates are often high-noise in diffs |
+| Baseline dependency model | Local-first workflow with no mandatory external secret service | Commonly paired with KMS/cloud backends (can also run with local key methods) | Local Git/GPG-centric workflow |
+| Optimized for parallel AI agents (worktrees + many merges) | High: explicit multi-worktree handling and merge-noise reduction workflows | Medium: structured files can merge reasonably, no dedicated worktree/agent model | Low: opaque filter-encrypted files increase merge conflict friction |
+| Supported platforms | Linux, macOS, Windows | Linux, macOS, Windows | Git-supported platforms (commonly Linux/macOS; Windows via Git tooling) |
+| Supported identity providers | age identities, stdin/FD, OS keyring, SSH keys, SSH agent | age, PGP, cloud KMS identities (for example AWS KMS/GCP KMS/Azure Key Vault), Vault transit | GPG identities (plus symmetric repo key mode) |
+| Supported encryption systems | age recipient encryption | age/PGP with cloud-KMS-backed key management options | OpenSSL-backed Git filter encryption |
+| Supported storage providers | Git repository store; optional AWS SSM backend (`--features ssm`) | Encrypted files in VCS/file storage; external key services for key management | Encrypted files in Git repository |
+| Typical fit | Teams needing one tool for repo protection, CI automation, and runtime secret delivery | Teams centered on KMS/PGP/age-backed structured config management | Teams wanting transparent path-based encryption with minimal command changes |
+
+For command-level examples and deployment recipes, see [docs/cicd-recipes.md](docs/cicd-recipes.md) and [docs/reference.md](docs/reference.md).
 
 ---
 

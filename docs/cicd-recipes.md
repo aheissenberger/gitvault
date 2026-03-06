@@ -1,6 +1,6 @@
 # CI/CD Best Practices & Recipes for gitvault
 
-> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · [Recipient Management](recipient-management.md) · CI/CD Recipes · [Secret Formats](secret-formats.md) · [CLI Reference](reference.md)
+> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · [Recipient Management](recipient-management.md) · CI/CD Recipes · [Seal vs Encrypt](seal-vs-encrypt.md) · [CLI Reference](reference.md)
 
 gitvault is a Git-native, age-encrypted secrets manager. This guide covers how to integrate it safely into CI/CD pipelines, container builds, and orchestration platforms.
 
@@ -608,3 +608,4 @@ GITVAULT_IDENTITY_FD=3 gitvault run --no-prompt --env prod -- ./deploy.sh \
 - [CLI Reference — Environment Variables](reference.md#environment-variables)
 - [CLI Reference — Exit Codes](reference.md#exit-codes)
 - [Identity Setup](identity-setup.md) — configuring your identity for CI
+- [Seal vs Encrypt](seal-vs-encrypt.md) — choosing archive vs in-place secret handling

@@ -1,6 +1,6 @@
 # Identity Setup Guide
 
-> **[← README](../README.md)** · Identity Setup · [Recipient Management](recipient-management.md) · [CI/CD Recipes](cicd-recipes.md) · [Secret Formats](secret-formats.md) · [CLI Reference](reference.md)
+> **[← README](../README.md)** · Identity Setup · [Recipient Management](recipient-management.md) · [CI/CD Recipes](cicd-recipes.md) · [Seal vs Encrypt](seal-vs-encrypt.md) · [CLI Reference](reference.md)
 
 This guide explains how to configure your gitvault identity — the age identity key used to encrypt
 and decrypt secrets. Choose the method that best fits your workflow and security requirements.
@@ -12,7 +12,7 @@ and decrypt secrets. Choose the method that best fits your workflow and security
 - [Option 2: age Key File](#option-2-age-key-file)
 - [Option 3: SSH Key File](#option-3-ssh-key-file-with-optional-passphrase)
 - [Option 4: SSH Agent](#option-4-ssh-agent)
-- [Option 5: Piped / FD-based (CI/CD)](#option-5-pipedfd-based-cicd)
+- [Option 5: Piped FD-based (CI/CD)](#option-5-piped-fd-based-cicd)
 - [Passphrase Management](#passphrase-management)
 - [Security Recommendations](#security-recommendations)
 
@@ -28,7 +28,7 @@ Identity is resolved in this order: `--identity-stdin` → `--identity` / `GITVA
 - **Keyring unavailable / prefer files** → [Option 2: age Key File](#option-2-age-key-file)
 - **Reuse existing SSH key** → [Option 3: SSH Key File](#option-3-ssh-key-file-with-optional-passphrase)
 - **Team uses ssh-agent / hardware token** → [Option 4: SSH Agent](#option-4-ssh-agent)
-- **CI/CD pipelines** → [Option 5: Piped / FD-based](#option-5-pipedfd-based-cicd)
+- **CI/CD pipelines** → [Option 5: Piped FD-based](#option-5-piped-fd-based-cicd)
 
 > **Note:** `GITVAULT_IDENTITY_FD` and `--identity` share priority level 1; `GITVAULT_IDENTITY_FD` is preferred in CI because the key does not appear in the process environment listing.
 
@@ -87,7 +87,7 @@ gitvault keyring delete
 > and ensure a secrets daemon is running.
 
 > **Note:** In headless or container environments the OS keyring is typically unavailable. Use
-> [Option 5: Piped / FD-based](#option-5-pipedfd-based-cicd) instead.
+> [Option 5: Piped FD-based](#option-5-piped-fd-based-cicd) instead.
 
 ---
 
@@ -256,12 +256,12 @@ ssh-add -l
 ### Limitations
 
 - The SSH agent must be running and have the key loaded before gitvault is invoked.
-- In headless CI environments, prefer [Option 5](#option-5-pipedfd-based-cicd) unless your CI
+- In headless CI environments, prefer [Option 5](#option-5-piped-fd-based-cicd) unless your CI
   platform provides an SSH agent socket.
 
 ---
 
-## Option 5: Piped / FD-based (CI/CD)
+## Option 5: Piped FD-based (CI/CD)
 
 For CI/CD pipelines, pass the identity key without writing it to disk or exposing it in the
 process environment.

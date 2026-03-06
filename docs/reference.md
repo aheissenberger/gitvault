@@ -1,5 +1,7 @@
 # gitvault CLI Reference
 
+> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · [Recipient Management](recipient-management.md) · [CI/CD Recipes](cicd-recipes.md) · [Seal vs Encrypt](seal-vs-encrypt.md) · CLI Reference
+
 Use this file as the canonical command reference. For task-oriented examples, see `README.md` and the guides in `docs/`.
 
 ## Source of Truth
@@ -12,6 +14,47 @@ cargo xtask cli-help
 
 Generated file:
 - `docs/ai/cli-help.json`
+
+## Table of Contents
+
+- [Source of Truth](#source-of-truth)
+- [Commands](#commands)
+- [Global Options](#global-options)
+- [Command Details](#command-details)
+  - [`encrypt`](#encrypt)
+  - [`decrypt`](#decrypt)
+  - [`seal`](#seal)
+  - [`unseal`](#unseal)
+  - [`edit`](#edit)
+  - [`get`](#get)
+  - [`set`](#set)
+  - [`materialize`](#materialize)
+  - [`status`](#status)
+  - [`init`](#init)
+  - [`harden`](#harden)
+  - [`run`](#run)
+  - [`allow-prod` / `revoke-prod`](#allow-prod--revoke-prod)
+  - [`recipient`](#recipient)
+  - [`rekey`](#rekey)
+  - [`keyring`](#keyring)
+  - [`check`](#check)
+  - [`identity`](#identity)
+  - [`ai`](#ai)
+  - [`ssm` (feature-gated)](#ssm-feature-gated)
+- [Environment Variables](#environment-variables)
+- [Configuration File](#configuration-file)
+  - [`[hooks]`](#hooks)
+  - [`[env]`](#env)
+  - [`[barrier]`](#barrier)
+  - [`[paths]`](#paths)
+  - [`[keyring]`](#keyring-1)
+  - [Rule-based command filtering (`[[seal.rule]]`, `[[materialize.rule]]`, `[[run.rule]]`)](#rule-based-command-filtering-sealrule-materializerule-runrule)
+  - [`[materialize]`](#materialize-1)
+  - [`[run]`](#run-1)
+  - [`[editor]`](#editor)
+- [Complete Example](#complete-example)
+- [Exit Codes](#exit-codes)
+- [Identity Resolution](#identity-resolution)
 
 ## Commands
 

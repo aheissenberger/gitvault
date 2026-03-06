@@ -69,6 +69,6 @@ See `docs/ai/agent-reference.md` for the curated list of critical and architectu
 | `docs/identity-setup.md` | Identity setup guide (OS keyring, age files, SSH keys, SSH agent, FD-based) |
 | `docs/recipient-management.md` | Recipient lifecycle: onboarding, offboarding, rekeying, team scaling patterns |
 | `docs/cicd-recipes.md` | CI/CD best practices (GitHub Actions, Docker, Kubernetes recipes) |
-| `docs/secret-formats.md` | Secret formats cookbook (.env, JSON, YAML, TOML) |
+| `docs/seal-vs-encrypt.md` | Seal vs encrypt decision guide and format recipes (.env, JSON, YAML, TOML) |
 | `docs/ai/skill.md` | AI skill reference (embedded in binary; canonical AI reference for the tool) |
 | `docs/ai/agent-reference.md` | Architecture hotspots and curated risk areas (read before touching core modules) |

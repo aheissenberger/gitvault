@@ -1,6 +1,6 @@
 # Recipient Management
 
-> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · Recipient Management · [CI/CD Recipes](cicd-recipes.md) · [Secret Formats](secret-formats.md) · [CLI Reference](reference.md)
+> **[← README](../README.md)** · [Identity Setup](identity-setup.md) · Recipient Management · [CI/CD Recipes](cicd-recipes.md) · [Seal vs Encrypt](seal-vs-encrypt.md) · [CLI Reference](reference.md)
 
 This guide covers the full lifecycle of managing recipients in a gitvault-encrypted repository: onboarding new team members, offboarding departing ones, and rekeying secrets when the recipient set changes.
 
