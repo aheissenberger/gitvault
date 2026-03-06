@@ -304,6 +304,9 @@ mod tests {
     fn test_sensitive_key_name_warns_but_succeeds() {
         let secrets = vec![("LD_PRELOAD".to_string(), "".to_string())];
         let result = run_command(&secrets, "true", &[], false, &[]);
-        assert!(result.is_ok(), "LD_PRELOAD key should be allowed with a warning");
+        assert!(
+            result.is_ok(),
+            "LD_PRELOAD key should be allowed with a warning"
+        );
     }
 }
