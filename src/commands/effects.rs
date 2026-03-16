@@ -165,14 +165,24 @@ impl EffectRunner for DefaultRunner {
                 self.materialize_path_prefix,
             ),
         };
-        crate::repo::decrypt_env_secrets_with_rules(
-            repo_root,
-            env,
-            identity,
-            rules,
-            dir_prefix,
-            path_prefix,
-        )
+        match scope {
+            SecretRuleScope::Run => crate::repo::decrypt_runtime_secrets_with_rules(
+                repo_root,
+                env,
+                identity,
+                rules,
+                dir_prefix,
+                path_prefix,
+            ),
+            SecretRuleScope::Materialize => crate::repo::decrypt_runtime_secrets_with_rules(
+                repo_root,
+                env,
+                identity,
+                rules,
+                dir_prefix,
+                path_prefix,
+            ),
+        }
     }
 
     fn run_command(

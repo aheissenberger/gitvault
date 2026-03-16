@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.5.7] - 2026-03-16
+
+### Added
+- Extend runtime rule source selection to `[[materialize.rule]]` and `[[run.rule]]` with `source = "store" | "sealed"`
+- Add sealed-source loading parity for `gitvault materialize` (config-selected repository files with sealed values)
+
+### Changed
+- Update CLI reference documentation with source-selector semantics and examples for `run` and `materialize`
+- Add and activate REQ-119 spec coverage for run/materialize sealed-source runtime behavior
+
 ## [v0.5.4] - 2026-03-05
 
 ### Changed
@@ -161,7 +171,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Streamlined release verification flow
 
-[Unreleased]: https://github.com/aheissenberger/gitvault/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/aheissenberger/gitvault/compare/v0.5.7...HEAD
+[v0.5.7]: https://github.com/aheissenberger/gitvault/compare/v0.5.6...v0.5.7
+[v0.5.6]: https://github.com/aheissenberger/gitvault/compare/v0.5.4...v0.5.6
 [v0.5.4]: https://github.com/aheissenberger/gitvault/compare/v0.5.3...v0.5.4
 [v0.5.3]: https://github.com/aheissenberger/gitvault/compare/v0.5.2...v0.5.3
 [v0.5.2]: https://github.com/aheissenberger/gitvault/compare/v0.5.1...v0.5.2

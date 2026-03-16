@@ -1,3 +1,4 @@
+use crate::config::RuleSource;
 use crate::defaults;
 use crate::error::GitvaultError;
 use crate::{crypto, merge};
@@ -275,6 +276,136 @@ pub fn decrypt_env_secrets(
     decrypt_env_secrets_with_rules(repo_root, env, identity, None, false, false)
 }
 
+/// Decrypt runtime secrets for `gitvault run`, including both store artifacts
+/// and optionally configured sealed-source files.
+///
+/// Rule behavior:
+/// - `source = "store"` (or omitted source) applies to `.gitvault/store/...` paths.
+/// - `source = "sealed"` applies to repository working-tree files.
+pub fn decrypt_runtime_secrets_with_rules(
+    repo_root: &Path,
+    env: &str,
+    identity: &dyn age::Identity,
+    rules: Option<&[crate::config::MatchRule]>,
+    global_dir_prefix: bool,
+    global_path_prefix: bool,
+) -> Result<Vec<(String, String)>, GitvaultError> {
+    let mut secrets = decrypt_env_secrets_with_rules(
+        repo_root,
+        env,
+        identity,
+        rules,
+        global_dir_prefix,
+        global_path_prefix,
+    )?;
+
+    let repo_files = list_repository_files(repo_root)?;
+    for rel_repo_path in repo_files {
+        let (include_file, key_filters, dir_prefix, path_prefix, custom_prefix) =
+            evaluate_rule_filters_for_source(
+                &rel_repo_path,
+                rules,
+                global_dir_prefix,
+                global_path_prefix,
+                RuleEvalSource::Sealed,
+            );
+
+        if !include_file {
+            continue;
+        }
+
+        let file_path = repo_root.join(&rel_repo_path);
+        let ext =
+            crate::commands::seal::validated_extension(Path::new(&rel_repo_path)).map_err(|e| {
+                GitvaultError::Usage(format!(
+                    "selected sealed runtime source '{}' is unsupported: {e}",
+                    rel_repo_path
+                ))
+            })?;
+
+        let content = crate::fs_util::read_text(&file_path)?;
+        let unsealed = crate::commands::seal::unseal_content(&content, &ext, None, identity)
+            .map_err(|e| {
+                GitvaultError::Decryption(format!(
+                    "failed to load sealed runtime source {}: {e}",
+                    rel_repo_path
+                ))
+            })?;
+
+        let prefix = build_repo_key_prefix(
+            &rel_repo_path,
+            dir_prefix,
+            path_prefix,
+            custom_prefix.as_deref(),
+        );
+
+        let parsed_pairs = match ext.as_str() {
+            "env" => merge::parse_env_pairs(&unsealed).map_err(|e| {
+                GitvaultError::Usage(format!(
+                    "invalid .env runtime source {}: {e}",
+                    rel_repo_path
+                ))
+            })?,
+            "json" => {
+                let val: serde_json::Value = serde_json::from_str(&unsealed).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "invalid JSON runtime source {}: {e}",
+                        rel_repo_path
+                    ))
+                })?;
+                let mut pairs = Vec::new();
+                flatten_to_env_pairs(&val, "", &mut pairs);
+                pairs
+            }
+            "yaml" | "yml" => {
+                let val: serde_yaml::Value = serde_yaml::from_str(&unsealed).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "invalid YAML runtime source {}: {e}",
+                        rel_repo_path
+                    ))
+                })?;
+                let json_val = serde_json::to_value(val).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "cannot convert YAML runtime source {} to JSON: {e}",
+                        rel_repo_path
+                    ))
+                })?;
+                let mut pairs = Vec::new();
+                flatten_to_env_pairs(&json_val, "", &mut pairs);
+                pairs
+            }
+            "toml" => {
+                let val: toml::Value = toml::from_str(&unsealed).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "invalid TOML runtime source {}: {e}",
+                        rel_repo_path
+                    ))
+                })?;
+                let json_val = serde_json::to_value(val).map_err(|e| {
+                    GitvaultError::Usage(format!(
+                        "cannot convert TOML runtime source {} to JSON: {e}",
+                        rel_repo_path
+                    ))
+                })?;
+                let mut pairs = Vec::new();
+                flatten_to_env_pairs(&json_val, "", &mut pairs);
+                pairs
+            }
+            _ => {
+                return Err(GitvaultError::Usage(format!(
+                    "selected sealed runtime source '{}' has unsupported extension '{}': expected env/json/yaml/yml/toml",
+                    rel_repo_path, ext
+                )));
+            }
+        };
+
+        let prefixed = apply_prefix_to_pairs(parsed_pairs, prefix.as_deref());
+        secrets.extend(filter_pairs_by_key_globs(prefixed, key_filters.as_deref()));
+    }
+
+    Ok(secrets)
+}
+
 /// Decrypt all encrypted secrets for the given environment, applying optional
 /// rule-based path/key filtering.
 ///
@@ -300,11 +431,12 @@ pub fn decrypt_env_secrets_with_rules(
             .unwrap_or_else(|_| path.to_string_lossy().into_owned());
 
         let (include_file, key_filters, dir_prefix, path_prefix, custom_prefix) =
-            evaluate_rule_filters(
+            evaluate_rule_filters_for_source(
                 &rel_store_path,
                 rules,
                 global_dir_prefix,
                 global_path_prefix,
+                RuleEvalSource::Store,
             );
         if !include_file {
             continue;
@@ -401,30 +533,67 @@ pub fn decrypt_env_secrets_with_rules(
     Ok(secrets)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuleEvalSource {
+    Store,
+    Sealed,
+}
+
+#[cfg(test)]
 fn evaluate_rule_filters(
     rel_store_path: &str,
     rules: Option<&[crate::config::MatchRule]>,
     global_dir_prefix: bool,
     global_path_prefix: bool,
 ) -> (bool, Option<Vec<String>>, bool, bool, Option<String>) {
-    fn defaults(dir: bool, path: bool) -> (bool, Option<Vec<String>>, bool, bool, Option<String>) {
-        (true, None, dir, path, None)
+    evaluate_rule_filters_for_source(
+        rel_store_path,
+        rules,
+        global_dir_prefix,
+        global_path_prefix,
+        RuleEvalSource::Store,
+    )
+}
+
+fn evaluate_rule_filters_for_source(
+    rel_store_path: &str,
+    rules: Option<&[crate::config::MatchRule]>,
+    global_dir_prefix: bool,
+    global_path_prefix: bool,
+    source: RuleEvalSource,
+) -> (bool, Option<Vec<String>>, bool, bool, Option<String>) {
+    fn defaults(
+        include: bool,
+        dir: bool,
+        path: bool,
+    ) -> (bool, Option<Vec<String>>, bool, bool, Option<String>) {
+        (include, None, dir, path, None)
     }
 
-    let mut include = true;
+    let default_include = matches!(source, RuleEvalSource::Store);
+
+    let mut include = default_include;
     let mut key_filters: Option<Vec<String>> = None;
     let mut dir_prefix = global_dir_prefix;
     let mut path_prefix = global_path_prefix;
     let mut custom_prefix: Option<String> = None;
 
     let Some(rules) = rules else {
-        return defaults(global_dir_prefix, global_path_prefix);
+        return defaults(default_include, global_dir_prefix, global_path_prefix);
     };
     if rules.is_empty() {
-        return defaults(global_dir_prefix, global_path_prefix);
+        return defaults(default_include, global_dir_prefix, global_path_prefix);
     }
 
     for rule in rules {
+        let rule_source = rule.source.unwrap_or(RuleSource::Store);
+        let source_matches = match source {
+            RuleEvalSource::Store => rule_source == RuleSource::Store,
+            RuleEvalSource::Sealed => rule_source == RuleSource::Sealed,
+        };
+        if !source_matches {
+            continue;
+        }
         if !crate::matcher::path_matches_glob(&rule.path, rel_store_path) {
             continue;
         }
@@ -454,6 +623,79 @@ fn evaluate_rule_filters(
     }
 
     (include, key_filters, dir_prefix, path_prefix, custom_prefix)
+}
+
+fn list_repository_files(repo_root: &Path) -> Result<Vec<String>, GitvaultError> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), GitvaultError> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().and_then(|n| n.to_str()) == Some(".git") {
+                    continue;
+                }
+                walk(root, &path, out)?;
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+            out.push(rel);
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    walk(repo_root, repo_root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn build_repo_key_prefix(
+    rel_repo_path: &str,
+    dir_prefix_enabled: bool,
+    filename_prefix_enabled: bool,
+    custom_prefix: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if dir_prefix_enabled && let Some(parent) = Path::new(rel_repo_path).parent() {
+        let tokens = parent
+            .components()
+            .filter_map(|c| normalize_prefix_token(&c.as_os_str().to_string_lossy()))
+            .collect::<Vec<_>>();
+        if !tokens.is_empty() {
+            parts.push(tokens.join("_"));
+        }
+    }
+
+    if filename_prefix_enabled
+        && let Some(stem) = Path::new(rel_repo_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+    {
+        let candidate = stem
+            .trim_start_matches('.')
+            .split('.')
+            .next()
+            .unwrap_or_default();
+        if let Some(token) = normalize_prefix_token(candidate) {
+            parts.push(token);
+        }
+    }
+
+    if let Some(custom) = custom_prefix
+        && let Some(token) = normalize_prefix_token(custom)
+    {
+        parts.push(token);
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("_"))
+    }
 }
 
 fn apply_prefix_to_pairs(
@@ -1146,6 +1388,7 @@ mod tests {
                 action: crate::config::RuleAction::Allow,
                 path: ".gitvault/store/dev/*.env.age".to_string(),
                 keys: vec!["FOO".to_string(), "BAR_*".to_string()],
+                source: None,
                 dir_prefix: None,
                 path_prefix: None,
                 custom_prefix: None,
@@ -1154,6 +1397,7 @@ mod tests {
                 action: crate::config::RuleAction::Deny,
                 path: ".gitvault/store/dev/blocked.env.age".to_string(),
                 keys: vec!["IGNORED".to_string()],
+                source: None,
                 dir_prefix: None,
                 path_prefix: None,
                 custom_prefix: None,
@@ -1219,6 +1463,7 @@ mod tests {
             action: crate::config::RuleAction::Allow,
             path: ".gitvault/store/dev/app.env.age".to_string(),
             keys: vec!["FOO".to_string()],
+            source: None,
             dir_prefix: None,
             path_prefix: None,
             custom_prefix: None,
@@ -1250,6 +1495,7 @@ mod tests {
             action: crate::config::RuleAction::Deny,
             path: ".gitvault/store/dev/blocked.env.age".to_string(),
             keys: vec![],
+            source: None,
             dir_prefix: None,
             path_prefix: None,
             custom_prefix: None,
@@ -1281,6 +1527,7 @@ mod tests {
             action: crate::config::RuleAction::Allow,
             path: ".gitvault/store/dev/conf/*.env.age".to_string(),
             keys: vec![],
+            source: None,
             dir_prefix: Some(true),
             path_prefix: Some(true),
             custom_prefix: Some("svc".to_string()),
@@ -1332,6 +1579,7 @@ mod tests {
             action: crate::config::RuleAction::Allow,
             path: ".gitvault/store/dev/conf/*.env.age".to_string(),
             keys: vec![],
+            source: None,
             dir_prefix: Some(false),
             path_prefix: Some(true),
             custom_prefix: None,

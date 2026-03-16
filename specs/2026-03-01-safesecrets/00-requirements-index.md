@@ -94,6 +94,7 @@ This index is the canonical source for requirement-to-spec traceability.
 ## Engineering NFR Specs (Additive)
 - `2026-03-04-engineering-nfr/req-110.md` -> REQ-110: Auto-discover encrypted fields in structured files (decrypt without --fields) [status: implemented]
 - `2026-03-04-engineering-nfr/req-111.md` -> REQ-111: Encrypt all string fields without explicit listing (--all-fields flag) [status: **superseded by REQ-112**]
+- `2026-03-04-engineering-nfr/req-119.md` -> REQ-119: `gitvault run`/`materialize` support config-referenced sealed-source files [status: active]
 
 ## Breaking Change Specs
 - `2026-03-04-engineering-nfr/req-112.md` -> REQ-112: `seal` and `unseal` — In-place field-level encryption commands (supersedes REQ-111; replaces encrypt --fields, --value-only; replaces decrypt --fields, --value-only) [status: done]

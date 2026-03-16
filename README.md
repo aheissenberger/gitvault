@@ -61,6 +61,7 @@ For CI/CD workflows, gitvault provides two runtime patterns:
 Rule of thumb:
 - Prefer `run` by default in CI.
 - Use `materialize` only for file-bound steps (for example, migrations expecting `.env`).
+- Both commands can load from encrypted store artifacts and selected sealed repository files using `[[run.rule]]` / `[[materialize.rule]]` with `source = "sealed"`.
 
 See full CI/CD recipes (GitHub Actions, Docker, Kubernetes): [docs/cicd-recipes.md](docs/cicd-recipes.md)
 

@@ -294,6 +294,8 @@ Behavior:
 - Decrypts store files for the selected environment and writes merged values to
   `[materialize].output_filename` (default: `.env`).
 - Supports multi-format store sources (`.env.age`, `.json.age`, `.yaml/.yml.age`, `.toml.age`).
+- `[[materialize.rule]]` can also select sealed repository files with `source = "sealed"`.
+- For sealed sources, `path` is matched against repository-relative working-tree paths.
 - Fails if decryption fails or secret content is invalid for its detected format.
 
 Examples:
@@ -364,6 +366,8 @@ Behavior:
 - Decrypts secrets for the selected environment and injects them into the child process env.
 - Does not write plaintext files to disk.
 - Uses the same multi-format store parsing as `materialize`.
+- `[[run.rule]]` can also select sealed repository files with `source = "sealed"`.
+- For sealed sources, `path` is matched against repository-relative working-tree paths.
 
 Examples:
 
@@ -569,6 +573,7 @@ Matcher rules are defined as array-of-table entries with `action`, `path`, and o
 | `action` | string | `allow` or `deny` |
 | `path` | string | Repo-relative glob path to match |
 | `keys` | array of strings | Optional key globs (applies to `allow` rules) |
+| `source` | string | Optional (`materialize`/`run` rules): `store` (default) or `sealed` |
 | `dir_prefix` | bool | Optional (`materialize`/`run` rules): include directory components as key prefix |
 | `path_prefix` | bool | Optional (`materialize`/`run` rules): include filename stem as key prefix |
 | `custom_prefix` | string | Optional (`materialize`/`run` rules): append custom token before key |
@@ -576,6 +581,9 @@ Matcher rules are defined as array-of-table entries with `action`, `path`, and o
 Notes:
 - Rules are evaluated in file order; later matches override earlier matches.
 - `keys` filters emitted key/value pairs for matching files.
+- `source` defaults to `store` when omitted.
+- `source = "store"` matches `.gitvault/store/<env>/**/*.age` inputs.
+- `source = "sealed"` matches repository-relative working-tree files (`.env`, `.env.<suffix>`, `<name>.env`, `.json`, `.yaml`, `.yml`, `.toml`; `.envrc` excluded).
 - Runtime commands support global prefix defaults via `[materialize]` and `[run]` keys: `dir_prefix` and `path_prefix`.
 - Prefix order is deterministic: `<DIR_PREFIX>_<FILENAME_PREFIX>_<CUSTOM_PREFIX>_<KEY>` (missing parts are skipped).
 - Unknown keys in rule entries fail config parsing.
@@ -631,13 +639,26 @@ path = "conf/public.json"
 
 [[materialize.rule]]
 action = "allow"
+source = "sealed"
+path = "services/web/.env.local"
+custom_prefix = "MAT"
+
+[[materialize.rule]]
+action = "allow"
+source = "store"
 path = ".gitvault/store/dev/*.env.age"
 dir_prefix = true
 path_prefix = true
-custom_prefix = "APP"
 
 [[run.rule]]
 action = "allow"
+source = "sealed"
+path = "services/api/.env.local"
+keys = ["DATABASE_URL", "API_*"]
+
+[[run.rule]]
+action = "allow"
+source = "store"
 path = ".gitvault/store/dev/conf/*.json.age"
 keys = ["DATABASE_*", "REDIS_*"]
 dir_prefix = false
@@ -696,8 +717,14 @@ path = "config/test-*.json"
 
 [[materialize.rule]]
 action = "allow"
-path = ".gitvault/store/dev/*.env.age"
+source = "sealed"
+path = "services/web/.env.local"
 custom_prefix = "MAT"
+
+[[materialize.rule]]
+action = "allow"
+source = "store"
+path = ".gitvault/store/dev/*.env.age"
 
 [run]
 dir_prefix = false
@@ -705,6 +732,13 @@ path_prefix = true
 
 [[run.rule]]
 action = "allow"
+source = "sealed"
+path = "services/api/.env.local"
+keys = ["DATABASE_URL", "API_*"]
+
+[[run.rule]]
+action = "allow"
+source = "store"
 path = ".gitvault/store/dev/conf/*.json.age"
 keys = ["DATABASE_*", "REDIS_*"]
 

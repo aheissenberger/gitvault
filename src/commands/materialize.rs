@@ -95,4 +95,44 @@ mod tests {
         };
         assert!(msg.contains("Failed to decrypt"));
     }
+
+    #[test]
+    fn test_cmd_materialize_loads_sealed_source_from_materialize_rule() {
+        let _lock = global_test_lock().lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+        let _cwd = CwdGuard::enter(dir.path());
+        let (identity_file, identity) = setup_identity_file();
+
+        let config_dir = dir.path().join(".gitvault");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("config.toml"),
+            "[materialize]\n[[materialize.rule]]\naction = \"allow\"\nsource = \"sealed\"\npath = \"services/web/.env.local\"\n",
+        )
+        .unwrap();
+
+        let sealed_src = dir.path().join("services/web/.env.local");
+        std::fs::create_dir_all(sealed_src.parent().unwrap()).unwrap();
+        let recipients = vec![identity.to_public().to_string()];
+        let fields = vec!["SECRET".to_string()];
+        let sealed = crate::commands::seal::seal_content(
+            "PLAIN=visible\nSECRET=hidden\n",
+            "env",
+            Some(&fields),
+            &recipients,
+        )
+        .expect("sealing test input should succeed");
+        std::fs::write(&sealed_src, sealed).unwrap();
+
+        with_identity_env(identity_file.path(), || {
+            cmd_materialize(None, None, false, false, true, None)
+                .expect("materialize should include configured sealed source values");
+        });
+
+        let materialized =
+            std::fs::read_to_string(dir.path().join(".env")).expect(".env should be created");
+        assert!(materialized.contains("PLAIN=\"visible\""));
+        assert!(materialized.contains("SECRET=\"hidden\""));
+    }
 }

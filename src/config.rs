@@ -203,12 +203,20 @@ pub enum RuleAction {
     Deny,
 }
 
+/// Source selector for runtime rule evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleSource {
+    Store,
+    Sealed,
+}
+
 /// A structured matcher rule (`[[<section>.rule]]`).
 #[derive(Debug, Clone)]
 pub struct MatchRule {
     pub action: RuleAction,
     pub path: String,
     pub keys: Vec<String>,
+    pub source: Option<RuleSource>,
     pub dir_prefix: Option<bool>,
     pub path_prefix: Option<bool>,
     pub custom_prefix: Option<String>,
@@ -382,6 +390,21 @@ struct RawRuntimeMatchRule {
     path: String,
     #[serde(default)]
     keys: Vec<String>,
+    source: Option<String>,
+    dir_prefix: Option<bool>,
+    path_prefix: Option<bool>,
+    custom_prefix: Option<String>,
+}
+
+/// Intermediate TOML representation for `[[run.rule]]` entries.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRunMatchRule {
+    action: String,
+    path: String,
+    #[serde(default)]
+    keys: Vec<String>,
+    source: Option<String>,
     dir_prefix: Option<bool>,
     path_prefix: Option<bool>,
     custom_prefix: Option<String>,
@@ -413,7 +436,7 @@ struct RawRunConfig {
     dir_prefix: Option<bool>,
     path_prefix: Option<bool>,
     #[serde(rename = "rule", default)]
-    rules: Vec<RawRuntimeMatchRule>,
+    rules: Vec<RawRunMatchRule>,
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +545,7 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
                     action: parse_rule_action(&rule.action, "materialize")?,
                     path: rule.path,
                     keys: rule.keys,
+                    source: parse_rule_source(rule.source.as_deref(), "materialize")?,
                     dir_prefix: rule.dir_prefix,
                     path_prefix: rule.path_prefix,
                     custom_prefix: rule.custom_prefix.filter(|s| !s.trim().is_empty()),
@@ -548,6 +572,7 @@ fn parse_config_text(raw_text: &str, config_path: &Path) -> Result<GitvaultConfi
                     action: parse_rule_action(&rule.action, "run")?,
                     path: rule.path,
                     keys: rule.keys,
+                    source: parse_rule_source(rule.source.as_deref(), "run")?,
                     dir_prefix: rule.dir_prefix,
                     path_prefix: rule.path_prefix,
                     custom_prefix: rule.custom_prefix.filter(|s| !s.trim().is_empty()),
@@ -586,6 +611,20 @@ fn parse_rule_action(raw: &str, section: &str) -> Result<RuleAction, GitvaultErr
         "deny" => Ok(RuleAction::Deny),
         other => Err(GitvaultError::Usage(format!(
             "invalid action '{other}' in [{section}].rule; valid values: allow, deny"
+        ))),
+    }
+}
+
+fn parse_rule_source(
+    raw: Option<&str>,
+    section: &str,
+) -> Result<Option<RuleSource>, GitvaultError> {
+    match raw {
+        None => Ok(None),
+        Some("store") => Ok(Some(RuleSource::Store)),
+        Some("sealed") => Ok(Some(RuleSource::Sealed)),
+        Some(other) => Err(GitvaultError::Usage(format!(
+            "invalid source '{other}' in [{section}].rule; valid values: store, sealed"
         ))),
     }
 }
@@ -1336,7 +1375,70 @@ mod tests {
             Some("APP")
         );
         assert_eq!(config.run.rules[0].path, ".gitvault/store/dev/private.*");
+        assert_eq!(config.run.rules[0].source, None);
         assert_eq!(config.run.dir_prefix, Some(false));
         assert_eq!(config.run.path_prefix, Some(true));
+    }
+
+    #[test]
+    fn test_parse_run_rule_with_source_sealed() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[run]\n\n[[run.rule]]\naction = \"allow\"\nsource = \"sealed\"\npath = \".env\"\n",
+        );
+
+        let config = load_config(dir.path()).expect("run rule with source should parse");
+        assert_eq!(config.run.rules.len(), 1);
+        assert_eq!(
+            config.run.rules[0].source,
+            Some(crate::config::RuleSource::Sealed)
+        );
+    }
+
+    #[test]
+    fn test_parse_run_rule_invalid_source_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[run]\n\n[[run.rule]]\naction = \"allow\"\nsource = \"unknown\"\npath = \".env\"\n",
+        );
+
+        let err = load_config(dir.path()).expect_err("invalid source should fail");
+        assert!(
+            err.to_string().contains("valid values: store, sealed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_materialize_rule_with_source_sealed() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[materialize]\n\n[[materialize.rule]]\naction = \"allow\"\nsource = \"sealed\"\npath = \"services/web/.env.local\"\n",
+        );
+
+        let config = load_config(dir.path()).expect("materialize rule with source should parse");
+        assert_eq!(config.materialize.rules.len(), 1);
+        assert_eq!(
+            config.materialize.rules[0].source,
+            Some(crate::config::RuleSource::Sealed)
+        );
+    }
+
+    #[test]
+    fn test_parse_materialize_rule_invalid_source_rejected() {
+        let dir = TempDir::new().unwrap();
+        make_config_file(
+            &dir,
+            "[materialize]\n\n[[materialize.rule]]\naction = \"allow\"\nsource = \"unknown\"\npath = \"services/web/.env.local\"\n",
+        );
+
+        let err = load_config(dir.path()).expect_err("invalid source should fail");
+        assert!(
+            err.to_string().contains("valid values: store, sealed"),
+            "unexpected error: {err}"
+        );
     }
 }
