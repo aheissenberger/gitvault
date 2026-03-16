@@ -51,7 +51,7 @@ jobs:
 
       - name: Cache cargo artifacts
         id: cache_verify
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: rust-verify-Linux-1.93.1
 
@@ -165,7 +165,7 @@ jobs:
 
       - name: Cache cargo artifacts
         id: cache_build
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: rust-build-${{ matrix.target }}-1.93.1
 
@@ -579,7 +579,7 @@ jobs:
           toolchain: 1.93.1
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: rust-test-x86_64-pc-windows-msvc-1.93.1
 
